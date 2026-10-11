@@ -90,6 +90,7 @@
 #include "utils/algorithm/container.hpp"
 #include "utils/attributes.h"
 #include "utils/cl2_to_clx.hpp"
+#include "utils/clx_shadow.hpp"
 #include "utils/endian_swap.hpp"
 #include "utils/enum_traits.h"
 #include "utils/file_name_generator.hpp"
@@ -3211,6 +3212,52 @@ bool UpdateModeStance(Monster &monster)
 	}
 }
 
+namespace {
+
+/**
+ * @brief Separates the shadows baked into the monster's sprites (see `utils/clx_shadow.hpp`).
+ *
+ * Each animation has its own shadow rule.
+ */
+void ExtractMonsterShadows(const MonsterData &monsterData, MonsterSpritesData &sprites)
+{
+	const size_t numAnims = GetNumAnims(monsterData);
+	std::array<std::optional<OwnedClxSpriteListOrSheet>, MonsterSpritesData::MaxAnims> extracted;
+	std::array<uint32_t, MonsterSpritesData::MaxAnims + 1> offsets;
+	bool anyExtracted = false;
+	size_t size = 0;
+	size_t j = 0;
+	for (size_t i = 0; i < numAnims; ++i) {
+		if (!monsterData.hasAnim(i))
+			continue;
+		const auto *data = reinterpret_cast<const uint8_t *>(&sprites.data[sprites.offsets[j]]);
+		const size_t dataSize = sprites.offsets[j + 1] - sprites.offsets[j];
+		const uint16_t numLists = GetNumListsFromClxListOrSheetBuffer(data, dataSize);
+		extracted[j] = ExtractClxShadows(ClxSpriteListOrSheet { data, numLists }, monsterData.shadowRules[i]);
+		anyExtracted = anyExtracted || extracted[j].has_value();
+		offsets[j] = static_cast<uint32_t>(size);
+		size += extracted[j].has_value() ? extracted[j]->dataSize() : dataSize;
+		++j;
+	}
+	if (!anyExtracted)
+		return;
+	offsets[j] = static_cast<uint32_t>(size);
+
+	std::unique_ptr<std::byte[]> data { new std::byte[size] };
+	for (size_t k = 0; k < j; ++k) {
+		if (extracted[k].has_value()) {
+			const ClxSpriteListOrSheet clx { *extracted[k] };
+			memcpy(&data[offsets[k]], clx.isSheet() ? clx.sheet().data() : clx.list().data(), offsets[k + 1] - offsets[k]);
+		} else {
+			memcpy(&data[offsets[k]], &sprites.data[sprites.offsets[k]], offsets[k + 1] - offsets[k]);
+		}
+	}
+	sprites.data = std::move(data);
+	sprites.offsets = offsets;
+}
+
+} // namespace
+
 MonsterSpritesData LoadMonsterSpritesData(const MonsterData &monsterData)
 {
 	const size_t numAnims = GetNumAnims(monsterData);
@@ -3245,6 +3292,8 @@ MonsterSpritesData LoadMonsterSpritesData(const MonsterData &monsterData)
 		memcpy(&result.data[result.offsets[i]], clxData[i].data(), clxData[i].size());
 	}
 #endif
+
+	ExtractMonsterShadows(monsterData, result);
 
 	return result;
 }
