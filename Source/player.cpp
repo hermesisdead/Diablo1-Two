@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <ctime>
 
 #ifdef USE_SDL3
 #include <SDL3/SDL_events.h>
@@ -2298,6 +2299,9 @@ void CreatePlayer(Player &player, HeroClass c)
 {
 	player = {};
 	SetRndSeed(SDL_GetTicks());
+	player.townSeed = static_cast<uint32_t>(SDL_GetTicks()) * 2654435761U ^ static_cast<uint32_t>(std::time(nullptr));
+	if (player.townSeed == 0)
+		player.townSeed = 1;
 
 	player.setCharacterLevel(1);
 	player._pClass = c;

@@ -14,6 +14,7 @@
 #include "cursor.h"
 #include "diablo_msg.hpp"
 #include "game_mode.hpp"
+#include "levels/town_shuffle.hpp"
 #include "multi.h"
 #include "utils/algorithm/container.hpp"
 #include "utils/format.hpp"
@@ -111,7 +112,7 @@ void InitTownTriggers()
 	numtrigs = 0;
 
 	// Cathedral
-	trigs[numtrigs].position = { 25, 29 };
+	trigs[numtrigs].position = Point { 25, 29 } + TownBuildingShift(TownBuilding::Cathedral);
 	trigs[numtrigs]._tmsg = WM_DIABNEXTLVL;
 	numtrigs++;
 

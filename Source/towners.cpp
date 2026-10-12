@@ -14,6 +14,7 @@
 #include "inv.h"
 #include "minitext.h"
 #include "stores.h"
+#include "levels/town_shuffle.hpp"
 #include "tables/textdat.h"
 #include "tables/townerdat.hpp"
 #include "utils/is_of.hpp"
@@ -764,6 +765,35 @@ void InitTowners()
 	// Load towner data from TSV files
 	LoadTownerData();
 	TownerAnimOrderStorage.clear();
+
+	// Move towners along with the building they stand at (identity for the classic layout).
+	for (TownerDataEntry &entry : TownersDataEntries) {
+		switch (entry.type) {
+		case TOWN_SMITH:
+			entry.position += TownBuildingShift(TownBuilding::Smithy);
+			break;
+		case TOWN_HEALER:
+			entry.position += TownBuildingShift(TownBuilding::Healer);
+			break;
+		case TOWN_DEADGUY:
+			entry.position += TownBuildingShift(TownBuilding::Cathedral);
+			break;
+		case TOWN_TAVERN:
+			entry.position += TownBuildingShift(TownBuilding::Tavern);
+			break;
+		case TOWN_DRUNK:
+			entry.position += TownBuildingShift(TownBuilding::FarnhamHouse);
+			break;
+		case TOWN_WITCH:
+			entry.position += TownBuildingShift(TownBuilding::WitchHut);
+			break;
+		case TOWN_BMAID:
+			entry.position += TownBuildingShift(TownBuilding::GillianHouse);
+			break;
+		default:
+			break;
+		}
+	}
 
 	// Build lookup table for towner behaviors
 	TownerBehaviors.clear();

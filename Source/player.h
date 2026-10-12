@@ -363,6 +363,8 @@ public:
 	uint8_t pDiabloKillLevel;
 	uint16_t wReflections;
 	ItemSpecialEffectHf pDamAcFlags;
+	/** Seed of this hero's Tristram layout, 0 for the classic layout. Stored in previously unused save bytes. */
+	uint32_t townSeed;
 
 	[[nodiscard]] std::string_view name() const
 	{

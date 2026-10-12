@@ -1,21 +1,27 @@
 #include "levels/town.h"
 
 #include <cstdint>
+#include <cstdlib>
 
 #include "engine/load_file.hpp"
 #include "engine/random.hpp"
 #include "engine/world_tile.hpp"
 #include "game_mode.hpp"
 #include "levels/drlg_l1.h"
+#include "levels/town_shuffle.hpp"
 #include "levels/trigs.h"
 #include "multi.h"
 #include "player.h"
 #include "quests.h"
 #include "utils/endian_swap.hpp"
+#include "utils/log.hpp"
 
 namespace devilution {
 
 namespace {
+
+/** Layout seed of the town being created, 0 for the classic layout. */
+uint32_t TownLayoutSeed = 0;
 
 /**
  * @brief Load level data into dPiece
@@ -207,6 +213,8 @@ void DrlgTPass3()
 	auto dunData = LoadFileInMem<uint16_t>("levels\\towndata\\automap.dun");
 	PlaceDunTiles(dunData.get(), { 0, 0 });
 
+	ShuffleTown(TownLayoutSeed);
+
 	if (!IsWarpOpen(DTYPE_CATACOMBS)) {
 		dungeon[20][7] = 10;
 		dungeon[20][6] = 8;
@@ -385,7 +393,29 @@ void CreateTown(lvl_entry entry)
 		}
 	}
 
+	// Single player towns are rearranged per save; multiplayer keeps the classic layout so all clients agree.
+	TownLayoutSeed = (!gbIsMultiplayer && MyPlayer != nullptr) ? MyPlayer->townSeed : 0;
+#ifdef _DEBUG
+	if (const char *forced = std::getenv("DEVILUTIONX_DEV_TOWNSEED"); forced != nullptr)
+		TownLayoutSeed = static_cast<uint32_t>(std::strtoul(forced, nullptr, 10));
+#endif
+	ResetTownLayout();
+
 	DrlgTPass3();
+
+	if (entry == ENTRY_PREV)
+		ViewPosition = ViewPosition + TownBuildingShift(TownBuilding::Cathedral);
+#ifdef _DEBUG
+	LogVerbose("CreateTown entry {}", static_cast<int>(entry));
+	if (const char *view = std::getenv("DEVILUTIONX_DEV_VIEWPOS"); view != nullptr && entry == ENTRY_MAIN) {
+		char *end = nullptr;
+		const long vx = std::strtol(view, &end, 10);
+		if (end != nullptr && *end == ',')
+			ViewPosition = { static_cast<int>(vx), static_cast<int>(std::strtol(end + 1, nullptr, 10)) };
+		if (MyPlayer != nullptr)
+			MyPlayer->position.tile = ViewPosition;
+	}
+#endif
 }
 
 } // namespace devilution
