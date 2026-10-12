@@ -126,6 +126,31 @@ bool IsSolid(uint16_t piece)
 	return HasAnyOf(SOLData[piece], TileProperties::Solid);
 }
 
+bool InBuildingRect(int x, int y)
+{
+	return std::any_of(BuildingRects.begin(), BuildingRects.end(), [&](const Rect &r) { return x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1; });
+}
+
+/** Single-cell solid objects (trees, rocks, stumps) of the classic town's interior, to be scattered again. */
+std::vector<uint16_t> CollectDecorations(const Grid &classic)
+{
+	std::vector<uint16_t> result;
+	for (int x = Border; x < TownSize - Border; x++) {
+		for (int y = Border; y < TownSize - Border; y++) {
+			if (!IsSolid(classic.at(x, y)) || InFixedRect(x, y) || InBuildingRect(x, y))
+				continue;
+			bool isolated = true;
+			for (int dx = -1; dx <= 1 && isolated; dx++)
+				for (int dy = -1; dy <= 1 && isolated; dy++)
+					if ((dx != 0 || dy != 0) && IsSolid(classic.at(x + dx, y + dy)))
+						isolated = false;
+			if (isolated)
+				result.push_back(classic.at(x, y));
+		}
+	}
+	return result;
+}
+
 bool TryLayout(uint64_t seed, const Grid &classic, Grid &out, std::array<Displacement, BuildingCount> &shifts)
 {
 	LayoutRng rng(seed);
@@ -194,6 +219,25 @@ bool TryLayout(uint64_t seed, const Grid &classic, Grid &out, std::array<Displac
 		}
 		if (!placed)
 			return false;
+	}
+
+	// Scatter the town's trees and rocks again. Never next to another solid cell, so they cannot seal off paths.
+	for (const uint16_t decoration : CollectDecorations(classic)) {
+		for (int attempt = 0; attempt < 30; attempt++) {
+			const int x = rng.range(Border, TownSize - Border);
+			const int y = rng.range(Border, TownSize - Border);
+			if (occ(x, y))
+				continue;
+			bool clear = true;
+			for (int dx = -1; dx <= 1 && clear; dx++)
+				for (int dy = -1; dy <= 1 && clear; dy++)
+					if (IsSolid(out.at(x + dx, y + dy)))
+						clear = false;
+			if (!clear)
+				continue;
+			out.at(x, y) = decoration;
+			break;
+		}
 	}
 
 	// Everything that must stay reachable has to connect to the player spawn.
