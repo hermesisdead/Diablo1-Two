@@ -23,6 +23,11 @@ enum class TownBuilding : uint8_t {
 	FarnhamHouse,
 	HouseA,
 	HouseB,
+	Catacombs,
+	Caves,
+	Hell,
+	Fountain,
+	Grave,
 	Count,
 };
 

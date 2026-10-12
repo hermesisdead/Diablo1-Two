@@ -23,6 +23,12 @@ namespace {
 /** Layout seed of the town being created, 0 for the classic layout. */
 uint32_t TownLayoutSeed = 0;
 
+/** Moves a classic-layout coordinate along with the landmark it belongs to. */
+Point Moved(TownBuilding landmark, int x, int y)
+{
+	return Point { x, y } + TownBuildingShift(landmark);
+}
+
 /**
  * @brief Load level data into dPiece
  * @param path Path of dun file
@@ -140,16 +146,17 @@ void TownCloseHive()
  */
 void TownCloseGrave()
 {
-	dPiece[36][21] = 0x52a;
-	dPiece[37][21] = 0x52b;
-	dPiece[36][22] = 0x52c;
-	dPiece[37][22] = 0x52d;
-	dPiece[36][23] = 0x52e;
-	dPiece[37][23] = 0x52f;
-	dPiece[36][24] = 0x530;
-	dPiece[37][24] = 0x531;
-	dPiece[35][21] = 0x53a;
-	dPiece[34][21] = 0x53b;
+	const Displacement grave = TownBuildingShift(TownBuilding::Grave);
+	dPiece[36 + grave.deltaX][21 + grave.deltaY] = 0x52a;
+	dPiece[37 + grave.deltaX][21 + grave.deltaY] = 0x52b;
+	dPiece[36 + grave.deltaX][22 + grave.deltaY] = 0x52c;
+	dPiece[37 + grave.deltaX][22 + grave.deltaY] = 0x52d;
+	dPiece[36 + grave.deltaX][23 + grave.deltaY] = 0x52e;
+	dPiece[37 + grave.deltaX][23 + grave.deltaY] = 0x52f;
+	dPiece[36 + grave.deltaX][24 + grave.deltaY] = 0x530;
+	dPiece[37 + grave.deltaX][24 + grave.deltaY] = 0x531;
+	dPiece[35 + grave.deltaX][21 + grave.deltaY] = 0x53a;
+	dPiece[34 + grave.deltaX][21 + grave.deltaY] = 0x53b;
 }
 
 void InitTownPieces()
@@ -218,19 +225,22 @@ void DrlgTPass3()
 	if (!IsWarpOpen(DTYPE_CATACOMBS)) {
 		dungeon[20][7] = 10;
 		dungeon[20][6] = 8;
-		FillTile(48, 20, 320);
+		const Point catacombs = Moved(TownBuilding::Catacombs, 48, 20);
+		FillTile(catacombs.x, catacombs.y, 320);
 	}
 	if (!IsWarpOpen(DTYPE_CAVES)) {
 		dungeon[4][30] = 8;
-		FillTile(16, 68, 332);
-		FillTile(16, 70, 331);
+		const Point caves = Moved(TownBuilding::Caves, 16, 68);
+		FillTile(caves.x, caves.y, 332);
+		FillTile(caves.x, caves.y + 2, 331);
 	}
 	if (!IsWarpOpen(DTYPE_HELL)) {
 		dungeon[15][35] = 7;
 		dungeon[16][35] = 7;
 		dungeon[17][35] = 7;
 		for (int x = 36; x < 46; x++) {
-			FillTile(x, 78, PickRandomlyAmong({ 1, 2, 3, 4 }));
+			const Point hell = Moved(TownBuilding::Hell, x, 78);
+			FillTile(hell.x, hell.y, PickRandomlyAmong({ 1, 2, 3, 4 }));
 		}
 	}
 	if (gbIsHellfire) {
@@ -245,10 +255,11 @@ void DrlgTPass3()
 			TownCloseGrave();
 	}
 
+	const Point fountain = Moved(TownBuilding::Fountain, 60, 70);
 	if (Quests[Q_PWATER]._qactive != QUEST_DONE && Quests[Q_PWATER]._qactive != QUEST_NOTAVAIL) {
-		FillTile(60, 70, 342);
+		FillTile(fountain.x, fountain.y, 342);
 	} else {
-		FillTile(60, 70, 71);
+		FillTile(fountain.x, fountain.y, 71);
 	}
 
 	InitTownPieces();
@@ -267,7 +278,8 @@ bool OpensGrave(Point position)
 {
 	const int yp = position.y;
 	const int xp = position.x;
-	return xp >= 35 && xp <= 38 && yp >= 20 && yp <= 24;
+	const Displacement grave = TownBuildingShift(TownBuilding::Grave);
+	return xp >= 35 + grave.deltaX && xp <= 38 + grave.deltaX && yp >= 20 + grave.deltaY && yp <= 24 + grave.deltaY;
 }
 
 void OpenHive()
@@ -343,19 +355,20 @@ void TownOpenHive()
 
 void TownOpenGrave()
 {
+	const Displacement grave = TownBuildingShift(TownBuilding::Grave);
 	dungeon[14][8] = 47;
 	dungeon[14][7] = 47;
 
-	dPiece[36][21] = 0x532;
-	dPiece[37][21] = 0x533;
-	dPiece[36][22] = 0x534;
-	dPiece[37][22] = 0x535;
-	dPiece[36][23] = 0x536;
-	dPiece[37][23] = 0x537;
-	dPiece[36][24] = 0x538;
-	dPiece[37][24] = 0x539;
-	dPiece[35][21] = 0x53a;
-	dPiece[34][21] = 0x53b;
+	dPiece[36 + grave.deltaX][21 + grave.deltaY] = 0x532;
+	dPiece[37 + grave.deltaX][21 + grave.deltaY] = 0x533;
+	dPiece[36 + grave.deltaX][22 + grave.deltaY] = 0x534;
+	dPiece[37 + grave.deltaX][22 + grave.deltaY] = 0x535;
+	dPiece[36 + grave.deltaX][23 + grave.deltaY] = 0x536;
+	dPiece[37 + grave.deltaX][23 + grave.deltaY] = 0x537;
+	dPiece[36 + grave.deltaX][24 + grave.deltaY] = 0x538;
+	dPiece[37 + grave.deltaX][24 + grave.deltaY] = 0x539;
+	dPiece[35 + grave.deltaX][21 + grave.deltaY] = 0x53a;
+	dPiece[34 + grave.deltaX][21 + grave.deltaY] = 0x53b;
 	MarkWalkabilityChanged();
 }
 
@@ -363,7 +376,8 @@ void CleanTownFountain()
 {
 	if (!pMegaTiles)
 		return;
-	FillTile(60, 70, 71);
+	const Point fountain = Moved(TownBuilding::Fountain, 60, 70);
+	FillTile(fountain.x, fountain.y, 71);
 }
 
 void CreateTown(lvl_entry entry)
@@ -405,6 +419,16 @@ void CreateTown(lvl_entry entry)
 
 	if (entry == ENTRY_PREV)
 		ViewPosition = ViewPosition + TownBuildingShift(TownBuilding::Cathedral);
+	if (entry == ENTRY_TWARPUP) {
+		if (TWarpFrom == 5)
+			ViewPosition = ViewPosition + TownBuildingShift(TownBuilding::Catacombs);
+		else if (TWarpFrom == 9)
+			ViewPosition = ViewPosition + TownBuildingShift(TownBuilding::Caves);
+		else if (TWarpFrom == 13)
+			ViewPosition = ViewPosition + TownBuildingShift(TownBuilding::Hell);
+		else if (TWarpFrom == 21)
+			ViewPosition = ViewPosition + TownBuildingShift(TownBuilding::Grave);
+	}
 #ifdef _DEBUG
 	LogVerbose("CreateTown entry {}", static_cast<int>(entry));
 	if (const char *view = std::getenv("DEVILUTIONX_DEV_VIEWPOS"); view != nullptr && entry == ENTRY_MAIN) {

@@ -40,23 +40,23 @@ constexpr std::array<Rect, BuildingCount> BuildingRects = { {
     { 66, 76, 73, 85 }, // FarnhamHouse
     { 44, 38, 55, 47 }, // HouseA
     { 24, 46, 31, 53 }, // HouseB
+    { 46, 16, 52, 25 }, // Catacombs entrance
+    { 14, 66, 19, 73 }, // Caves entrance
+    { 34, 76, 47, 83 }, // Hell entrance
+    { 58, 68, 65, 73 }, // Fountain (Cain stands next to it)
+    { 32, 18, 41, 27 }, // Grave / crypt entrance
 } };
 
-/** Landmarks (quest overlays, warps) whose art is painted onto fixed cells. They never move. */
-constexpr std::array<Rect, 6> FixedRects = { {
-    { 46, 16, 52, 24 }, // Catacombs
-    { 33, 18, 40, 26 }, // Crypt / grave
-    { 58, 68, 62, 72 }, // Fountain
-    { 14, 66, 19, 73 }, // Caves
-    { 38, 76, 43, 83 }, // Hell
-    { 77, 59, 83, 65 }, // Nest / hive
+/** The hive hugs the map edge and never moves. */
+constexpr std::array<Rect, 1> FixedRects = { {
+    { 77, 59, 87, 66 }, // Nest / hive
 } };
 
 /** Points that stay where they are and must remain reachable (towners, spawn, warp landings). */
-constexpr std::array<Point, 11> FixedPoints = { {
-    { 49, 22 }, { 36, 26 }, { 18, 69 }, { 41, 79 }, { 80, 62 }, // warp landings
-    { 62, 71 }, { 11, 53 }, { 75, 68 },                         // Cain, Wirt, spawn
-    { 58, 16 }, { 56, 14 }, { 59, 20 },                         // cows
+constexpr std::array<Point, 6> FixedPoints = { {
+    { 80, 62 },                 // nest warp landing
+    { 11, 53 }, { 75, 68 },     // Wirt, spawn
+    { 58, 16 }, { 56, 14 }, { 59, 20 }, // cows
 } };
 constexpr size_t FixedPointCount = FixedPoints.size();
 
@@ -66,7 +66,7 @@ struct AttachedPoint {
 };
 
 /** Points that travel with a building. */
-constexpr std::array<AttachedPoint, 9> AttachedPoints = { {
+constexpr std::array<AttachedPoint, 18> AttachedPoints = { {
     { TownBuilding::Cathedral, { 25, 29 } },    // cathedral warp
     { TownBuilding::Cathedral, { 25, 31 } },    // entry view point
     { TownBuilding::Cathedral, { 24, 32 } },    // wounded townsman
@@ -76,6 +76,15 @@ constexpr std::array<AttachedPoint, 9> AttachedPoints = { {
     { TownBuilding::GillianHouse, { 43, 66 } }, // Gillian
     { TownBuilding::WitchHut, { 80, 20 } },     // Adria
     { TownBuilding::FarnhamHouse, { 71, 84 } }, // Farnham
+    { TownBuilding::Catacombs, { 49, 21 } },    // catacombs warp
+    { TownBuilding::Catacombs, { 49, 22 } },    // catacombs landing
+    { TownBuilding::Caves, { 17, 69 } },        // caves warp
+    { TownBuilding::Caves, { 18, 69 } },        // caves landing
+    { TownBuilding::Hell, { 41, 80 } },         // hell warp
+    { TownBuilding::Hell, { 41, 81 } },         // hell landing
+    { TownBuilding::Fountain, { 62, 71 } },     // Cain
+    { TownBuilding::Grave, { 36, 24 } },        // crypt warp
+    { TownBuilding::Grave, { 36, 25 } },        // crypt landing
 } };
 
 std::array<Displacement, BuildingCount> BuildingShifts {};

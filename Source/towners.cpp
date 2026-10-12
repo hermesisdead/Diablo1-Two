@@ -775,6 +775,9 @@ void InitTowners()
 		case TOWN_HEALER:
 			entry.position += TownBuildingShift(TownBuilding::Healer);
 			break;
+		case TOWN_STORY:
+			entry.position += TownBuildingShift(TownBuilding::Fountain);
+			break;
 		case TOWN_DEADGUY:
 			entry.position += TownBuildingShift(TownBuilding::Cathedral);
 			break;

@@ -117,19 +117,19 @@ void InitTownTriggers()
 	numtrigs++;
 
 	if (IsWarpOpen(DTYPE_CATACOMBS)) {
-		trigs[numtrigs].position = { 49, 21 };
+		trigs[numtrigs].position = Point { 49, 21 } + TownBuildingShift(TownBuilding::Catacombs);
 		trigs[numtrigs]._tmsg = WM_DIABTOWNWARP;
 		trigs[numtrigs]._tlvl = 5;
 		numtrigs++;
 	}
 	if (IsWarpOpen(DTYPE_CAVES)) {
-		trigs[numtrigs].position = { 17, 69 };
+		trigs[numtrigs].position = Point { 17, 69 } + TownBuildingShift(TownBuilding::Caves);
 		trigs[numtrigs]._tmsg = WM_DIABTOWNWARP;
 		trigs[numtrigs]._tlvl = 9;
 		numtrigs++;
 	}
 	if (IsWarpOpen(DTYPE_HELL)) {
-		trigs[numtrigs].position = { 41, 80 };
+		trigs[numtrigs].position = Point { 41, 80 } + TownBuildingShift(TownBuilding::Hell);
 		trigs[numtrigs]._tmsg = WM_DIABTOWNWARP;
 		trigs[numtrigs]._tlvl = 13;
 		numtrigs++;
@@ -141,7 +141,7 @@ void InitTownTriggers()
 		numtrigs++;
 	}
 	if (IsWarpOpen(DTYPE_CRYPT)) {
-		trigs[numtrigs].position = { 36, 24 };
+		trigs[numtrigs].position = Point { 36, 24 } + TownBuildingShift(TownBuilding::Grave);
 		trigs[numtrigs]._tmsg = WM_DIABTOWNWARP;
 		trigs[numtrigs]._tlvl = 21;
 		numtrigs++;
