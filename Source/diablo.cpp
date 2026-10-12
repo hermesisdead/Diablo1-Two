@@ -4,6 +4,7 @@
  * Implementation of the main game initialization functions.
  */
 #include <array>
+#include <cstdio>
 #include <cstdlib>
 #include <cstdint>
 #include <string_view>
@@ -929,6 +930,16 @@ void RunGameLoop(interface_mode uMsg)
 			if (devCaptureFrames % 20 == 0)
 				LogVerbose("devcap frame {}", devCaptureFrames);
 			if (devCaptureFrames == 240) {
+				if (std::getenv("DEVILUTIONX_DEV_DUMPTOWN") != nullptr) {
+					FILE *f = std::fopen((paths::PrefPath() + "town_dump.csv").c_str(), "w");
+					if (f != nullptr) {
+						std::fprintf(f, "x,y,piece,sol,special,object\n");
+						for (int y = 0; y < MAXDUNY; y++)
+							for (int x = 0; x < MAXDUNX; x++)
+								std::fprintf(f, "%d,%d,%d,%d,%d,%d\n", x, y, (int)dPiece[x][y], (int)static_cast<uint8_t>(SOLData[dPiece[x][y]]), (int)dSpecial[x][y], (int)dObject[x][y]);
+						std::fclose(f);
+					}
+				}
 				CaptureScreen();
 				gbRunGame = false;
 			}
