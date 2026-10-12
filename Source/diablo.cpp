@@ -4,6 +4,7 @@
  * Implementation of the main game initialization functions.
  */
 #include <array>
+#include <cstdlib>
 #include <cstdint>
 #include <string_view>
 
@@ -87,6 +88,7 @@
 #include "panels/quest_log.hpp"
 #include "panels/spell_book.hpp"
 #include "panels/spell_list.hpp"
+#include "menu.h"
 #include "pfile.h"
 #include "plrmsg.h"
 #include "qol/chatlog.h"
@@ -920,6 +922,18 @@ void RunGameLoop(interface_mode uMsg)
 		if (!gbRunGame)
 			break;
 
+#ifdef _DEBUG
+		if (std::getenv("DEVILUTIONX_DEV_CAPTURE") != nullptr) {
+			static int devCaptureFrames = 0;
+			++devCaptureFrames;
+			if (devCaptureFrames % 20 == 0)
+				LogVerbose("devcap frame {}", devCaptureFrames);
+			if (devCaptureFrames == 240) {
+				CaptureScreen();
+				gbRunGame = false;
+			}
+		}
+#endif
 		bool drawGame = true;
 		bool processInput = true;
 		const bool runGameLoop = demo::IsRunning() ? demo::GetRunGameLoop(drawGame, processInput) : nthread_has_500ms_passed(&drawGame);
@@ -2805,6 +2819,21 @@ int DiabloMain(int argc, char **argv)
 #endif
 	if (!demo::IsRunning()) SaveOptions();
 
+#ifdef _DEBUG
+	if (std::getenv("DEVILUTIONX_DEV_AUTOSTART") != nullptr) {
+		gSaveNumber = 0;
+		_uiheroinfo info {};
+		info.saveNumber = 0;
+		CopyUtf8(info.name, "DevHero", sizeof(info.name));
+		info.heroclass = HeroClass::Warrior;
+		if (Players.empty())
+			Players.resize(MAX_PLRS);
+		pfile_ui_save_create(&info);
+		StartGame(true, true);
+		DiabloDeinit();
+		return 0;
+	}
+#endif
 	DiabloSplash();
 	mainmenu_loop();
 	DiabloDeinit();

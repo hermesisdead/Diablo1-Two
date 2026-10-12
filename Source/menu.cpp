@@ -4,6 +4,7 @@
  * Implementation of functions for interacting with the main menu.
  */
 
+#include <cstdlib>
 #include <cstdint>
 
 #ifdef USE_SDL3
@@ -110,6 +111,14 @@ bool DummyGetHeroInfo(_uiheroinfo * /*pInfo*/)
 
 bool mainmenu_select_hero_dialog(GameData *gameData)
 {
+#ifdef _DEBUG
+	if (std::getenv("DEVILUTIONX_DEV_AUTOSTART") != nullptr) {
+		// Debug-only: the hero is already created by the autostart hook in diablo.cpp.
+		gSaveNumber = 0;
+		gbLoadGame = false;
+		return true;
+	}
+#endif
 	OptionEntryInt<uint32_t> *pSaveNumberFromOptions = nullptr;
 	_selhero_selections dlgresult = SELHERO_NEW_DUNGEON;
 	if (demo::IsRunning()) {
