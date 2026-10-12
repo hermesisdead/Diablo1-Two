@@ -8,6 +8,7 @@
 #endif
 #include "engine/load_file.hpp"
 #include "engine/palette.h"
+#include "options.h"
 #include "levels/drlg_l1.h"
 #include "levels/drlg_l2.h"
 #include "levels/drlg_l3.h"
@@ -93,7 +94,7 @@ std::expected<void, std::string> LoadCustomMap(const char *path, Point viewPosit
 	case DTYPE_NONE:
 		break;
 	}
-	LoadRndLvlPal(setlvltype, DungeonSeeds[currlevel] | 1);
+	LoadRndLvlPal(setlvltype, *GetOptions().Graphics.dungeonColorVariation ? (DungeonSeeds[currlevel] | 1) : 0);
 	return {};
 }
 

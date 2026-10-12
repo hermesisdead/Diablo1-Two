@@ -562,6 +562,10 @@ struct GraphicsOptions : OptionCategoryBase {
 	OptionEntryBoolean perPixelLighting;
 	/** @brief Enable color cycling animations. */
 	OptionEntryBoolean colorCycling;
+	/** @brief Randomized weather effects in town. */
+	OptionEntryBoolean townWeather;
+	/** @brief Per-level colour variation in dungeons. */
+	OptionEntryBoolean dungeonColorVariation;
 	/** @brief Use alternate nest palette. */
 	OptionEntryBoolean alternateNestArt;
 #if SDL_VERSION_ATLEAST(2, 0, 0)

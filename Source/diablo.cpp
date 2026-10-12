@@ -1511,7 +1511,7 @@ void CreateLevel(lvl_entry entry)
 		Freeupstairs();
 	}
 	// Each dungeon level gets its own colour mood, derived from the shared per-level seed.
-	LoadRndLvlPal(leveltype, leveltype == DTYPE_TOWN ? 0 : DungeonSeeds[currlevel] | 1);
+	LoadRndLvlPal(leveltype, (leveltype == DTYPE_TOWN || !*GetOptions().Graphics.dungeonColorVariation) ? 0 : DungeonSeeds[currlevel] | 1);
 }
 
 void UnstuckChargers()

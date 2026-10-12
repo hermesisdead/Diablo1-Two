@@ -5,6 +5,7 @@
 
 #include "engine/load_file.hpp"
 #include "engine/random.hpp"
+#include "engine/render/town_weather.hpp"
 #include "engine/world_tile.hpp"
 #include "game_mode.hpp"
 #include "levels/drlg_l1.h"
@@ -418,6 +419,7 @@ void CreateTown(lvl_entry entry)
 	ResetTownLayout();
 
 	DrlgTPass3();
+	InitTownWeather();
 
 	if (entry == ENTRY_PREV)
 		ViewPosition = ViewPosition + TownBuildingShift(TownBuilding::Cathedral);

@@ -52,6 +52,7 @@
 #include "minitext.h"
 #include "missiles.h"
 #include "nthread.h"
+#include "engine/render/town_weather.hpp"
 #include "options.h"
 #include "panels/charpanel.hpp"
 #include "panels/console.hpp"
@@ -1318,6 +1319,8 @@ void DrawView(const Surface &out, Point startPosition)
 	Displacement offset = {};
 	CalcFirstTilePosition(startPosition, offset);
 	DrawGame(out, startPosition, offset);
+	if (leveltype == DTYPE_TOWN && *GetOptions().Graphics.townWeather && !AutomapActive)
+		DrawTownWeather(out.subregionY(0, gnViewportHeight));
 	if (AutomapActive) {
 		DrawAutomap(out.subregionY(0, gnViewportHeight));
 	}
