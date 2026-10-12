@@ -412,6 +412,8 @@ void CreateTown(lvl_entry entry)
 #ifdef _DEBUG
 	if (const char *forced = std::getenv("DEVILUTIONX_DEV_TOWNSEED"); forced != nullptr)
 		TownLayoutSeed = static_cast<uint32_t>(std::strtoul(forced, nullptr, 10));
+	if (std::getenv("DEVILUTIONX_DEV_OPENWARPS") != nullptr && MyPlayer != nullptr)
+		MyPlayer->pTownWarps = 7;
 #endif
 	ResetTownLayout();
 
@@ -430,7 +432,7 @@ void CreateTown(lvl_entry entry)
 			ViewPosition = ViewPosition + TownBuildingShift(TownBuilding::Grave);
 	}
 #ifdef _DEBUG
-	LogVerbose("CreateTown entry {}", static_cast<int>(entry));
+	LogVerbose("CreateTown entry {} layout seed {} multiplayer {}", static_cast<int>(entry), TownLayoutSeed, gbIsMultiplayer);
 	if (const char *view = std::getenv("DEVILUTIONX_DEV_VIEWPOS"); view != nullptr && entry == ENTRY_MAIN) {
 		char *end = nullptr;
 		const long vx = std::strtol(view, &end, 10);

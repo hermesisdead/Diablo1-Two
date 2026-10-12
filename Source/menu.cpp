@@ -115,7 +115,7 @@ bool mainmenu_select_hero_dialog(GameData *gameData)
 	if (std::getenv("DEVILUTIONX_DEV_AUTOSTART") != nullptr) {
 		// Debug-only: the hero is already created by the autostart hook in diablo.cpp.
 		gSaveNumber = 0;
-		gbLoadGame = false;
+		gbLoadGame = std::getenv("DEVILUTIONX_DEV_AUTOLOAD") != nullptr;
 		return true;
 	}
 #endif

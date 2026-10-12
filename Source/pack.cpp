@@ -199,6 +199,7 @@ void PackPlayer(PlayerPack &packed, const Player &player)
 	packed.wReflections = Swap16LE(player.wReflections);
 	packed.pDamAcFlags = Swap32LE(static_cast<uint32_t>(player.pDamAcFlags));
 	packed.pDiabloKillLevel = Swap32LE(player.pDiabloKillLevel);
+	packed.townSeed = Swap32LE(player.townSeed);
 	packed.bIsHellfire = gbIsHellfire ? 1 : 0;
 }
 
@@ -433,6 +434,7 @@ void UnPackPlayer(const PlayerPack &packed, Player &player)
 	CalcPlrInv(player, false);
 	player.wReflections = Swap16LE(packed.wReflections);
 	player.pDiabloKillLevel = Swap32LE(packed.pDiabloKillLevel);
+	player.townSeed = Swap32LE(packed.townSeed);
 }
 
 bool UnPackNetItem(const Player &player, const ItemNetPack &packedItem, Item &item)

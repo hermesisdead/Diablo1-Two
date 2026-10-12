@@ -931,6 +931,20 @@ void RunGameLoop(interface_mode uMsg)
 				LogVerbose("devcap frame {}", devCaptureFrames);
 			if (devCaptureFrames == 240) {
 				if (std::getenv("DEVILUTIONX_DEV_DUMPTOWN") != nullptr) {
+					FILE *tf = std::fopen((paths::PrefPath() + "town_objects.csv").c_str(), "w");
+					if (tf != nullptr) {
+						std::fprintf(tf, "kind,name,x,y\n");
+						for (int i = 0; i < numtrigs; i++)
+							std::fprintf(tf, "trig,%d,%d,%d\n", trigs[i]._tlvl, (int)trigs[i].position.x, (int)trigs[i].position.y);
+						for (const Towner &towner : Towners)
+							std::fprintf(tf, "towner,%s,%d,%d\n", std::string(towner.name).c_str(), towner.position.x, towner.position.y);
+						std::fprintf(tf, "player,me,%d,%d\n", MyPlayer->position.tile.x, MyPlayer->position.tile.y);
+						std::fclose(tf);
+					}
+				}
+				if (std::getenv("DEVILUTIONX_DEV_SAVEGAME") != nullptr)
+					SaveGame();
+				if (std::getenv("DEVILUTIONX_DEV_DUMPTOWN") != nullptr) {
 					FILE *f = std::fopen((paths::PrefPath() + "town_dump.csv").c_str(), "w");
 					if (f != nullptr) {
 						std::fprintf(f, "x,y,piece,sol,special,object\n");
@@ -2839,8 +2853,10 @@ int DiabloMain(int argc, char **argv)
 		info.heroclass = HeroClass::Warrior;
 		if (Players.empty())
 			Players.resize(MAX_PLRS);
-		pfile_ui_save_create(&info);
-		StartGame(true, true);
+		const bool devAutoLoad = std::getenv("DEVILUTIONX_DEV_AUTOLOAD") != nullptr;
+		if (!devAutoLoad)
+			pfile_ui_save_create(&info);
+		StartGame(!devAutoLoad, true);
 		DiabloDeinit();
 		return 0;
 	}

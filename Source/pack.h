@@ -78,7 +78,9 @@ struct PlayerPack {
 	uint32_t pDiabloKillLevel;
 	uint32_t pDifficulty;
 	uint32_t pDamAcFlags;  // `ItemSpecialEffectHf` is 1 byte but this is 4 bytes.
-	uint8_t reserved3[20]; // For future use
+	/** Seed of the hero's Tristram layout (0: classic). Uses 4 of the formerly reserved bytes. */
+	uint32_t townSeed;
+	uint8_t reserved3[16]; // For future use
 };
 
 union ItemNetPack {
