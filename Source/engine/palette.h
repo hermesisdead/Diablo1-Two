@@ -83,14 +83,14 @@ void LoadPalette(const char *path);
 /**
  * @brief Loads `logical_palette` from path, and generates the blending lookup table
  */
-void LoadPaletteAndInitBlending(const char *path);
+void LoadPaletteAndInitBlending(const char *path, uint32_t variationSeed = 0);
 
 /**
  * @brief Sets a single `logical_palette` color and updates the corresponding `system_color`.
  */
 void SetLogicalPaletteColor(unsigned colorIndex, const SDL_Color &color);
 
-void LoadRndLvlPal(dungeon_type l);
+void LoadRndLvlPal(dungeon_type l, uint32_t variationSeed = 0);
 void IncreaseBrightness();
 
 /**

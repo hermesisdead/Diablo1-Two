@@ -1510,7 +1510,8 @@ void CreateLevel(lvl_entry entry)
 	if (leveltype != DTYPE_TOWN) {
 		Freeupstairs();
 	}
-	LoadRndLvlPal(leveltype);
+	// Each dungeon level gets its own colour mood, derived from the shared per-level seed.
+	LoadRndLvlPal(leveltype, leveltype == DTYPE_TOWN ? 0 : DungeonSeeds[currlevel] | 1);
 }
 
 void UnstuckChargers()
@@ -2748,6 +2749,14 @@ bool StartGame(bool bNewGame, bool bSinglePlayer)
 			InitDungMsgs(*MyPlayer);
 			DeltaSyncJunk();
 		}
+#ifdef _DEBUG
+		// Debug-only: start the new game directly on a dungeon level.
+		if (const char *devLevel = std::getenv("DEVILUTIONX_DEV_LEVEL"); devLevel != nullptr && bNewGame) {
+			currlevel = static_cast<uint8_t>(std::atoi(devLevel));
+			leveltype = GetLevelType(currlevel);
+			MyPlayer->setLevel(currlevel);
+		}
+#endif
 		giNumberOfLevels = gbIsHellfire ? 25 : 17;
 		interface_mode uMsg = WM_DIABNEWGAME;
 		if (gbValidSaveFile && gbLoadGame) {

@@ -93,7 +93,7 @@ std::expected<void, std::string> LoadCustomMap(const char *path, Point viewPosit
 	case DTYPE_NONE:
 		break;
 	}
-	LoadRndLvlPal(setlvltype);
+	LoadRndLvlPal(setlvltype, DungeonSeeds[currlevel] | 1);
 	return {};
 }
 

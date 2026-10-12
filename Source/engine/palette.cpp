@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <span>
@@ -185,11 +186,111 @@ void LoadPalette(const char *path)
 	}
 }
 
-void LoadPaletteAndInitBlending(const char *path)
+namespace {
+
+/** Small deterministic generator so palette variation never touches the game's random state. */
+struct PaletteRng {
+	uint64_t state;
+	float next01()
+	{
+		state += 0x9E3779B97F4A7C15ULL;
+		uint64_t z = state;
+		z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+		z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+		z ^= z >> 31;
+		return static_cast<float>(z >> 40) / static_cast<float>(1 << 24);
+	}
+	float range(float lo, float hi) { return lo + (hi - lo) * next01(); }
+};
+
+void RgbToHsv(float r, float g, float b, float &h, float &s, float &v)
+{
+	const float mx = std::max({ r, g, b });
+	const float mn = std::min({ r, g, b });
+	const float d = mx - mn;
+	v = mx;
+	s = mx > 0.0f ? d / mx : 0.0f;
+	if (d <= 0.0f) {
+		h = 0.0f;
+	} else if (mx == r) {
+		h = std::fmod((g - b) / d, 6.0f);
+	} else if (mx == g) {
+		h = (b - r) / d + 2.0f;
+	} else {
+		h = (r - g) / d + 4.0f;
+	}
+	h *= 60.0f;
+	if (h < 0.0f) h += 360.0f;
+}
+
+void HsvToRgb(float h, float s, float v, float &r, float &g, float &b)
+{
+	h = std::fmod(h, 360.0f);
+	if (h < 0.0f) h += 360.0f;
+	const float c = v * s;
+	const float x = c * (1.0f - std::fabs(std::fmod(h / 60.0f, 2.0f) - 1.0f));
+	const float m = v - c;
+	float rp = 0, gp = 0, bp = 0;
+	if (h < 60) { rp = c; gp = x; }
+	else if (h < 120) { rp = x; gp = c; }
+	else if (h < 180) { gp = c; bp = x; }
+	else if (h < 240) { gp = x; bp = c; }
+	else if (h < 300) { rp = x; bp = c; }
+	else { rp = c; bp = x; }
+	r = rp + m;
+	g = gp + m;
+	b = bp + m;
+}
+
+/**
+ * @brief Gives a dungeon level its own colour mood: rotates hues, rescales saturation and tints the greys.
+ *
+ * Only the level-specific half of the palette (1-127) changes, so monsters, items and the UI keep their colours.
+ */
+void ApplyPaletteVariation(std::array<SDL_Color, 256> &palette, uint32_t seed)
+{
+	PaletteRng rng { static_cast<uint64_t>(seed) * 0x2545F4914F6CDD1DULL + 0x1234567ULL };
+	const float hueShift = rng.range(-70.0f, 70.0f);
+	const float satMul = rng.range(0.85f, 1.35f);
+	const float tintHue = rng.range(0.0f, 360.0f);
+	const float tintStrength = rng.range(0.12f, 0.32f);
+	float tr, tg, tb;
+	HsvToRgb(tintHue, 0.75f, 1.0f, tr, tg, tb);
+
+	for (size_t i = 1; i < 128; i++) {
+		const float r = palette[i].r / 255.0f;
+		const float g = palette[i].g / 255.0f;
+		const float b = palette[i].b / 255.0f;
+		const float luma = 0.299f * r + 0.587f * g + 0.114f * b;
+
+		float h, s, v;
+		RgbToHsv(r, g, b, h, s, v);
+		float nr, ng, nb;
+		HsvToRgb(h + hueShift, std::min(1.0f, s * satMul), v, nr, ng, nb);
+
+		// Tint towards a luminance-scaled colour so grey stone picks up the mood too.
+		nr = nr * (1.0f - tintStrength) + tr * luma * tintStrength * 1.6f;
+		ng = ng * (1.0f - tintStrength) + tg * luma * tintStrength * 1.6f;
+		nb = nb * (1.0f - tintStrength) + tb * luma * tintStrength * 1.6f;
+
+		// Keep the original brightness so lighting and contrast stay readable.
+		const float newLuma = 0.299f * nr + 0.587f * ng + 0.114f * nb;
+		const float scale = newLuma > 0.001f ? luma / newLuma : 1.0f;
+		palette[i].r = static_cast<uint8_t>(std::clamp(nr * scale, 0.0f, 1.0f) * 255.0f + 0.5f);
+		palette[i].g = static_cast<uint8_t>(std::clamp(ng * scale, 0.0f, 1.0f) * 255.0f + 0.5f);
+		palette[i].b = static_cast<uint8_t>(std::clamp(nb * scale, 0.0f, 1.0f) * 255.0f + 0.5f);
+	}
+}
+
+} // namespace
+
+void LoadPaletteAndInitBlending(const char *path, uint32_t variationSeed)
 {
 	assert(path != nullptr);
 	if (HeadlessMode) return;
 	LoadPalette(path);
+	if (variationSeed != 0)
+		ApplyPaletteVariation(logical_palette, variationSeed);
 	if (leveltype == DTYPE_CAVES || leveltype == DTYPE_CRYPT) {
 		GenerateBlendedLookupTable(logical_palette.data(), /*skipFrom=*/1, /*skipTo=*/31);
 	} else if (leveltype == DTYPE_NEST) {
@@ -199,7 +300,7 @@ void LoadPaletteAndInitBlending(const char *path)
 	}
 }
 
-void LoadRndLvlPal(dungeon_type l)
+void LoadRndLvlPal(dungeon_type l, uint32_t variationSeed)
 {
 	if (HeadlessMode)
 		return;
@@ -210,7 +311,7 @@ void LoadRndLvlPal(dungeon_type l)
 	}
 
 	if (l == DTYPE_CRYPT) {
-		LoadPaletteAndInitBlending("nlevels\\l5data\\l5base.pal");
+		LoadPaletteAndInitBlending("nlevels\\l5data\\l5base.pal", variationSeed);
 		return;
 	}
 
@@ -227,7 +328,7 @@ void LoadRndLvlPal(dungeon_type l)
 		const std::string_view n = std::string_view(nbuf, end - nbuf);
 		*BufCopy(szFileName, "levels\\l", n, "data\\l", n, "_", rv, ".pal") = '\0';
 	}
-	LoadPaletteAndInitBlending(szFileName);
+	LoadPaletteAndInitBlending(szFileName, variationSeed);
 }
 
 void IncreaseBrightness()
