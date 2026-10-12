@@ -1,7 +1,10 @@
 #include "levels/drlg_l1.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <expected>
+#include <vector>
 
 #include "engine/load_file.hpp"
 #include "engine/point.hpp"
@@ -11,6 +14,8 @@
 #include "levels/crypt.h"
 #include "levels/drlg_quests.hpp"
 #include "levels/gendung.h"
+#include "multi.h"
+#include "options.h"
 #include "player.h"
 #include "utils/bitset2d.hpp"
 #include "utils/is_of.hpp"
@@ -501,6 +506,169 @@ void GenerateRoom(Rectangle area, bool verticalLayout)
 		GenerateRoom(room2, !verticalLayout);
 }
 
+/** @brief Smallest layout, in mega tiles, that is accepted for the current level. */
+size_t MinimumArea()
+{
+	switch (currlevel) {
+	case 1:
+		return 533;
+	case 2:
+		return 693;
+	default:
+		return 761;
+	}
+}
+
+/** @brief Whether the extended room-and-corridor generator replaces the recursive room growth. */
+bool UseProceduralRooms()
+{
+	return leveltype == DTYPE_CATHEDRAL && !gbIsMultiplayer && *GetOptions().Gameplay.proceduralDungeons;
+}
+
+/** @brief True if no mask cell lies in the rectangle (inclusive of the given margin) or it leaves the playable area. */
+bool AreaClear(int x, int y, int width, int height)
+{
+	for (int j = y; j < y + height; j++) {
+		for (int i = x; i < x + width; i++) {
+			if (i < 1 || j < 1 || i >= DMAXX - 1 || j >= DMAXY - 1)
+				return false;
+			if (DungeonMask.test(i, j))
+				return false;
+		}
+	}
+	return true;
+}
+
+bool MaskNear(int x, int y)
+{
+	for (int j = y - 1; j <= y + 1; j++)
+		for (int i = x - 1; i <= x + 1; i++)
+			if (i >= 0 && j >= 0 && i < DMAXX && j < DMAXY && DungeonMask.test(i, j))
+				return true;
+	return false;
+}
+
+/**
+ * @brief Walks a two cell wide corridor from a room towards a target until it touches the existing layout.
+ * @param path Receives the corridor cells.
+ * @return True if the corridor connected without grazing any other part of the layout.
+ */
+bool WalkCorridor(Point start, Point target, bool horizontalFirst, std::vector<Point> &path)
+{
+	Point cur = start;
+	for (int leg = 0; leg < 2; leg++) {
+		const bool horizontal = (leg == 0) == horizontalFirst;
+		const int goal = horizontal ? target.x : target.y;
+		while ((horizontal ? cur.x : cur.y) != goal) {
+			const int step = ((horizontal ? cur.x : cur.y) < goal) ? 1 : -1;
+			const Point next = horizontal ? Point { cur.x + step, cur.y } : Point { cur.x, cur.y + step };
+			// A corridor is two cells wide perpendicular to its direction.
+			const Point band[2] = { next, horizontal ? Point { next.x, next.y + 1 } : Point { next.x + 1, next.y } };
+			for (const Point &cell : band) {
+				if (cell.x < 1 || cell.y < 1 || cell.x >= DMAXX - 1 || cell.y >= DMAXY - 1)
+					return false;
+			}
+			bool touchesAhead = false;
+			bool touchesSide = false;
+			for (const Point &cell : band) {
+				if (DungeonMask.test(cell.x, cell.y))
+					return !path.empty();
+				for (int j = -1; j <= 1; j++) {
+					for (int i = -1; i <= 1; i++) {
+						const int x = cell.x + i;
+						const int y = cell.y + j;
+						if (x < 0 || y < 0 || x >= DMAXX || y >= DMAXY || !DungeonMask.test(x, y))
+							continue;
+						const bool ahead = horizontal ? (i == step) : (j == step);
+						(ahead ? touchesAhead : touchesSide) = true;
+					}
+				}
+			}
+			if (touchesSide)
+				return false;
+			path.push_back(band[0]);
+			path.push_back(band[1]);
+			if (touchesAhead)
+				return true;
+			cur = next;
+		}
+	}
+	return !path.empty();
+}
+
+/**
+ * @brief Grows the dungeon beyond the fixed chambers and hallway with rooms of varied size, each joined by a
+ * corridor to the closest part of the layout, plus a few extra corridors that close loops.
+ */
+void GenerateProceduralRooms(size_t targetArea)
+{
+	constexpr int MaxRooms = 28;
+	int rooms = 0;
+	for (int attempt = 0; attempt < 400 && rooms < MaxRooms && (DungeonMask.count() < targetArea || rooms < 6); attempt++) {
+		const int width = 4 + 2 * GenerateRnd(4);
+		const int height = 4 + 2 * GenerateRnd(4);
+		const int x = 2 + GenerateRnd(DMAXX - width - 4);
+		const int y = 2 + GenerateRnd(DMAXY - height - 4);
+		if (!AreaClear(x - 2, y - 2, width + 4, height + 4))
+			continue;
+
+		// Closest existing layout cell to the centre of the room.
+		const Point centre { x + width / 2, y + height / 2 };
+		int bestDistance = 1 << 20;
+		Point target {};
+		for (int j = 0; j < DMAXY; j++) {
+			for (int i = 0; i < DMAXX; i++) {
+				if (!DungeonMask.test(i, j))
+					continue;
+				const int distance = std::abs(i - centre.x) + std::abs(j - centre.y);
+				if (distance < bestDistance) {
+					bestDistance = distance;
+					target = { i, j };
+				}
+			}
+		}
+		if (bestDistance == (1 << 20))
+			return;
+
+		// Start the corridor on the side of the room that faces the target.
+		Point start = centre;
+		const bool horizontalFirst = FlipCoin();
+		if (horizontalFirst) {
+			start.x = target.x < centre.x ? x - 1 : x + width;
+			start.y = std::clamp(centre.y + GenerateRnd(3) - 1, y, y + height - 2);
+		} else {
+			start.y = target.y < centre.y ? y - 1 : y + height;
+			start.x = std::clamp(centre.x + GenerateRnd(3) - 1, x, x + width - 2);
+		}
+		std::vector<Point> path;
+		// The first corridor cell is directly outside the room, so walk from just inside it.
+		if (!WalkCorridor(start, target, horizontalFirst, path))
+			continue;
+		// The corridor must not run through the room it belongs to.
+		bool throughRoom = false;
+		for (const Point &cell : path)
+			if (cell.x >= x && cell.x < x + width && cell.y >= y && cell.y < y + height)
+				throughRoom = true;
+		if (throughRoom)
+			continue;
+
+		MapRoom({ { x, y }, { width, height } });
+		for (const Point &cell : path)
+			DungeonMask.set(cell.x, cell.y);
+		// Fill the gap between the room edge and the first corridor cell.
+		if (horizontalFirst) {
+			const int edge = start.x < x ? x - 1 : x + width;
+			for (int j = start.y; j <= start.y + 1; j++)
+				DungeonMask.set(edge, j);
+		} else {
+			const int edge = start.y < y ? y - 1 : y + height;
+			for (int i = start.x; i <= start.x + 1; i++)
+				DungeonMask.set(i, edge);
+		}
+		rooms++;
+	}
+}
+
 /**
  * @brief Generate a boolean dungoen room layout
  */
@@ -542,6 +710,11 @@ void FirstRoom()
 
 	MapRoom(hallway);
 
+	if (UseProceduralRooms()) {
+		GenerateProceduralRooms(MinimumArea());
+		return;
+	}
+
 	if (HasChamber1)
 		GenerateRoom(chamber1, VerticalLayout);
 	if (HasChamber2)
@@ -556,6 +729,38 @@ void FirstRoom()
 inline size_t FindArea()
 {
 	return DungeonMask.count();
+}
+
+/** @brief True if every cell of the layout can be reached from every other one without leaving it. */
+bool MaskConnected()
+{
+	Bitset2d<DMAXX, DMAXY> visited;
+	std::vector<Point> stack;
+	for (int j = 0; j < DMAXY && stack.empty(); j++) {
+		for (int i = 0; i < DMAXX && stack.empty(); i++) {
+			if (DungeonMask.test(i, j)) {
+				stack.push_back({ i, j });
+				visited.set(i, j);
+			}
+		}
+	}
+	size_t count = 0;
+	while (!stack.empty()) {
+		const Point p = stack.back();
+		stack.pop_back();
+		count++;
+		constexpr int Dx[4] = { 1, -1, 0, 0 };
+		constexpr int Dy[4] = { 0, 0, 1, -1 };
+		for (int d = 0; d < 4; d++) {
+			const int x = p.x + Dx[d];
+			const int y = p.y + Dy[d];
+			if (x < 0 || y < 0 || x >= DMAXX || y >= DMAXY || visited.test(x, y) || !DungeonMask.test(x, y))
+				continue;
+			visited.set(x, y);
+			stack.push_back({ x, y });
+		}
+	}
+	return count == DungeonMask.count();
 }
 
 void MakeDmt()
@@ -1168,17 +1373,7 @@ void GenerateLevel(lvl_entry entry)
 	if (LevelSeeds[currlevel])
 		SetRndSeed(*LevelSeeds[currlevel]);
 
-	size_t minarea = 761;
-	switch (currlevel) {
-	case 1:
-		minarea = 533;
-		break;
-	case 2:
-		minarea = 693;
-		break;
-	default:
-		break;
-	}
+	const size_t minarea = MinimumArea();
 
 	while (true) {
 		DRLG_InitTrans();
@@ -1186,7 +1381,7 @@ void GenerateLevel(lvl_entry entry)
 		do {
 			LevelSeeds[currlevel] = GetLCGEngineState();
 			FirstRoom();
-		} while (FindArea() < minarea);
+		} while (FindArea() < minarea || (UseProceduralRooms() && !MaskConnected()));
 
 		InitDungeonFlags();
 		MakeDmt();

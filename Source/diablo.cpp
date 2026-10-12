@@ -65,7 +65,9 @@
 #include "levels/drlg_l2.h"
 #include "levels/drlg_l3.h"
 #include "levels/drlg_l4.h"
+#include "engine/path.h"
 #include "levels/gendung.h"
+#include "levels/tile_properties.hpp"
 #include "levels/setmaps.h"
 #include "levels/themes.h"
 #include "levels/town.h"
@@ -938,6 +940,40 @@ void RunGameLoop(interface_mode uMsg)
 							std::fprintf(tf, "trig,%d,%d,%d\n", trigs[i]._tlvl, (int)trigs[i].position.x, (int)trigs[i].position.y);
 						for (const Towner &towner : Towners)
 							std::fprintf(tf, "towner,%s,%d,%d\n", std::string(towner.name).c_str(), towner.position.x, towner.position.y);
+						if (SetPiece.size.width > 0)
+							std::fprintf(tf, "setpiece,quest,%d,%d\n", SetPiece.position.x * 2 + 16 + SetPiece.size.width, SetPiece.position.y * 2 + 16 + SetPiece.size.height);
+						// Doors open when walked into, so they count as walkable here.
+						const auto DevWalkable = [](Point tile) {
+							if (PosOkPlayer(*MyPlayer, tile))
+								return true;
+							const Object *object = FindObjectAtPosition(tile);
+							return object != nullptr && object->isDoor() && !IsTileSolid(tile);
+						};
+						// Real pathfinding from the player to every trigger and the quest set piece (any tile within a few cells).
+						const auto pathLength = [&DevWalkable](Point destination, int radius) {
+							int8_t path[800];
+							for (int r = 0; r <= radius; r++) {
+								for (int dx = -r; dx <= r; dx++) {
+									for (int dy = -r; dy <= r; dy++) {
+										if (std::max(std::abs(dx), std::abs(dy)) != r)
+											continue;
+										const Point candidate = destination + Displacement { dx, dy };
+										if (!InDungeonBounds(candidate) || !DevWalkable(candidate))
+											continue;
+										if (candidate == MyPlayer->position.tile)
+											return 1;
+										const int steps = FindPath(CanStep, [&DevWalkable](Point tile) { return DevWalkable(tile); }, MyPlayer->position.tile, candidate, path, 800);
+										if (steps > 0)
+											return steps;
+									}
+								}
+							}
+							return 0;
+						};
+						for (int i = 0; i < numtrigs; i++)
+							std::fprintf(tf, "pathtrig,%d,%d,%d\n", trigs[i]._tlvl, (int)trigs[i].position.x, pathLength(trigs[i].position, 4));
+						if (SetPiece.size.width > 0)
+							std::fprintf(tf, "pathsetpiece,quest,%d,%d\n", 0, pathLength({ SetPiece.position.x * 2 + 16 + SetPiece.size.width, SetPiece.position.y * 2 + 16 + SetPiece.size.height }, 4));
 						std::fprintf(tf, "player,me,%d,%d\n", MyPlayer->position.tile.x, MyPlayer->position.tile.y);
 						std::fclose(tf);
 					}

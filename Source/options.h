@@ -588,6 +588,8 @@ struct GameplayOptions : OptionCategoryBase {
 	OptionEntryInt<int> tickRate;
 	/** @brief Enable double walk speed when in town. */
 	OptionEntryBoolean runInTown;
+	/** @brief Use the extended procedural room generator for Cathedral levels (single player only). */
+	OptionEntryBoolean proceduralDungeons;
 	/** @brief Do not let the mouse leave the application window. */
 	OptionEntryBoolean grabInput;
 	/** @brief Pause the game when focus is lost. */
