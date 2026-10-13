@@ -977,6 +977,30 @@ void RunGameLoop(interface_mode uMsg)
 				if (const Towner *gambler = GetTowner(TOWN_GAMBLER); gambler != nullptr)
 					LogInfo("GAMBLER at {},{}", gambler->position.x, gambler->position.y);
 			}
+			if (const char *vstore = std::getenv("DEVILUTIONX_DEV_VSTORE"); vstore != nullptr && devCaptureFrames == 40) {
+				const std::string_view v = vstore;
+				if (v == "gambler") {
+					RefreshGamblerStock();
+					OpenVisualStore(VisualStoreVendor::Gambler);
+				} else {
+					OpenVisualStore(v == "witch" ? VisualStoreVendor::Witch : v == "healer" ? VisualStoreVendor::Healer : VisualStoreVendor::Smith);
+				}
+			}
+			if (const char *hover = std::getenv("DEVILUTIONX_DEV_VSTOREHOVER"); hover != nullptr && devCaptureFrames > 40 && IsVisualStoreOpen && !VisualStore.pages.empty()) {
+				const auto &items = VisualStore.pages[VisualStore.currentPage].items;
+				if (!items.empty()) {
+					const auto &target = items[std::min<size_t>(std::atoi(hover), items.size() - 1)];
+					MousePosition = GetVisualStoreSlotCoord(target.position) + Displacement { INV_SLOT_HALF_SIZE_PX, INV_SLOT_HALF_SIZE_PX };
+				}
+			}
+			if (std::getenv("DEVILUTIONX_DEV_VSTOREBUY") != nullptr && IsVisualStoreOpen && devCaptureFrames >= 60 && devCaptureFrames <= 64) {
+				CheckVisualStoreItem(MousePosition, false, false);
+				if (devCaptureFrames == 64) {
+					for (int i = 0; i < MyPlayer->_pNumInv; i++)
+						LogInfo("VSTORE bought {} quality {} ident {}", MyPlayer->InvList[i].getName().str(), static_cast<int>(MyPlayer->InvList[i]._iMagical), MyPlayer->InvList[i]._iIdentified);
+					LogInfo("VSTORE gamble stock left {}", GamblerItems.size());
+				}
+			}
 			if (const char *store = std::getenv("DEVILUTIONX_DEV_STORE"); store != nullptr && devCaptureFrames == 40) {
 				StartStore(TalkID::Gambler);
 				if (std::string_view(store) == "gamblebuy") {

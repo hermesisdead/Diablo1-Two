@@ -31,6 +31,7 @@
 #include "qol/stash.h"
 #include "spells.h"
 #include "stores.h"
+#include "utils/format.hpp"
 #include "utils/format_int.hpp"
 #include "utils/language.h"
 #include "utils/str_cat.hpp"
@@ -89,8 +90,47 @@ std::span<Item> GetVendorItems(VisualStoreVendor vendor, VisualStoreTab tab)
 		}
 		return { &BoyItem, 1 };
 	}
+	case VisualStoreVendor::Gambler: {
+		return { GamblerItems.data(), GamblerItems.size() };
+	}
 	}
 	return {};
+}
+
+bool IsGambling()
+{
+	return VisualStore.vendor == VisualStoreVendor::Gambler;
+}
+
+/** What the vendor asks for an item: the gambler has his own price list. */
+int GetBuyPrice(int itemIndex, const Item &item)
+{
+	if (IsGambling() && itemIndex >= 0 && itemIndex < static_cast<int>(GamblerPrices.size()))
+		return GamblerPrices[itemIndex];
+	return item._iIvalue;
+}
+
+/** A gamble shows only its base item: plain colours and base stats, nothing that hints at quality. */
+void PrintGambleItemDetails(const Item &item)
+{
+	if (item._iClass == ICLASS_WEAPON) {
+		if (item._iMinDam == item._iMaxDam)
+			AddInfoBoxString(FormatRuntime(_("damage: {:d}  Dur: {:d}/{:d}"), item._iMinDam, item._iDurability, item._iMaxDur));
+		else
+			AddInfoBoxString(FormatRuntime(_("damage: {:d}-{:d}  Dur: {:d}/{:d}"), item._iMinDam, item._iMaxDam, item._iDurability, item._iMaxDur));
+	}
+	if (item._iClass == ICLASS_ARMOR)
+		AddInfoBoxString(FormatRuntime(_("armor: {:d}  Dur: {:d}/{:d}"), item._iAC, item._iDurability, item._iMaxDur));
+	AddInfoBoxString(_("Unknown magic. Buy to find out."));
+	std::string req;
+	if (item._iMinStr != 0)
+		StrAppend(req, " ", item._iMinStr, " ", _("Str"));
+	if (item._iMinMag != 0)
+		StrAppend(req, " ", item._iMinMag, " ", _("Mag"));
+	if (item._iMinDex != 0)
+		StrAppend(req, " ", item._iMinDex, " ", _("Dex"));
+	if (!req.empty())
+		AddInfoBoxString(StrCat(_("Required:"), req));
 }
 
 /** @brief Check if the current vendor has tabs (Smith only). */
@@ -104,7 +144,8 @@ bool VendorAcceptsSale()
 {
 	switch (VisualStore.vendor) {
 	case VisualStoreVendor::Smith:
-	case VisualStoreVendor::Witch: {
+	case VisualStoreVendor::Witch:
+	case VisualStoreVendor::Gambler: {
 		return true;
 	}
 	case VisualStoreVendor::Healer:
@@ -446,6 +487,13 @@ void DrawVisualStore(const Surface &out)
 		DrawString(out, _("Premium"), premBtnPos, { .flags = UiFlags::AlignCenter | premiumStyle });
 		break;
 	}
+	case VisualStoreVendor::Gambler: {
+		const Rectangle refreshBtnPos = { GetPanelPosition(UiPanels::Stash, VisualStoreButtonRect[TabButtonBasic].position), VisualStoreButtonRect[TabButtonBasic].size };
+		RenderClxSprite(out, (*VisualStoreNavButtonArt)[VisualStoreButtonPressed == TabButtonBasic], refreshBtnPos.position);
+		DrawString(out, _("Refresh"), refreshBtnPos, { .flags = UiFlags::AlignCenter | styleWhite });
+		DrawString(out, _("Tremain's table"), { panelPos + Displacement { 100, 21 }, { 200, 22 } }, { .flags = UiFlags::AlignRight | UiFlags::VerticalCenter | UiFlags::ColorWhitegold });
+		break;
+	}
 	case VisualStoreVendor::Witch:
 	case VisualStoreVendor::Boy:
 	case VisualStoreVendor::Healer: {
@@ -476,7 +524,7 @@ void DrawVisualStore(const Surface &out)
 
 			const Item &item = allItems[itemPlusOne - 1];
 			Point position = GetVisualStoreSlotCoord({ x, y }) + offset;
-			InvDrawSlotBack(out, position, InventorySlotSizeInPixels, item._iMagical);
+			InvDrawSlotBack(out, position, InventorySlotSizeInPixels, IsGambling() ? ITEM_QUALITY_NORMAL : item._iMagical);
 		}
 	}
 
@@ -490,7 +538,7 @@ void DrawVisualStore(const Surface &out)
 
 		// Draw highlight outline if this item is hovered
 		if (pcursstoreitem == vsItem.index) {
-			const uint8_t color = GetOutlineColor(item, true);
+			const uint8_t color = IsGambling() ? (item._iStatFlag ? ICOL_WHITE : ICOL_RED) : GetOutlineColor(item, true);
 			ClxDrawOutline(out, color, position, sprite);
 		}
 
@@ -532,6 +580,11 @@ int16_t CheckVisualStoreHLight(Point mousePosition)
 						FloatingInfoString = _("Basic");
 						AddInfoBoxString(_("Basic items"));
 						AddInfoBoxString(_("Basic items"), true);
+					} else if (IsGambling()) {
+						InfoString = _("Refresh");
+						FloatingInfoString = _("Refresh");
+						AddInfoBoxString(_("Deal a new table"));
+						AddInfoBoxString(_("Deal a new table"), true);
 					} else {
 						InfoString = _("Misc");
 						FloatingInfoString = _("Misc");
@@ -603,14 +656,16 @@ int16_t CheckVisualStoreHLight(Point mousePosition)
 			};
 
 			if (cell.contains(mousePosition)) {
-				const int price = item._iIvalue;
+				const int price = GetBuyPrice(itemIndex, item);
 				const bool canAfford = PlayerCanAfford(price);
 
 				InfoString = item.getName();
 				FloatingInfoString = item.getName();
-				InfoColor = canAfford ? item.getTextColor() : UiFlags::ColorRed;
+				InfoColor = canAfford ? (IsGambling() ? UiFlags::ColorWhite : item.getTextColor()) : UiFlags::ColorRed;
 
-				if (item._iIdentified) {
+				if (IsGambling()) {
+					PrintGambleItemDetails(item);
+				} else if (item._iIdentified) {
 					PrintItemDetails(item);
 				} else {
 					PrintItemDur(item);
@@ -642,7 +697,7 @@ void CheckVisualStoreItem(Point mousePosition, bool isCtrlHeld, bool isShiftHeld
 		return;
 
 	// Check if player can afford the item
-	int price = item._iIvalue;
+	int price = GetBuyPrice(itemIndex, item);
 	uint32_t totalGold = MyPlayer->_pGold + Stash.gold;
 	if (totalGold < static_cast<uint32_t>(price)) {
 		// InitDiabloMsg(EMSG_NOT_ENOUGH_GOLD);
@@ -691,6 +746,11 @@ void CheckVisualStoreItem(Point mousePosition, bool isCtrlHeld, bool isShiftHeld
 		BoyItem.clear();
 		break;
 	}
+	case VisualStoreVendor::Gambler: {
+		GamblerItems.erase(GamblerItems.begin() + itemIndex);
+		GamblerPrices.erase(GamblerPrices.begin() + itemIndex);
+		break;
+	}
 	}
 
 	pcursstoreitem = -1;
@@ -730,7 +790,8 @@ bool CanSellToCurrentVendor(const Item &item)
 		return false;
 
 	switch (VisualStore.vendor) {
-	case VisualStoreVendor::Smith: {
+	case VisualStoreVendor::Smith:
+	case VisualStoreVendor::Gambler: {
 		return SmithWillBuy(item);
 	}
 	case VisualStoreVendor::Witch: {
@@ -801,6 +862,16 @@ void CheckVisualStoreButtonRelease(Point mousePosition)
 	if (button.contains(mousePosition)) {
 		switch (VisualStoreButtonPressed) {
 		case TabButtonBasic: {
+			if (IsGambling()) {
+				RefreshGamblerStock();
+				for (Item &item : GetVisualStoreItems())
+					item._iStatFlag = MyPlayer->CanUseItem(item);
+				VisualStore.currentPage = 0;
+				pcursstoreitem = -1;
+				RefreshVisualStoreLayout();
+				PlaySFX(SfxID::ItemGold);
+				break;
+			}
 			SetVisualStoreTab(VisualStoreTab::Basic);
 			break;
 		}

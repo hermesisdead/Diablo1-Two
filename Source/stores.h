@@ -94,6 +94,11 @@ extern DVL_API_FOR_TEST StaticVector<Item, NumHealerItemsHf> HealerItems;
 
 /** Items sold by Adria */
 extern DVL_API_FOR_TEST StaticVector<Item, NumWitchItemsHf> WitchItems;
+/** Tremain's gambling stock (unidentified, quality hidden until bought) and his asking prices. */
+extern std::vector<Item> GamblerItems;
+extern std::vector<int> GamblerPrices;
+/** Re-rolls Tremain's table. */
+void RefreshGamblerStock();
 
 /** Current level of the item sold by Wirt */
 extern DVL_API_FOR_TEST int BoyItemLevel;

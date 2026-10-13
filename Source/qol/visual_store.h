@@ -20,7 +20,9 @@ enum class VisualStoreVendor : uint8_t {
 	Smith,
 	Witch,
 	Healer,
-	Boy
+	Boy,
+	/** Tremain's gambling table: unidentified goods whose quality stays hidden until bought. */
+	Gambler,
 };
 
 enum class VisualStoreTab : uint8_t {

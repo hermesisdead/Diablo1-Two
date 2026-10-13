@@ -56,10 +56,14 @@ StaticVector<Item, NumSmithItemsHf> PremiumItems;
 StaticVector<Item, NumHealerItemsHf> HealerItems;
 
 StaticVector<Item, NumWitchItemsHf> WitchItems;
-/** Tremain's gambling stock (unidentified) and his asking prices. */
 std::vector<Item> GamblerItems;
 std::vector<int> GamblerPrices;
-constexpr int GambleStockSize = 15;
+
+void RefreshGamblerStock()
+{
+	constexpr int GambleStockSize = 15;
+	SpawnGambleItems(GamblerItems, GamblerPrices, GambleStockSize);
+}
 
 int BoyItemLevel;
 Item BoyItem;
@@ -1641,7 +1645,12 @@ void GamblerEnter()
 	switch (CurrentTextLine) {
 	case 14:
 		// A fresh table every time you sit down, like Diablo II's gamblers.
-		SpawnGambleItems(GamblerItems, GamblerPrices, GambleStockSize);
+		RefreshGamblerStock();
+		if (*GetOptions().Gameplay.storeUi == StoreUi::VisualGrid) {
+			ActiveStore = TalkID::None;
+			OpenVisualStore(VisualStoreVendor::Gambler);
+			break;
+		}
 		StartStore(TalkID::GamblerBuy);
 		break;
 	case 18:

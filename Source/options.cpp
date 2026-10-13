@@ -895,7 +895,8 @@ GameplayOptions::GameplayOptions()
     , numFullManaPotionPickup("Full Mana Potion Pickup", OptionEntryFlags::None, N_("Full Mana Potion Pickup"), N_("Number of Full Mana potions to pick up automatically."), 0, { 0, 1, 2, 4, 8, 16 })
     , numRejuPotionPickup("Rejuvenation Potion Pickup", OptionEntryFlags::None, N_("Rejuvenation Potion Pickup"), N_("Number of Rejuvenation potions to pick up automatically."), 0, { 0, 1, 2, 4, 8, 16 })
     , numFullRejuPotionPickup("Full Rejuvenation Potion Pickup", OptionEntryFlags::None, N_("Full Rejuvenation Potion Pickup"), N_("Number of Full Rejuvenation potions to pick up automatically."), 0, { 0, 1, 2, 4, 8, 16 })
-    , storeUi("Store UI", OptionEntryFlags::None, N_("Store UI"), N_("User interface for stores"), StoreUi::Text,
+    // New ini key, so existing configs pick up the Diablo II style grid as the new default.
+    , storeUi("Store UI Style", OptionEntryFlags::None, N_("Store UI"), N_("User interface for stores"), StoreUi::VisualGrid,
           {
               { StoreUi::Text, N_("Text-only list") },
               { StoreUi::ListWithItemGraphics, N_("List with item graphics") },
