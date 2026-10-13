@@ -305,7 +305,7 @@ void LoadRndLvlPal(dungeon_type l, uint32_t variationSeed)
 	if (HeadlessMode)
 		return;
 
-	if (l == DTYPE_TOWN) {
+	if (l == DTYPE_TOWN || l == DTYPE_FOREST) {
 		LoadPaletteAndInitBlending("levels\\towndata\\town.pal");
 		return;
 	}

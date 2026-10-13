@@ -12,6 +12,7 @@ std::expected<dungeon_type, std::string> ParseDungeonType(std::string_view value
 	if (value == "DTYPE_HELL") return DTYPE_HELL;
 	if (value == "DTYPE_NEST") return DTYPE_NEST;
 	if (value == "DTYPE_CRYPT") return DTYPE_CRYPT;
+	if (value == "DTYPE_FOREST") return DTYPE_FOREST;
 	return std::unexpected("Unknown enum value");
 }
 

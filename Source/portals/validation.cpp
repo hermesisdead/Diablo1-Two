@@ -28,7 +28,9 @@ dungeon_type GetQuestLevelType(_setlevels questLevel)
 
 dungeon_type GetSetLevelType(_setlevels setLevel)
 {
-	const bool isArenaLevel = setLevel >= SL_FIRST_ARENA && setLevel <= SL_LAST;
+	if (setLevel == SL_FOREST)
+		return DTYPE_FOREST;
+	const bool isArenaLevel = setLevel >= SL_FIRST_ARENA && setLevel <= SL_LAST_ARENA;
 	return isArenaLevel ? GetArenaLevelType(setLevel) : GetQuestLevelType(setLevel);
 }
 

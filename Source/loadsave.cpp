@@ -637,7 +637,11 @@ void LoadPlayer(LoadHelper &file, Player &player)
 	sgGameInitInfo.nDifficulty = static_cast<_difficulty>(file.NextLE<uint32_t>());
 	player.pDamAcFlags = static_cast<ItemSpecialEffectHf>(file.NextLE<uint32_t>());
 	player.townSeed = file.NextLE<uint32_t>();
-	file.Skip(16); // Available bytes
+	player.forestSeed = file.NextLE<uint32_t>();
+	player.forestTier = file.NextLE<uint8_t>();
+	file.Skip(1);
+	player.forestBestWave = file.NextLE<uint16_t>();
+	file.Skip(8); // Available bytes
 	CalcPlrInv(player, false);
 
 	player.executedSpell = player.queuedSpell; // Ensures backwards compatibility
@@ -1488,7 +1492,11 @@ void SavePlayer(SaveHelper &file, const Player &player)
 	file.WriteLE<uint32_t>(sgGameInitInfo.nDifficulty);
 	file.WriteLE<uint32_t>(static_cast<uint32_t>(player.pDamAcFlags));
 	file.WriteLE<uint32_t>(player.townSeed);
-	file.Skip(16); // Available bytes
+	file.WriteLE<uint32_t>(player.forestSeed);
+	file.WriteLE<uint8_t>(player.forestTier);
+	file.Skip(1);
+	file.WriteLE<uint16_t>(player.forestBestWave);
+	file.Skip(8); // Available bytes
 
 	// Omit pointer _pNData
 	// Omit pointer _pWData

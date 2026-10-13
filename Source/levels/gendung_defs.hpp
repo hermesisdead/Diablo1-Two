@@ -20,8 +20,10 @@ enum dungeon_type : int8_t {
 	DTYPE_HELL,
 	DTYPE_NEST,
 	DTYPE_CRYPT,
+	/** Outdoor forest beyond Tristram, built from the town tileset. */
+	DTYPE_FOREST,
 
-	DTYPE_LAST = DTYPE_CRYPT,
+	DTYPE_LAST = DTYPE_FOREST,
 	DTYPE_NONE = -1,
 };
 
@@ -56,8 +58,12 @@ enum _setlevels : int8_t {
 	SL_ARENA_HELL,
 	SL_ARENA_CIRCLE_OF_LIFE,
 
+	/** Endless, level-scaled forest beyond Tristram (single player). */
+	SL_FOREST,
+
 	SL_FIRST_ARENA = SL_ARENA_CHURCH,
-	SL_LAST = SL_ARENA_CIRCLE_OF_LIFE,
+	SL_LAST_ARENA = SL_ARENA_CIRCLE_OF_LIFE,
+	SL_LAST = SL_FOREST,
 };
 
 inline bool IsArenaLevel(_setlevels setLevel)

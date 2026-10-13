@@ -2305,6 +2305,9 @@ void CreatePlayer(Player &player, HeroClass c)
 	player.townSeed = static_cast<uint32_t>(SDL_GetTicks()) * 2654435761U ^ static_cast<uint32_t>(std::time(nullptr));
 	if (player.townSeed == 0)
 		player.townSeed = 1;
+	player.forestSeed = 0;
+	player.forestTier = 0;
+	player.forestBestWave = 0;
 
 	player.setCharacterLevel(1);
 	player._pClass = c;

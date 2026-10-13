@@ -62,6 +62,7 @@
 #include "items.h"
 #include "levels/crypt.h"
 #include "levels/drlg_l4.h"
+#include "levels/forest.hpp"
 #include "levels/dun_tile.hpp"
 #include "levels/gendung.h"
 #include "levels/gendung_defs.hpp"
@@ -114,6 +115,7 @@ size_t LevelMonsterTypeCount;
 Monster Monsters[MaxMonsters];
 unsigned ActiveMonsters[MaxMonsters];
 size_t ActiveMonsterCount;
+int monstimgtot;
 /** Tracks the total number of monsters killed per monster_id. */
 int MonsterKillCounts[NUM_MAX_MTYPES];
 bool sgbSaveSoundOn;
@@ -131,7 +133,6 @@ constexpr int ReservedMonsterSlotsForGolems = 4;
 
 /** Tracks which missile files are already loaded */
 size_t totalmonsters;
-int monstimgtot;
 int uniquetrans;
 
 constexpr const std::array<_monster_id, 12> SkeletonTypes {
@@ -3518,6 +3519,9 @@ std::expected<void, std::string> GetLevelMTypes()
 		if (setlvlnum == SL_SKELKING) {
 			RETURN_IF_ERROR(AddMonsterType(MT_SKING, PLACE_UNIQUE));
 		}
+		if (setlvlnum == SL_FOREST) {
+			RETURN_IF_ERROR(AddForestMonsterTypes());
+		}
 	}
 	return {};
 }
@@ -3684,7 +3688,7 @@ void WeakenNaKrul()
 
 void InitGolems()
 {
-	if (!setlevel) {
+	if (!setlevel || setlvlnum == SL_FOREST) {
 		for (int i = 0; i < ReservedMonsterSlotsForGolems; i++)
 			AddMonster(GolemHoldingCell, Direction::South, 0, false);
 	}
@@ -4006,7 +4010,7 @@ void M_StartHit(Monster &monster, const Player &player, int dam)
 void MonsterDeath(Monster &monster, Direction md, bool sendmsg)
 {
 	if (!monster.isPlayerMinion())
-		AddPlrMonstExper(monster.level(sgGameInitInfo.nDifficulty), monster.exp(sgGameInitInfo.nDifficulty), monster.whoHit);
+		AddPlrMonstExper(monster.level(sgGameInitInfo.nDifficulty), static_cast<unsigned>(monster.exp(sgGameInitInfo.nDifficulty) * ForestExperienceMultiplier()), monster.whoHit);
 
 	MonsterKillCounts[monster.type().type]++;
 	monster.hitPoints = Fixed26_6::fromInt(0);

@@ -14,6 +14,7 @@
 #include "cursor.h"
 #include "diablo_msg.hpp"
 #include "game_mode.hpp"
+#include "levels/forest.hpp"
 #include "levels/town_shuffle.hpp"
 #include "multi.h"
 #include "utils/algorithm/container.hpp"
@@ -146,6 +147,8 @@ void InitTownTriggers()
 		trigs[numtrigs]._tlvl = 21;
 		numtrigs++;
 	}
+
+	AddTownForestTrigger();
 
 	trigflag = false;
 }
@@ -408,7 +411,7 @@ bool ForceTownTrig()
 		}
 	}
 
-	return false;
+	return ForceTownForestTrig();
 }
 
 bool ForceL1Trig()
@@ -854,6 +857,9 @@ void CheckTrigForce()
 		case SL_POISONWATER:
 			trigflag = ForcePWaterTrig();
 			break;
+		case SL_FOREST:
+			trigflag = ForceForestTrig();
+			break;
 		default:
 			if (IsArenaLevel(setlvlnum))
 				trigflag = ForceArenaTrig();
@@ -928,6 +934,10 @@ void CheckTriggers()
 		case WM_DIABTWARPUP:
 			TWarpFrom = currlevel;
 			StartNewLvl(myPlayer, trigs[i]._tmsg, 0);
+			break;
+		case WM_DIABSETLVL:
+			if (trigs[i]._tlvl == SL_FOREST)
+				EnterForest();
 			break;
 		default:
 			app_fatal("Unknown trigger msg");

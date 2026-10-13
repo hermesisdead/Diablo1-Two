@@ -63,6 +63,7 @@
 #include "init.hpp"
 #include "inv.h"
 #include "levels/drlg_l1.h"
+#include "levels/forest.hpp"
 #include "levels/drlg_l2.h"
 #include "levels/drlg_l3.h"
 #include "levels/drlg_l4.h"
@@ -938,16 +939,21 @@ void RunGameLoop(interface_mode uMsg)
 #ifdef _DEBUG
 		if (std::getenv("DEVILUTIONX_DEV_CAPTURE") != nullptr) {
 			static int devCaptureFrames = 0;
+			static const int devCaptureAt = std::getenv("DEVILUTIONX_DEV_CAPTURE_AT") != nullptr ? std::atoi(std::getenv("DEVILUTIONX_DEV_CAPTURE_AT")) : 240;
 			++devCaptureFrames;
 			if (devCaptureFrames % 20 == 0)
 				LogVerbose("devcap frame {}", devCaptureFrames);
-			if (const char *burst = std::getenv("DEVILUTIONX_DEV_CAPTURE_FRAMES"); burst != nullptr && devCaptureFrames > 240) {
+			if (devCaptureFrames == 20 && std::getenv("DEVILUTIONX_DEV_FOREST") != nullptr && leveltype == DTYPE_TOWN)
+				EnterForest();
+			if (const char *back = std::getenv("DEVILUTIONX_DEV_FORESTRETURN"); back != nullptr && devCaptureFrames == std::atoi(back) && leveltype == DTYPE_FOREST)
+				StartNewLvl(*MyPlayer, WM_DIABRTNLVL, GetMapReturnLevel());
+			if (const char *burst = std::getenv("DEVILUTIONX_DEV_CAPTURE_FRAMES"); burst != nullptr && devCaptureFrames > devCaptureAt) {
 				// Burst capture for animated previews: every other frame, then quit.
 				CaptureScreen();
-				if (devCaptureFrames >= 240 + std::atoi(burst))
+				if (devCaptureFrames >= devCaptureAt + std::atoi(burst))
 					gbRunGame = false;
 			}
-			if (devCaptureFrames == 240) {
+			if (devCaptureFrames == devCaptureAt) {
 				if (std::getenv("DEVILUTIONX_DEV_DUMPTOWN") != nullptr) {
 					FILE *tf = std::fopen((paths::PrefPath() + "town_objects.csv").c_str(), "w");
 					if (tf != nullptr) {
@@ -1472,7 +1478,8 @@ std::expected<void, std::string> LoadLvlGFX()
 	};
 
 	switch (leveltype) {
-	case DTYPE_TOWN: {
+	case DTYPE_TOWN:
+	case DTYPE_FOREST: { // the forest is built from the town tileset
 		auto cel = LoadFileInMemWithStatus("nlevels\\towndata\\town.cel");
 		if (!cel.has_value()) {
 			ASSIGN_OR_RETURN(pDungeonCels, LoadFileInMemWithStatus("levels\\towndata\\town.cel"));
@@ -1646,6 +1653,8 @@ void GameLogic()
 		ProcessItems();
 		ProcessLightList();
 		ProcessVisionList();
+		if (leveltype == DTYPE_FOREST)
+			UpdateForestWaves();
 	} else {
 		gGameLogicStep = GameLogicStep::ProcessTowners;
 		ProcessTowners();
@@ -3434,7 +3443,8 @@ std::expected<void, std::string> LoadGameLevelSetLevel(bool firstflag, lvl_entry
 	InitMultiView();
 	IncProgress();
 
-	if (firstflag || lvldir == ENTRY_LOAD || !myPlayer._pSLvlVisited[setlvlnum] || gbIsMultiplayer) {
+	// The Darkwood is fresh on every visit (only a save made inside it restores its state).
+	if (firstflag || lvldir == ENTRY_LOAD || !myPlayer._pSLvlVisited[setlvlnum] || gbIsMultiplayer || setlvlnum == SL_FOREST) {
 		InitItems();
 		SavePreLighting();
 	} else {

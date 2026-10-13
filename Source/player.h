@@ -365,6 +365,12 @@ public:
 	ItemSpecialEffectHf pDamAcFlags;
 	/** Seed of this hero's Tristram layout, 0 for the classic layout. Stored in previously unused save bytes. */
 	uint32_t townSeed;
+	/** Seed of the current Darkwood visit (layout and monster set). */
+	uint32_t forestSeed;
+	/** Monster tier of the current Darkwood visit (virtual dungeon level). */
+	uint8_t forestTier;
+	/** Highest Darkwood wave this hero has cleared. */
+	uint16_t forestBestWave;
 
 	[[nodiscard]] std::string_view name() const
 	{

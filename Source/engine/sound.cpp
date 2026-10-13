@@ -312,6 +312,8 @@ _music_id GetLevelMusic(dungeon_type dungeonType)
 	switch (dungeonType) {
 	case DTYPE_TOWN:
 		return TMUSIC_TOWN;
+	case DTYPE_FOREST:
+		return TMUSIC_CAVES;
 	case DTYPE_CATHEDRAL:
 		return TMUSIC_CATHEDRAL;
 	case DTYPE_CATACOMBS:

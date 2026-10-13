@@ -16,6 +16,7 @@
 #include "game_mode.hpp"
 #include "levels/dun_tile_data.hpp"
 #include "levels/gendung.h"
+#include "levels/forest.hpp"
 #include "levels/town.h"
 #include "levels/trigs.h"
 #include "missiles.h"
@@ -318,6 +319,10 @@ Point GetMapReturnPosition()
 		return Quests[Q_PWATER].position + Direction::SouthWest;
 	case SL_VILEBETRAYER:
 		return Quests[Q_BETRAYER].position + Direction::South;
+	case SL_FOREST:
+		if (const std::optional<Point> gate = TownForestGate(); gate)
+			return *gate + Direction::SouthEast; // one step back into town from the woods' edge
+		return GetTowner(TOWN_DRUNK)->position + Direction::SouthEast;
 	default:
 		return GetTowner(TOWN_DRUNK)->position + Direction::SouthEast;
 	}

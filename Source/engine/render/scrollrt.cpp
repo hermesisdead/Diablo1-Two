@@ -53,6 +53,7 @@
 #include "missiles.h"
 #include "nthread.h"
 #include "engine/render/dungeon_mood.hpp"
+#include "levels/forest.hpp"
 #include "engine/render/town_weather.hpp"
 #include "action_mode.hpp"
 #include "engine/render/orbit_view.hpp"
@@ -1096,7 +1097,7 @@ void DrawOOB(const Surface &out, const Lightmap &lightmap, Point tilePosition, P
 	for (int i = 0; i < rows + 5; i++) { // 5 extra rows needed to make sure everything gets rendered at the bottom half of the screen
 		for (int j = 0; j < columns; j++, tilePosition += Direction::East, targetBufferPosition.x += TILE_WIDTH) {
 			if (!InDungeonBounds(tilePosition)) {
-				if (leveltype == DTYPE_TOWN) {
+				if (leveltype == DTYPE_TOWN || leveltype == DTYPE_FOREST) {
 					world_draw_black_tile(out, targetBufferPosition.x, targetBufferPosition.y);
 				} else {
 					DrawDirtTile(out, lightmap, tilePosition, targetBufferPosition);
@@ -1326,6 +1327,7 @@ void DrawView(const Surface &out, Point startPosition)
 		DrawOrbitView(orbitOut);
 		if (leveltype != DTYPE_TOWN && !AutomapActive)
 			DrawDungeonMood(orbitOut);
+		DrawForestHud(out.subregionY(0, gnViewportHeight));
 		if (leveltype == DTYPE_TOWN && *GetOptions().Graphics.townWeather && !AutomapActive)
 			DrawTownWeather(out.subregionY(0, gnViewportHeight));
 		if (AutomapActive)
@@ -1337,6 +1339,7 @@ void DrawView(const Surface &out, Point startPosition)
 	DrawGame(out, startPosition, offset);
 	if (leveltype != DTYPE_TOWN && !AutomapActive)
 		DrawDungeonMood(out.subregionY(0, gnViewportHeight));
+	DrawForestHud(out.subregionY(0, gnViewportHeight));
 	if (leveltype == DTYPE_TOWN && *GetOptions().Graphics.townWeather && !AutomapActive)
 		DrawTownWeather(out.subregionY(0, gnViewportHeight));
 	if (AutomapActive) {

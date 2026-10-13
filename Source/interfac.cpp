@@ -78,6 +78,7 @@ Cutscenes GetCutSceneFromLevelType(dungeon_type type)
 {
 	switch (type) {
 	case DTYPE_TOWN:
+	case DTYPE_FOREST:
 		return CutTown;
 	case DTYPE_CATHEDRAL:
 		return CutLevel1;
@@ -119,6 +120,8 @@ Cutscenes PickCutscene(interface_mode uMsg)
 		return CutPortal;
 	case WM_DIABSETLVL:
 	case WM_DIABRTNLVL:
+		if (setlvlnum == SL_FOREST)
+			return CutTown;
 		if (setlvlnum == SL_BONECHAMB)
 			return CutLevel2;
 		if (setlvlnum == SL_VILEBETRAYER)

@@ -3,12 +3,54 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <numeric>
 
+#include "engine/lighting_defs.hpp"
+#include "engine/load_file.hpp"
 #include "levels/dun_tile_data.hpp"
 #include "utils/is_of.hpp"
 
 namespace devilution {
+
+namespace {
+
+/**
+ * The town palette is not laid out in 16-colour shading ramps like the dungeon palettes, so the
+ * index-shifting tables would turn it into noise. The forest instead darkens every colour in
+ * RGB, drifting towards a cool moonlit blue, and picks the nearest palette entry.
+ */
+void MakeForestLightTables()
+{
+	const std::unique_ptr<uint8_t[]> pal = LoadFileInMem<uint8_t>("levels\\towndata\\town.pal");
+	if (pal == nullptr)
+		return;
+	const auto channel = [&](int index, int c) { return static_cast<float>(pal[index * 3 + c]); };
+	for (int shade = 1; shade < LightsMax; shade++) {
+		auto &lightTable = LightTables[shade];
+		const float f = 1.0f - static_cast<float>(shade) / static_cast<float>(LightsMax);
+		const float cool = 1.0f - f; // the darker, the bluer
+		for (int index = 1; index < 256; index++) {
+			const float r = channel(index, 0) * f * (1.0f - 0.25f * cool);
+			const float g = channel(index, 1) * f * (1.0f - 0.12f * cool);
+			const float b = channel(index, 2) * f * (1.0f + 0.25f * cool) + 4.0f * cool * f;
+			int best = 0;
+			float bestD = 1e30f;
+			for (int candidate = 0; candidate < 255; candidate++) {
+				const float dr = channel(candidate, 0) - r, dg = channel(candidate, 1) - g, db = channel(candidate, 2) - b;
+				const float d = dr * dr * 0.30f + dg * dg * 0.59f + db * db * 0.11f;
+				if (d < bestD) {
+					bestD = d;
+					best = candidate;
+				}
+			}
+			lightTable[index] = static_cast<uint8_t>(best);
+		}
+		lightTable[0] = 0;
+	}
+}
+
+} // namespace
 
 std::array<std::array<uint8_t, LightTableSize>, NumLightingLevels> LightTables;
 uint8_t *FullyLitLightTable = nullptr;
@@ -46,6 +88,9 @@ void MakeLightTable()
 	LightTables[15] = {}; // Make last shade pitch black
 	FullyLitLightTable = LightTables[0].data();
 	FullyDarkLightTable = LightTables[LightsMax].data();
+
+	if (leveltype == DTYPE_FOREST)
+		MakeForestLightTables();
 
 	if (leveltype == DTYPE_HELL) {
 		// Blood wall lighting

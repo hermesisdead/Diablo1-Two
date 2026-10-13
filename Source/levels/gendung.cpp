@@ -20,6 +20,7 @@
 #include "levels/drlg_l2.h"
 #include "levels/drlg_l3.h"
 #include "levels/drlg_l4.h"
+#include "levels/forest.hpp"
 #include "levels/town.h"
 #include "lighting.h"
 #include "monster.h"
@@ -300,6 +301,8 @@ void InitGlobals()
 	memset(dObject, 0, sizeof(dObject));
 	memset(dSpecial, 0, sizeof(dSpecial));
 	uint8_t defaultLight = leveltype == DTYPE_TOWN ? 0 : 15;
+	if (leveltype == DTYPE_FOREST)
+		defaultLight = 9; // moonlight: the forest stays dimly visible beyond the hero's light
 #ifdef _DEBUG
 	if (DisableLighting)
 		defaultLight = 0;
@@ -364,6 +367,9 @@ void CreateDungeon(uint32_t rseed, lvl_entry entry)
 		break;
 	case DTYPE_HELL:
 		CreateL4Dungeon(rseed, entry);
+		break;
+	case DTYPE_FOREST:
+		CreateForest(rseed);
 		break;
 	default:
 		app_fatal("Invalid level type");

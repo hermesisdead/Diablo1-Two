@@ -70,7 +70,8 @@ namespace {
 std::unique_ptr<uint16_t[]> LoadMinData(size_t &tileCount)
 {
 	switch (leveltype) {
-	case DTYPE_TOWN: {
+	case DTYPE_TOWN:
+	case DTYPE_FOREST: {
 		auto min = LoadFileInMemWithStatus<uint16_t>("nlevels\\towndata\\town.min", &tileCount);
 		if (!min.has_value()) {
 			return LoadFileInMem<uint16_t>("levels\\towndata\\town.min", &tileCount);
@@ -101,8 +102,17 @@ std::expected<void, std::string> LoadLevelSOLData()
 {
 	switch (leveltype) {
 	case DTYPE_TOWN:
+	case DTYPE_FOREST:
 		if (!LoadIntegralFileInMemWithStatus("nlevels\\towndata\\town.sol", SOLData).has_value()) {
 			RETURN_IF_ERROR(LoadIntegralFileInMemWithStatus("levels\\towndata\\town.sol", SOLData));
+		}
+		if (leveltype == DTYPE_FOREST) {
+			// Town art never had to stop missiles. In the forest, anything solid (trunks, thickets)
+			// blocks them, which also keeps them inside the map's solid border.
+			for (TileProperties &properties : SOLData) {
+				if (HasAnyOf(properties, TileProperties::Solid))
+					properties |= TileProperties::BlockMissile;
+			}
 		}
 		break;
 	case DTYPE_CATHEDRAL:
@@ -169,7 +179,7 @@ void SetDungeonMicros(std::unique_ptr<std::byte[]> &dungeonCels, uint_fast8_t &m
 	microTileLen = 10;
 	size_t blocks = 10;
 
-	if (leveltype == DTYPE_TOWN) {
+	if (leveltype == DTYPE_TOWN || leveltype == DTYPE_FOREST) {
 		microTileLen = 16;
 		blocks = 16;
 	} else if (leveltype == DTYPE_HELL) {

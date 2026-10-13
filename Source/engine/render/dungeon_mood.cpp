@@ -200,6 +200,9 @@ DungeonMood RollMood(uint32_t roll)
 	case DTYPE_HELL:
 		table = { { DungeonMood::Clear, 20 }, { DungeonMood::Embers, 50 }, { DungeonMood::Mist, 30 } };
 		break;
+	case DTYPE_FOREST:
+		table = { { DungeonMood::Clear, 25 }, { DungeonMood::Mist, 50 }, { DungeonMood::Dust, 25 } };
+		break;
 	default:
 		return DungeonMood::Clear;
 	}
@@ -302,10 +305,12 @@ void EnsureMood()
 		moodKey = -1;
 		return;
 	}
+	// The forest re-rolls its mood with every visit; dungeon levels keep theirs for the game.
+	const uint32_t seed = leveltype == DTYPE_FOREST && MyPlayer != nullptr ? MyPlayer->forestSeed : DungeonSeeds[currlevel];
 	const int64_t key = (setlevel ? (int64_t { 1 } << 20) + static_cast<int64_t>(setlvlnum) : static_cast<int64_t>(currlevel))
-	    + (static_cast<int64_t>(leveltype) << 24) + (static_cast<int64_t>(DungeonSeeds[currlevel]) << 32);
+	    + (static_cast<int64_t>(leveltype) << 24) + (static_cast<int64_t>(seed) << 32);
 	if (key != moodKey)
-		InitMood(key, DungeonSeeds[currlevel]);
+		InitMood(key, seed);
 }
 
 // ---------------------------------------------------------------------------------------------

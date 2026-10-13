@@ -13,10 +13,12 @@
 #include "levels/drlg_l2.h"
 #include "levels/drlg_l3.h"
 #include "levels/drlg_l4.h"
+#include "levels/forest.hpp"
 #include "levels/gendung.h"
 #include "levels/trigs.h"
 #include "msg.h"
 #include "objects.h"
+#include "player.h"
 #include "quests.h"
 #include "tables/objdat.h"
 #include "utils/language.h"
@@ -35,6 +37,7 @@ const char *const QuestLevelNames[] = {
 	N_("Church Arena"),
 	N_("Hell Arena"),
 	N_("Circle of Life Arena"),
+	N_("The Darkwood"),
 };
 
 namespace {
@@ -91,6 +94,7 @@ std::expected<void, std::string> LoadCustomMap(const char *path, Point viewPosit
 		RETURN_IF_ERROR(LoadL4Dungeon(path, viewPosition));
 		break;
 	case DTYPE_TOWN:
+	case DTYPE_FOREST:
 	case DTYPE_NONE:
 		break;
 	}
@@ -155,6 +159,12 @@ std::expected<void, std::string> LoadSetMap()
 		LoadPaletteAndInitBlending("levels\\l1data\\l1_2.pal");
 		AddVileObjs();
 		InitNoTriggers();
+		break;
+	case SL_FOREST:
+		CreateDungeon(MyPlayer->forestSeed, ENTRY_MAIN);
+		LoadRndLvlPal(DTYPE_FOREST, 0);
+		InitForestTriggers();
+		ResetForestWaves();
 		break;
 	case SL_ARENA_CHURCH:
 		RETURN_IF_ERROR(LoadArenaMap("arena\\church.dun", { 29, 22 }, { 28, 20 }));

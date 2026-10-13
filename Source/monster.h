@@ -38,6 +38,8 @@ struct Player;
 
 constexpr size_t MaxMonsters = 200;
 constexpr size_t MaxLvlMTypes = 24;
+/** Total sprite budget used by the level's monster types (see AddMonsterType). */
+extern int monstimgtot;
 
 enum monster_flag : uint16_t {
 	// clang-format off

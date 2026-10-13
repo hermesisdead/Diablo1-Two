@@ -55,6 +55,7 @@
 #include "levels/gendung.h"
 #include "levels/gendung_defs.hpp"
 #include "levels/tile_properties.hpp"
+#include "levels/forest.hpp"
 #include "levels/town.h"
 #include "lighting.h"
 #include "minitext.h"
@@ -408,6 +409,9 @@ int ItemsGetCurrlevel()
 			return Quests[Q_PWATER]._qlevel;
 		case SL_VILEBETRAYER:
 			return Quests[Q_BETRAYER]._qlevel;
+		case SL_FOREST:
+			// Ground loot and wave rewards follow the hero's forest tier.
+			return std::max<int>(1, MyPlayer != nullptr ? MyPlayer->forestTier : 1);
 		default:
 			return 1;
 		}
