@@ -596,6 +596,10 @@ struct GameplayOptions : OptionCategoryBase {
 	OptionEntryBoolean actionHud;
 	/** @brief Elden Ring style 3D third-person camera in action mode. */
 	OptionEntryBoolean actionCamera3D;
+	/** @brief Diablo II style rare (yellow) items with three to five affixes and random names. */
+	OptionEntryBoolean rareItems;
+	/** @brief Drops are generated at no less than (roughly) the hero's level. */
+	OptionEntryBoolean levelScaledLoot;
 	/** @brief Use the extended procedural room generator for Cathedral levels (single player only). */
 	OptionEntryBoolean proceduralDungeons;
 	/** @brief Do not let the mouse leave the application window. */

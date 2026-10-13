@@ -945,6 +945,14 @@ void RunGameLoop(interface_mode uMsg)
 				LogVerbose("devcap frame {}", devCaptureFrames);
 			if (devCaptureFrames == 20 && std::getenv("DEVILUTIONX_DEV_FOREST") != nullptr && leveltype == DTYPE_TOWN)
 				EnterForest();
+			if (const char *rares = std::getenv("DEVILUTIONX_DEV_RARETEST"); rares != nullptr && devCaptureFrames == 30)
+				DevRareItemTest(std::atoi(rares));
+			if (const char *hover = std::getenv("DEVILUTIONX_DEV_HOVERINV"); hover != nullptr && devCaptureFrames > 30) {
+				// Point the mouse at a backpack slot so the item details show.
+				invflag = true;
+				const int slot = SLOTXY_INV_FIRST + std::atoi(hover);
+				MousePosition = GetPanelPosition(UiPanels::Inventory, InvRect[slot].Center());
+			}
 			if (const char *back = std::getenv("DEVILUTIONX_DEV_FORESTRETURN"); back != nullptr && devCaptureFrames == std::atoi(back) && leveltype == DTYPE_FOREST)
 				StartNewLvl(*MyPlayer, WM_DIABRTNLVL, GetMapReturnLevel());
 			if (const char *burst = std::getenv("DEVILUTIONX_DEV_CAPTURE_FRAMES"); burst != nullptr && devCaptureFrames > devCaptureAt) {

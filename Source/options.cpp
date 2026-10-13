@@ -851,6 +851,8 @@ GameplayOptions::GameplayOptions()
     , actionMode("Action Mode", OptionEntryFlags::None, N_("Action Mode"), N_("Close third-person camera with direct movement (WASD / left stick), lock-on, dodge and stamina. Toggle with F4."), false)
     , actionHud("Action HUD", OptionEntryFlags::None, N_("Action HUD"), N_("Replace the main panel with slim health, mana and stamina bars while in action mode."), true)
     , actionCamera3D("Action Camera 3D", OptionEntryFlags::None, N_("Third-Person Camera"), N_("Elden Ring style orbiting camera in action mode: the level is rebuilt in 3D from the game's own tile art. Off keeps the close isometric camera."), true)
+    , rareItems("Rare Items", OptionEntryFlags::CantChangeInMultiPlayer, N_("Rare Items"), N_("Diablo II style rare items: yellow, with three to five magic properties and a randomly generated name."), true)
+    , levelScaledLoot("Level-Scaled Loot", OptionEntryFlags::CantChangeInMultiPlayer, N_("Level-Scaled Loot"), N_("Item drops are generated at no less than about your character level, so loot stays useful wherever you hunt."), true)
     , proceduralDungeons("Procedural Dungeons", OptionEntryFlags::CantChangeInGame | OptionEntryFlags::CantChangeInMultiPlayer, N_("Procedural Dungeons"), N_("Cathedral levels use an extended room-and-corridor generator for more varied layouts. Single player only."), true)
     , grabInput("Grab Input", OptionEntryFlags::None, N_("Grab Input"), N_("When enabled mouse is locked to the game window."), false)
     , pauseOnFocusLoss("Pause Game When Window Loses Focus", OptionEntryFlags::None, N_("Pause Game When Window Loses Focus"), N_("When enabled, the game will pause when focus is lost."), true)
@@ -916,6 +918,8 @@ std::vector<OptionEntryBase *> GameplayOptions::GetEntries()
 		&actionMode,
 		&actionHud,
 		&actionCamera3D,
+		&rareItems,
+		&levelScaledLoot,
 		&proceduralDungeons,
 		&quickCast,
 		&testBard,

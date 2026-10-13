@@ -355,7 +355,13 @@ void PrintStoreItem(const Item &item, int l, UiFlags flags, bool cursIndent = fa
 {
 	std::string productLine;
 
-	if (item._iIdentified) {
+	if (item._iIdentified && item._iMagical == ITEM_QUALITY_RARE) {
+		for (const item_effect_type power : GetRareItemPowers(item)) {
+			if (!productLine.empty())
+				productLine.append(_(",  "));
+			productLine.append(PrintItemPower(power, item));
+		}
+	} else if (item._iIdentified) {
 		if (item._iMagical != ITEM_QUALITY_UNIQUE) {
 			if (item._iPrePower != -1) {
 				productLine.append(PrintItemPower(item._iPrePower, item));

@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 #include "DiabloUI/ui_flags.hpp"
 #include "cursor.h"
@@ -43,6 +44,8 @@ enum item_quality : uint8_t {
 	ITEM_QUALITY_NORMAL,
 	ITEM_QUALITY_MAGIC,
 	ITEM_QUALITY_UNIQUE,
+	/** Diablo II style rare: three to five affixes and a generated name (see CF_RARE). */
+	ITEM_QUALITY_RARE,
 };
 
 enum _unique_items : int32_t {
@@ -178,6 +181,8 @@ enum icreateinfo_flag2 {
 	// clang-format off
 	CF_HELLFIRE = 1 << 0,
 	CF_UIDOFFSET = ((1 << 4) - 1) << 1,
+	/** The item was rolled as a rare; regeneration from seed reproduces its affixes and name. */
+	CF_RARE = 1 << 5,
 	// clang-format on
 };
 
@@ -437,6 +442,8 @@ struct Item {
 			return UiFlags::ColorBlue;
 		case ITEM_QUALITY_UNIQUE:
 			return UiFlags::ColorWhitegold;
+		case ITEM_QUALITY_RARE:
+			return UiFlags::ColorYellow;
 		default:
 			return UiFlags::ColorWhite;
 		}
@@ -526,6 +533,14 @@ void SetupItem(Item &item);
 Item *SpawnUnique(_unique_items uid, Point position, std::optional<int> level = std::nullopt, bool sendmsg = true, bool exactPosition = false);
 void GetSuperItemSpace(Point position, int8_t inum);
 _item_indexes RndItemForMonsterLevel(int8_t monsterLevel);
+/** @brief Item level for a drop: the source's level, raised towards the hero's level when level-scaled loot is on. */
+[[nodiscard]] int ScaledDropLevel(int sourceLevel);
+/** @brief The affix powers of a rare item, in the order they were rolled. */
+[[nodiscard]] std::vector<item_effect_type> GetRareItemPowers(const Item &item);
+#ifdef _DEBUG
+/** @brief Test harness: rolls many rares, checks they regenerate identically, drops a few to look at. */
+void DevRareItemTest(int count);
+#endif
 void SetupAllItems(const Player &player, Item &item, _item_indexes idx, uint32_t iseed, int lvl, int uper, bool onlygood, bool pregen, int uidOffset = 0, bool forceNotUnique = false);
 void TryRandomUniqueItem(Item &item, _item_indexes idx, int8_t mLevel, int uper, bool onlygood, bool pregen);
 void SpawnItem(Monster &monster, Point position, bool sendmsg, bool spawn = false);

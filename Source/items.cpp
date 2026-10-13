@@ -1238,6 +1238,254 @@ void GetItemPower(const Player &player, Item &item, int minlvl, int maxlvl, Affi
 		CalcItemValue(item);
 }
 
+// ---------------------------------------------------------------------------------------------
+// Rare items (Diablo II style)
+
+/** When set, GetRareItem records the powers it rolls (used to list a rare's properties). */
+std::vector<item_effect_type> *RarePowerCapture = nullptr;
+
+/** Stats each power writes to; two powers may only share an item if their stats don't overlap. */
+uint32_t RarePowerStats(item_effect_type type)
+{
+	enum : uint32_t {
+		HitDam = 1 << 0,
+		Ac = 1 << 1,
+		Fr = 1 << 2,
+		Lr = 1 << 3,
+		Mr = 1 << 4,
+		Str = 1 << 5,
+		Mag = 1 << 6,
+		Dex = 1 << 7,
+		Vit = 1 << 8,
+		GetHit = 1 << 9,
+		Life = 1 << 10,
+		Mana = 1 << 11,
+		Dur = 1 << 12,
+		Light = 1 << 13,
+		Spells = 1 << 14,
+		Other = 1u << 31,
+	};
+	switch (type) {
+	case IPL_TOHIT:
+	case IPL_TOHIT_CURSE:
+	case IPL_DAMP:
+	case IPL_DAMP_CURSE:
+	case IPL_TOHIT_DAMP:
+	case IPL_TOHIT_DAMP_CURSE:
+		return HitDam;
+	case IPL_ACP:
+	case IPL_ACP_CURSE:
+		return Ac;
+	case IPL_FIRERES:
+		return Fr;
+	case IPL_LIGHTRES:
+		return Lr;
+	case IPL_MAGICRES:
+		return Mr;
+	case IPL_ALLRES:
+		return Fr | Lr | Mr;
+	case IPL_STR:
+	case IPL_STR_CURSE:
+		return Str;
+	case IPL_MAG:
+	case IPL_MAG_CURSE:
+		return Mag;
+	case IPL_DEX:
+	case IPL_DEX_CURSE:
+		return Dex;
+	case IPL_VIT:
+	case IPL_VIT_CURSE:
+		return Vit;
+	case IPL_ATTRIBS:
+	case IPL_ATTRIBS_CURSE:
+		return Str | Mag | Dex | Vit;
+	case IPL_GETHIT:
+	case IPL_GETHIT_CURSE:
+		return GetHit;
+	case IPL_LIFE:
+	case IPL_LIFE_CURSE:
+		return Life;
+	case IPL_MANA:
+	case IPL_MANA_CURSE:
+		return Mana;
+	case IPL_DUR:
+	case IPL_DUR_CURSE:
+	case IPL_INDESTRUCTIBLE:
+		return Dur;
+	case IPL_LIGHT:
+	case IPL_LIGHT_CURSE:
+		return Light;
+	case IPL_SPLLVLADD:
+		return Spells;
+	default:
+		// Everything else is its own stat; give each type a distinct bit in the upper range.
+		return Other | (1u << (15 + (static_cast<unsigned>(type) % 16)));
+	}
+}
+
+constexpr std::array<std::string_view, 40> RareNameFirst {
+	"Beast", "Eagle", "Raven", "Viper", "Ghoul", "Bone", "Grim", "Dread", "Doom", "Bitter",
+	"Wraith", "Demon", "Death", "Blood", "Storm", "Shadow", "Pain", "Rune", "Gale", "Havoc",
+	"Corpse", "Skull", "Soul", "Plague", "Hailstone", "Wolf", "Bramble", "Ash", "Vengeance", "Rift",
+	"Gloom", "Grave", "Iron", "Mind", "Fiend", "Dire", "Cruel", "Entropy", "Empyrian", "Spirit",
+};
+
+std::string_view RareNameSecond(const Item &item, int roll)
+{
+	static constexpr std::array<std::string_view, 8> Blade { "Bite", "Scalpel", "Gutter", "Thirst", "Edge", "Fang", "Song", "Razor" };
+	static constexpr std::array<std::string_view, 8> Blunt { "Bludgeon", "Crack", "Knell", "Mallet", "Smasher", "Break", "Ram", "Mauler" };
+	static constexpr std::array<std::string_view, 8> Bow { "Branch", "Flight", "Nock", "Quill", "Fletch", "Horn", "Stinger", "Strike" };
+	static constexpr std::array<std::string_view, 8> Staff { "Spire", "Cane", "Pillar", "Weaver", "Song", "Call", "Chant", "Branch" };
+	static constexpr std::array<std::string_view, 8> Shield { "Ward", "Wing", "Guard", "Badge", "Emblem", "Tower", "Mark", "Bulwark" };
+	static constexpr std::array<std::string_view, 8> Helm { "Visage", "Crest", "Circlet", "Veil", "Hood", "Mask", "Brow", "Cowl" };
+	static constexpr std::array<std::string_view, 8> Armor { "Shell", "Mantle", "Coat", "Hide", "Carapace", "Pelt", "Suit", "Wrap" };
+	static constexpr std::array<std::string_view, 8> Ring { "Coil", "Band", "Loop", "Spiral", "Hold", "Grip", "Knuckle", "Turn" };
+	static constexpr std::array<std::string_view, 8> Amulet { "Talisman", "Beads", "Eye", "Heart", "Collar", "Torc", "Scarab", "Charm" };
+	const std::array<std::string_view, 8> *list = &Armor;
+	switch (item._itype) {
+	case ItemType::Sword:
+	case ItemType::Axe:
+		list = &Blade;
+		break;
+	case ItemType::Mace:
+		list = &Blunt;
+		break;
+	case ItemType::Bow:
+		list = &Bow;
+		break;
+	case ItemType::Staff:
+		list = &Staff;
+		break;
+	case ItemType::Shield:
+		list = &Shield;
+		break;
+	case ItemType::Helm:
+		list = &Helm;
+		break;
+	case ItemType::Ring:
+		list = &Ring;
+		break;
+	case ItemType::Amulet:
+		list = &Amulet;
+		break;
+	default:
+		break;
+	}
+	return (*list)[roll % list->size()];
+}
+
+std::optional<AffixItemType> RareAffixType(const Item &item)
+{
+	switch (item._itype) {
+	case ItemType::Sword:
+	case ItemType::Axe:
+	case ItemType::Mace:
+		return AffixItemType::Weapon;
+	case ItemType::Bow:
+		return AffixItemType::Bow;
+	case ItemType::Shield:
+		return AffixItemType::Shield;
+	case ItemType::LightArmor:
+	case ItemType::Helm:
+	case ItemType::MediumArmor:
+	case ItemType::HeavyArmor:
+		return AffixItemType::Armor;
+	case ItemType::Staff:
+		return AffixItemType::Staff;
+	case ItemType::Ring:
+	case ItemType::Amulet:
+		return AffixItemType::Misc;
+	default:
+		return std::nullopt;
+	}
+}
+
+/**
+ * Rolls a rare: three to five good affixes (at most three prefixes and three suffixes, no two
+ * touching the same stat) and a two-word name. Deterministic from the item seed, like every
+ * other item roll, so it regenerates identically from seed and creation flags.
+ */
+void GetRareItem(const Player &player, Item &item, int minlvl, int maxlvl, AffixItemType flgs)
+{
+	const int total = 3 + GenerateRnd(3);
+	int prefixes = 1 + GenerateRnd(std::min(3, total - 1));
+	int suffixes = std::min(3, total - prefixes);
+	prefixes = std::min(3, total - suffixes);
+
+	uint32_t usedStats = 0;
+	int addValue = 0;
+	int multValue = 0;
+	int rolled = 0;
+	const auto roll = [&](const std::vector<PLStruct> &list, bool isPrefix) {
+		for (int attempt = 0; attempt < 12; attempt++) {
+			const std::optional<const PLStruct *> affix = SelectAffix(list, flgs, minlvl, maxlvl, true, GOE_ANY, true);
+			if (!affix.has_value())
+				return;
+			const PLStruct &chosen = **affix;
+			const uint32_t stats = RarePowerStats(chosen.power.type);
+			if ((stats & usedStats) != 0)
+				continue;
+			usedStats |= stats;
+			ItemPower power = chosen.power;
+			const int value = SaveItemPower(player, item, power);
+			addValue += PLVal(value, power.param1, power.param2, chosen.minVal, chosen.maxVal);
+			multValue += chosen.multVal;
+			if (isPrefix && item._iPrePower == IPL_INVALID)
+				item._iPrePower = chosen.power.type;
+			if (!isPrefix && item._iSufPower == IPL_INVALID)
+				item._iSufPower = chosen.power.type;
+			if (RarePowerCapture != nullptr)
+				RarePowerCapture->push_back(chosen.power.type);
+			rolled++;
+			return;
+		}
+	};
+	for (int i = 0; i < prefixes; i++)
+		roll(ItemPrefixes, true);
+	for (int i = 0; i < suffixes; i++)
+		roll(ItemSuffixes, false);
+	// Conflicting picks can leave a rare short; top it up to at least three properties.
+	for (int extra = 0; extra < 6 && rolled < 3; extra++)
+		roll(FlipCoin() ? ItemPrefixes : ItemSuffixes, false);
+
+	if (rolled == 0) {
+		// Nothing fit this base at this level: fall back to an ordinary magic roll.
+		GetItemPower(player, item, minlvl, maxlvl, flgs, true);
+		return;
+	}
+
+	item._iMagical = ITEM_QUALITY_RARE;
+	const int first = GenerateRnd(static_cast<int>(RareNameFirst.size()));
+	const int second = GenerateRnd(8);
+	CopyUtf8(item._iIName, StrCat(RareNameFirst[first], " ", RareNameSecond(item, second)), ItemNameLength);
+	// Rares are worth more than the sum of their parts.
+	item._iVAdd1 = addValue + addValue / 4;
+	item._iVMult1 = multValue;
+	item._iVAdd2 = 0;
+	item._iVMult2 = 0;
+	CalcItemValue(item);
+}
+
+/** True when an item that was flagged CF_RARE can actually be rolled as a rare. */
+bool CanBeRare(const Item &item)
+{
+	return (item.dwBuff & CF_RARE) != 0 && RareAffixType(item).has_value();
+}
+
+/** Decides at drop time (outside the item's own seed) whether a fresh item is rolled as a rare. */
+void RollRareFlag(Item &item, int itemLevel, bool fromUnique)
+{
+	item.dwBuff &= ~CF_RARE;
+	if (!*GetOptions().Gameplay.rareItems || itemLevel < 3)
+		return;
+	// About 4% at low levels rising to 10%; bosses double it.
+	int chance = 40 + 2 * std::min(itemLevel, 30);
+	if (fromUnique)
+		chance *= 2;
+	if (GenerateRnd(1000) < chance)
+		item.dwBuff |= CF_RARE;
+}
+
 void GetStaffSpell(const Player &player, Item &item, int lvl, bool onlygood)
 {
 	if (!gbIsHellfire && FlipCoin(4)) {
@@ -1505,9 +1753,11 @@ void SetupBaseItem(Point position, _item_indexes idx, bool onlygood, bool sendms
 	auto &item = Items[ii];
 	GetSuperItemSpace(position, ii);
 	const int curlv = ItemsGetCurrlevel();
+	const int itemLevel = ScaledDropLevel(2 * curlv);
 
-	SetupAllItems(*MyPlayer, item, idx, AdvanceRndSeed(), 2 * curlv, 1, onlygood, delta);
-	TryRandomUniqueItem(item, idx, 2 * curlv, 1, onlygood, delta);
+	RollRareFlag(item, itemLevel, false);
+	SetupAllItems(*MyPlayer, item, idx, AdvanceRndSeed(), itemLevel, 1, onlygood, delta);
+	TryRandomUniqueItem(item, idx, itemLevel, 1, onlygood, delta);
 	SetupItem(item);
 
 	if (sendmsg)
@@ -2412,7 +2662,7 @@ uint8_t GetOutlineColor(const Item &item, bool checkReq)
 		return ICOL_YELLOW;
 	if (item._iMagical == ITEM_QUALITY_MAGIC)
 		return ICOL_BLUE;
-	if (item._iMagical == ITEM_QUALITY_UNIQUE)
+	if (item._iMagical == ITEM_QUALITY_UNIQUE || item._iMagical == ITEM_QUALITY_RARE)
 		return ICOL_YELLOW;
 
 	return ICOL_WHITE;
@@ -3257,6 +3507,138 @@ void GetSuperItemSpace(Point position, int8_t inum)
 	}
 }
 
+int ScaledDropLevel(int sourceLevel)
+{
+	if (!*GetOptions().Gameplay.levelScaledLoot || MyPlayer == nullptr)
+		return sourceLevel;
+	// Loot keeps up with the hero: never generated much below their level.
+	const int heroLevel = MyPlayer->getCharacterLevel() - 2;
+	return std::clamp(std::max(sourceLevel, heroLevel), 1, 60);
+}
+
+std::vector<item_effect_type> GetRareItemPowers(const Item &item)
+{
+	if (item._iMagical != ITEM_QUALITY_RARE || MyPlayer == nullptr)
+		return {};
+	struct CacheEntry {
+		uint32_t seed;
+		uint16_t createInfo;
+		_item_indexes idx;
+		uint32_t buff;
+		std::vector<item_effect_type> powers;
+	};
+	static std::vector<CacheEntry> cache;
+	for (const CacheEntry &entry : cache) {
+		if (entry.seed == item._iSeed && entry.createInfo == item._iCreateInfo && entry.idx == item.IDidx && entry.buff == item.dwBuff)
+			return entry.powers;
+	}
+	// Replay the item's own generation (it is deterministic from seed and flags) and record the
+	// powers it rolls. The engine RNG is restored so this never disturbs gameplay.
+	const uint32_t rngState = GetLCGEngineState();
+	std::vector<item_effect_type> powers;
+	Item scratch;
+	RarePowerCapture = &powers;
+	RecreateItem(*MyPlayer, scratch, item.IDidx, item._iCreateInfo, item._iSeed, item._ivalue, item.dwBuff);
+	RarePowerCapture = nullptr;
+	SetRndSeed(rngState);
+	if (cache.size() > 64)
+		cache.erase(cache.begin());
+	cache.push_back({ item._iSeed, item._iCreateInfo, item.IDidx, item.dwBuff, powers });
+	return powers;
+}
+
+#ifdef _DEBUG
+void DevRareItemTest(int count)
+{
+	std::vector<_item_indexes> bases;
+	for (size_t i = 0; i < AllItemsList.size(); i++) {
+		const ItemData &data = AllItemsList[i];
+		if (data.dropRate == 0 || data.iMiscId == IMISC_UNIQUE)
+			continue;
+		switch (data.itype) {
+		case ItemType::Sword:
+		case ItemType::Axe:
+		case ItemType::Mace:
+		case ItemType::Bow:
+		case ItemType::Shield:
+		case ItemType::LightArmor:
+		case ItemType::Helm:
+		case ItemType::MediumArmor:
+		case ItemType::HeavyArmor:
+		case ItemType::Staff:
+		case ItemType::Ring:
+		case ItemType::Amulet:
+			bases.push_back(static_cast<_item_indexes>(i));
+			break;
+		default:
+			break;
+		}
+	}
+	int rares = 0, mismatches = 0, packMismatches = 0;
+	std::array<int, 8> affixCounts {};
+	for (int n = 0; n < count && !bases.empty(); n++) {
+		Item item {};
+		item.dwBuff = CF_RARE;
+		const _item_indexes idx = bases[n % bases.size()];
+		const int level = 4 + (n * 7) % 56;
+		SetupAllItems(*MyPlayer, item, idx, 0x1234567u + static_cast<uint32_t>(n) * 2654435761u, level, 1, false, false, 0, true);
+		SetupItem(item);
+		if (item._iMagical != ITEM_QUALITY_RARE)
+			continue;
+		rares++;
+		const size_t powers = GetRareItemPowers(item).size();
+		affixCounts[std::min<size_t>(powers, 7)]++;
+		Item again {};
+		RecreateItem(*MyPlayer, again, item.IDidx, item._iCreateInfo, item._iSeed, item._ivalue, item.dwBuff);
+		const bool same = std::string_view(again._iIName) == std::string_view(item._iIName) && again._iMagical == item._iMagical
+		    && again._iPLDam == item._iPLDam && again._iPLToHit == item._iPLToHit && again._iPLAC == item._iPLAC
+		    && again._iPLStr == item._iPLStr && again._iPLMag == item._iPLMag && again._iPLDex == item._iPLDex && again._iPLVit == item._iPLVit
+		    && again._iPLHP == item._iPLHP && again._iPLMana == item._iPLMana && again._iPLFR == item._iPLFR && again._iPLLR == item._iPLLR
+		    && again._iPLMR == item._iPLMR && again._iIvalue == item._iIvalue && again._iFlags == item._iFlags;
+		if (!same)
+			mismatches++;
+		ItemPack pack;
+		PackItem(pack, item, gbIsHellfire);
+		Item unpacked {};
+		UnPackItem(pack, *MyPlayer, unpacked, gbIsHellfire);
+		if (std::string_view(unpacked._iIName) != std::string_view(item._iIName) || unpacked._iMagical != item._iMagical || unpacked._iPLDam != item._iPLDam)
+			packMismatches++;
+		if (n < 40) {
+			std::string line = StrCat(item._iIName, " [", item._iName, "] lvl ", item._iCreateInfo & CF_LEVEL, " value ", item._iIvalue, ":");
+			for (const item_effect_type power : GetRareItemPowers(item))
+				StrAppend(line, " | ", PrintItemPower(power, item).str());
+			LogInfo("RARE {}", line);
+		}
+	}
+	LogInfo("RARETEST rolled {} rares of {} tries; regenerate mismatches {}; hero-pack mismatches {}; affix counts 0:{} 1:{} 2:{} 3:{} 4:{} 5:{} 6:{}",
+	    rares, count, mismatches, packMismatches, affixCounts[0], affixCounts[1], affixCounts[2], affixCounts[3], affixCounts[4], affixCounts[5], affixCounts[6]);
+
+	// A few identified rares in the backpack, to inspect in the inventory.
+	for (int n = 0; n < 4; n++) {
+		Item item {};
+		item.dwBuff = CF_RARE;
+		SetupAllItems(*MyPlayer, item, bases[(n * 23 + 11) % bases.size()], 0xC0FFEEu + static_cast<uint32_t>(n) * 104729u, 24 + 6 * n, 1, false, false, 0, true);
+		SetupItem(item);
+		item._iIdentified = true;
+		AutoPlaceItemInInventory(*MyPlayer, item);
+	}
+	CalcPlrInv(*MyPlayer, true);
+
+	// Drop a handful of identified rares around the hero to look at.
+	for (int n = 0; n < 6; n++) {
+		if (ActiveItemCount >= MAXITEMS)
+			break;
+		const int ii = AllocateItem();
+		Item &item = Items[ii];
+		item.dwBuff = CF_RARE;
+		SetupAllItems(*MyPlayer, item, bases[(n * 17 + 5) % bases.size()], 0xBEEF00u + static_cast<uint32_t>(n) * 7919u, 30, 1, false, false, 0, true);
+		SetupItem(item);
+		item._iIdentified = true;
+		GetSuperItemSpace(MyPlayer->position.tile + Displacement { 1, 1 }, ii);
+	}
+}
+#endif
+
 _item_indexes RndItemForMonsterLevel(int8_t monsterLevel)
 {
 	if (GenerateRnd(100) > 40)
@@ -3288,7 +3670,10 @@ void SetupAllItems(const Player &player, Item &item, _item_indexes idx, uint32_t
 		item._iCreateInfo |= CF_UPER1;
 
 	if (item._iMiscId != IMISC_UNIQUE) {
-		const int iblvl = GetItemBLevel(lvl, item._iMiscId, onlygood, uper == 15);
+		int iblvl = GetItemBLevel(lvl, item._iMiscId, onlygood, uper == 15);
+		// A rare roll always yields a magic-capable item, independent of the plain magic chance.
+		if (iblvl == -1 && CanBeRare(item))
+			iblvl = lvl;
 		if (iblvl != -1) {
 			_unique_items uid = UITEM_INVALID;
 			if (!forceNotUnique) {
@@ -3297,7 +3682,10 @@ void SetupAllItems(const Player &player, Item &item, _item_indexes idx, uint32_t
 				DiscardRandomValues(1);
 			}
 			if (uid == UITEM_INVALID) {
-				GetItemBonus(player, item, iblvl / 2, iblvl, onlygood, true);
+				if (CanBeRare(item))
+					GetRareItem(player, item, iblvl / 2, iblvl, *RareAffixType(item));
+				else
+					GetItemBonus(player, item, iblvl / 2, iblvl, onlygood, true);
 			} else {
 				GetUniqueItem(player, item, uid);
 			}
@@ -3459,7 +3847,7 @@ void SpawnItem(Monster &monster, Point position, bool sendmsg, bool spawn /*= fa
 		if ((monster.data().treasure & T_NODROP) != 0)
 			return;
 		onlygood = false;
-		idx = RndItemForMonsterLevel(static_cast<int8_t>(monster.level(sgGameInitInfo.nDifficulty)));
+		idx = RndItemForMonsterLevel(static_cast<int8_t>(std::min(127, ScaledDropLevel(monster.level(sgGameInitInfo.nDifficulty)))));
 	}
 
 	if (idx == IDI_NONE)
@@ -3473,7 +3861,8 @@ void SpawnItem(Monster &monster, Point position, bool sendmsg, bool spawn /*= fa
 	GetSuperItemSpace(position, ii);
 	const int uper = monster.isUnique() ? 15 : 1;
 
-	const int8_t mLevel = monster.data().level;
+	const int8_t mLevel = static_cast<int8_t>(std::min(63, ScaledDropLevel(monster.data().level)));
+	RollRareFlag(item, mLevel, monster.isUnique());
 	SetupAllItems(*MyPlayer, item, idx, AdvanceRndSeed(), mLevel, uper, onlygood, false);
 	TryRandomUniqueItem(item, idx, mLevel, uper, onlygood, false);
 	SetupItem(item);
@@ -4103,10 +4492,27 @@ void DrawUniqueInfo(const Surface &out)
 	const Point position = DrawUniqueInfoWindow(out);
 
 	Rectangle rect { position + Displacement { 32, 56 }, { 257, 0 } };
+	const Rectangle dividerLineRect { position + Displacement { 26, 25 }, { 267, 3 } };
+
+	if (curruitem._iMagical == ITEM_QUALITY_RARE) {
+		// Rares: generated name in yellow, base type underneath, then every rolled property.
+		DrawString(out, curruitem._iIName, rect, { .flags = UiFlags::AlignCenter | UiFlags::ColorYellow });
+		rect.position.y += 12;
+		DrawString(out, _(curruitem._iName), { rect.position + Displacement { 0, 12 }, rect.size }, { .flags = UiFlags::AlignCenter | UiFlags::ColorYellow });
+		out.BlitFrom(out, MakeSdlRect(dividerLineRect), dividerLineRect.position + Displacement { 0, (5 * 12) + 13 });
+		const std::vector<item_effect_type> powers = GetRareItemPowers(curruitem);
+		rect.position.y += (10 - static_cast<int>(powers.size())) * 12 - 12;
+		const TextRenderOptions rareOptions { .flags = UiFlags::ColorBlue | UiFlags::AlignCenter };
+		for (const item_effect_type power : powers) {
+			rect.position.y += 2 * 12;
+			DrawString(out, WordWrapString(PrintItemPower(power, curruitem), rect.size.width), rect, rareOptions);
+		}
+		return;
+	}
+
 	const UniqueItem &uitem = UniqueItems[curruitem._iUid];
 	DrawString(out, _(uitem.UIName), rect, { .flags = UiFlags::AlignCenter });
 
-	const Rectangle dividerLineRect { position + Displacement { 26, 25 }, { 267, 3 } };
 	out.BlitFrom(out, MakeSdlRect(dividerLineRect), dividerLineRect.position + Displacement { 0, (5 * 12) + 13 });
 
 	rect.position.y += (10 - uitem.UINumPL) * 12;
@@ -4153,6 +4559,14 @@ void PrintItemDetails(const Item &item)
 	}
 	if (item._iMiscId == IMISC_STAFF && item._iMaxCharges != 0) {
 		AddItemInfoBoxString(FormatRuntime(_("Charges: {:d}/{:d}"), item._iCharges, item._iMaxCharges));
+	}
+	if (item._iMagical == ITEM_QUALITY_RARE) {
+		AddItemInfoBoxString(_(item._iName));
+		AddItemInfoBoxString(_("rare item"));
+		ShowUniqueItemInfoBox = true; // the big parchment box lists every property
+		curruitem = item;
+		PrintItemInfo(item);
+		return;
 	}
 	if (item._iPrePower != -1) {
 		AddItemInfoBoxString(PrintItemPower(item._iPrePower, item));
@@ -4856,6 +5270,9 @@ StringOrView Item::getName() const
 	}
 	if (_iMagical == ITEM_QUALITY_UNIQUE) {
 		return _(UniqueItems[_iUid].UIName);
+	}
+	if (_iMagical == ITEM_QUALITY_RARE) {
+		return std::string(_iIName);
 	}
 	return GetTranslatedItemNameMagical(*this, dwBuff & CF_HELLFIRE, true, std::nullopt);
 }
