@@ -799,6 +799,8 @@ GraphicsOptions::GraphicsOptions()
     , colorCycling("Color Cycling", OptionEntryFlags::None, N_("Color Cycling"), N_("Color cycling effect used for water, lava, and acid animation."), true)
     , townWeather("Town Weather", OptionEntryFlags::None, N_("Town Weather"), N_("Randomized weather effects such as rain, snow and fog in Tristram."), true)
     , dungeonColorVariation("Dungeon Color Variation", OptionEntryFlags::CantChangeInGame, N_("Dungeon Color Variation"), N_("Every dungeon level gets its own color mood."), true)
+    , firstPerson("First-Person View", OptionEntryFlags::None, N_("First-Person View"), N_("Experimental first-person view. Can also be toggled with its hotkey."), false)
+    , firstPersonHud("First-Person HUD", OptionEntryFlags::None, N_("First-Person HUD"), N_("Use a compass and slim status bars instead of the main panel while in first-person view."), true)
     , alternateNestArt("Alternate nest art", OptionEntryFlags::OnlyHellfire | OptionEntryFlags::CantChangeInGame, N_("Alternate nest art"), N_("The game will use an alternative palette for Hellfire’s nest tileset."), false)
 #if SDL_VERSION_ATLEAST(2, 0, 0)
     , hardwareCursor("Hardware Cursor", OptionEntryFlags::CantChangeInGame | OptionEntryFlags::RecreateUI | (HardwareCursorSupported() ? OptionEntryFlags::None : OptionEntryFlags::Invisible), N_("Hardware Cursor"), N_("Use a hardware cursor"), HardwareCursorDefault())
@@ -832,6 +834,8 @@ std::vector<OptionEntryBase *> GraphicsOptions::GetEntries()
 		&colorCycling,
 		&townWeather,
 		&dungeonColorVariation,
+		&firstPerson,
+		&firstPersonHud,
 		&alternateNestArt,
 #if SDL_VERSION_ATLEAST(2, 0, 0)
 		&hardwareCursor,

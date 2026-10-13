@@ -82,6 +82,7 @@ set(libdevilutionx_SRCS
   engine/render/automap_render.cpp
   engine/render/scrollrt.cpp
   engine/render/town_weather.cpp
+  engine/render/first_person.cpp
 
   items/validation.cpp
 

@@ -24,6 +24,7 @@
 #include "controls/plrctrls.h"
 #include "doom.h"
 #include "engine/backbuffer_state.hpp"
+#include "engine/render/first_person.hpp"
 #include "engine/demomode.h"
 #include "engine/point.hpp"
 #include "engine/points_in_rectangle_range.hpp"
@@ -901,6 +902,8 @@ bool CheckCursorActions(const Point currentTile, bool flipflag)
  */
 void CheckCursMove()
 {
+	if (FirstPersonUpdateCursor())
+		return;
 	if (IsItemLabelHighlighted())
 		return;
 

@@ -44,6 +44,7 @@
 #include "doom.h"
 #include "encrypt.h"
 #include "engine/backbuffer_state.hpp"
+#include "engine/render/first_person.hpp"
 #include "engine/clx_sprite.hpp"
 #include "engine/demomode.h"
 #include "engine/dx.h"
@@ -231,6 +232,7 @@ bool ProcessInput()
 	}
 
 	plrctrls_every_frame();
+	FirstPersonProcessInput();
 
 	if (!gbIsMultiplayer && gmenu_is_active()) {
 		RedrawViewport();
@@ -2195,6 +2197,14 @@ void InitKeymapActions()
 	    nullptr,
 	    CaptureScreen);
 	options.Keymapper.AddAction(
+	    "ToggleFirstPerson",
+	    N_("First-person view"),
+	    N_("Toggles the optional first-person view."),
+	    SDLK_F4,
+	    [] { ToggleFirstPerson(); },
+	    nullptr,
+	    CanPlayerTakeAction);
+	options.Keymapper.AddAction(
 	    "GameInfo",
 	    N_("Game info"),
 	    N_("Displays game infos."),
@@ -3655,6 +3665,16 @@ bool IsDiabloAlive(bool playSFX)
 void PrintScreen(SDL_Keycode vkey)
 {
 	ReleaseKey(vkey);
+}
+
+bool FirstPersonGameRunning()
+{
+	return IsGameRunning();
+}
+
+bool FirstPersonNoPanelsOpen()
+{
+	return CanAutomapBeToggledOff();
 }
 
 } // namespace devilution

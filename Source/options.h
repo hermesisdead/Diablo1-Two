@@ -566,6 +566,10 @@ struct GraphicsOptions : OptionCategoryBase {
 	OptionEntryBoolean townWeather;
 	/** @brief Per-level colour variation in dungeons. */
 	OptionEntryBoolean dungeonColorVariation;
+	/** @brief First-person view (toggled with a hotkey). */
+	OptionEntryBoolean firstPerson;
+	/** @brief Skyrim-style HUD while in first-person view. */
+	OptionEntryBoolean firstPersonHud;
 	/** @brief Use alternate nest palette. */
 	OptionEntryBoolean alternateNestArt;
 #if SDL_VERSION_ATLEAST(2, 0, 0)
