@@ -943,29 +943,39 @@ void RunGameLoop(interface_mode uMsg)
 						if (SetPiece.size.width > 0)
 							std::fprintf(tf, "setpiece,quest,%d,%d\n", SetPiece.position.x * 2 + 16 + SetPiece.size.width, SetPiece.position.y * 2 + 16 + SetPiece.size.height);
 						// Doors open when walked into, so they count as walkable here.
-						const auto DevWalkable = [](Point tile) {
-							if (PosOkPlayer(*MyPlayer, tile))
+						const auto DevWalkable = [](Point tile) { if (!InDungeonBounds(tile))
+								return false;
+							if (!IsTileSolid(tile))
 								return true;
 							const Object *object = FindObjectAtPosition(tile);
-							return object != nullptr && object->isDoor() && !IsTileSolid(tile);
+							return object != nullptr && object->isDoor();
 						};
-						// Real pathfinding from the player to every trigger and the quest set piece (any tile within a few cells).
-						const auto pathLength = [&DevWalkable](Point destination, int radius) {
-							int8_t path[800];
-							for (int r = 0; r <= radius; r++) {
-								for (int dx = -r; dx <= r; dx++) {
-									for (int dy = -r; dy <= r; dy++) {
-										if (std::max(std::abs(dx), std::abs(dy)) != r)
+						// Flood fill from the player over walkable tiles (engine FindPath is capped at ~25 steps).
+						std::vector<int> dist(112 * 112, -1);
+						{
+							std::vector<Point> queue { MyPlayer->position.tile };
+							dist[MyPlayer->position.tile.x * 112 + MyPlayer->position.tile.y] = 0;
+							for (size_t head = 0; head < queue.size(); head++) {
+								const Point cur = queue[head];
+								for (int dx = -1; dx <= 1; dx++) {
+									for (int dy = -1; dy <= 1; dy++) {
+										const Point next = cur + Displacement { dx, dy };
+										if ((dx == 0 && dy == 0) || !InDungeonBounds(next) || dist[next.x * 112 + next.y] >= 0 || !DevWalkable(next))
 											continue;
-										const Point candidate = destination + Displacement { dx, dy };
-										if (!InDungeonBounds(candidate) || !DevWalkable(candidate))
+										if (dx != 0 && dy != 0 && (!DevWalkable(cur + Displacement { dx, 0 }) || !DevWalkable(cur + Displacement { 0, dy })))
 											continue;
-										if (candidate == MyPlayer->position.tile)
-											return 1;
-										const int steps = FindPath(CanStep, [&DevWalkable](Point tile) { return DevWalkable(tile); }, MyPlayer->position.tile, candidate, path, 800);
-										if (steps > 0)
-											return steps;
+										dist[next.x * 112 + next.y] = dist[cur.x * 112 + cur.y] + 1;
+										queue.push_back(next);
 									}
+								}
+							}
+						}
+						const auto pathLength = [&dist](Point destination, int radius) {
+							for (int dx = -radius; dx <= radius; dx++) {
+								for (int dy = -radius; dy <= radius; dy++) {
+									const Point c = destination + Displacement { dx, dy };
+									if (InDungeonBounds(c) && dist[c.x * 112 + c.y] > 0)
+										return dist[c.x * 112 + c.y];
 								}
 							}
 							return 0;
