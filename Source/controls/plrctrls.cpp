@@ -1,3 +1,4 @@
+#include "action_mode.hpp"
 #include "controls/plrctrls.h"
 
 #include <algorithm>
@@ -1849,6 +1850,9 @@ void Movement(Player &player)
 	if (PadMenuNavigatorActive || PadHotspellMenuActive || InGameMenu())
 		return;
 
+	if (ActionModeMovement(player))
+		return;
+
 	if (GetLeftStickOrDPadGameUIHandler() == nullptr) {
 		WalkInDir(player, GetMoveDirection());
 	}
@@ -2178,6 +2182,10 @@ void ProcessGameAction(const GameAction &action)
 void HandleRightStickMotion()
 {
 	static RightStickAccumulator acc;
+	if (ActionModeHandleRightStick(rightStickX, rightStickY)) {
+		acc.Clear();
+		return;
+	}
 	// deadzone is handled in ScaleJoystickAxes() already
 	if (rightStickX == 0 && rightStickY == 0) {
 		acc.Clear();

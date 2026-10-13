@@ -1,3 +1,4 @@
+#include "action_mode.hpp"
 #include "control_panel.hpp"
 #include "control.hpp"
 #include "control_chat.hpp"
@@ -272,7 +273,7 @@ void CalculatePanelAreas()
 	RightPanel.position.y = LeftPanel.position.y;
 
 	gnViewportHeight = gnScreenHeight;
-	if (gnScreenWidth <= MainPanel.size.width) {
+	if (gnScreenWidth <= MainPanel.size.width && !IsActionHudEnabled()) {
 		// Part of the screen is fully obscured by the UI
 		gnViewportHeight -= MainPanel.size.height;
 	}

@@ -566,10 +566,6 @@ struct GraphicsOptions : OptionCategoryBase {
 	OptionEntryBoolean townWeather;
 	/** @brief Per-level colour variation in dungeons. */
 	OptionEntryBoolean dungeonColorVariation;
-	/** @brief First-person view (toggled with a hotkey). */
-	OptionEntryBoolean firstPerson;
-	/** @brief Skyrim-style HUD while in first-person view. */
-	OptionEntryBoolean firstPersonHud;
 	/** @brief Use alternate nest palette. */
 	OptionEntryBoolean alternateNestArt;
 #if SDL_VERSION_ATLEAST(2, 0, 0)
@@ -592,6 +588,10 @@ struct GameplayOptions : OptionCategoryBase {
 	OptionEntryInt<int> tickRate;
 	/** @brief Enable double walk speed when in town. */
 	OptionEntryBoolean runInTown;
+	/** @brief Action mode: close camera, direct movement, lock-on, dodge and stamina. */
+	OptionEntryBoolean actionMode;
+	/** @brief Slim HUD replacing the main panel while in action mode. */
+	OptionEntryBoolean actionHud;
 	/** @brief Use the extended procedural room generator for Cathedral levels (single player only). */
 	OptionEntryBoolean proceduralDungeons;
 	/** @brief Do not let the mouse leave the application window. */

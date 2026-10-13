@@ -15,6 +15,7 @@
 #include <SDL.h>
 #endif
 
+#include "action_mode.hpp"
 #include "control/control.hpp"
 #include "controls/control_mode.hpp"
 #include "controls/plrctrls.h"
@@ -148,6 +149,8 @@ void StartWalkAnimation(Player &player, Direction dir, bool pmWillBeCalled)
 		skippedFrames = 2;
 	if (pmWillBeCalled)
 		skippedFrames += 1;
+	if (const int dodgeSkip = ActionModeWalkSkipFrames(player); dodgeSkip > 0)
+		skippedFrames = dodgeSkip;
 	NewPlrAnim(player, player_graphic::Walk, dir, AnimationDistributionFlags::ProcessAnimationPending, skippedFrames);
 }
 

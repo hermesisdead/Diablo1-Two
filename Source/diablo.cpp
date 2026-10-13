@@ -44,7 +44,7 @@
 #include "doom.h"
 #include "encrypt.h"
 #include "engine/backbuffer_state.hpp"
-#include "engine/render/first_person.hpp"
+#include "action_mode.hpp"
 #include "engine/clx_sprite.hpp"
 #include "engine/demomode.h"
 #include "engine/dx.h"
@@ -232,7 +232,7 @@ bool ProcessInput()
 	}
 
 	plrctrls_every_frame();
-	FirstPersonProcessInput();
+	ActionModeUpdate();
 
 	if (!gbIsMultiplayer && gmenu_is_active()) {
 		RedrawViewport();
@@ -245,6 +245,7 @@ bool ProcessInput()
 #endif
 		CheckCursMove();
 		plrctrls_after_check_curs_move();
+		ActionModeAfterCursor();
 		RepeatPlayerAction();
 	}
 
@@ -377,6 +378,9 @@ void LeftMouseDown(uint16_t modState)
 	const bool isShiftHeld = (modState & SDL_KMOD_SHIFT) != 0;
 	const bool isCtrlHeld = (modState & SDL_KMOD_CTRL) != 0;
 
+	if (ActionModeHandleLeftMouse(isShiftHeld))
+		return;
+
 	if (!GetMainPanel().contains(MousePosition)) {
 		if (!gmenu_is_active() && !TryIconCurs()) {
 			if (QuestLogIsOpen && GetLeftPanel().contains(MousePosition)) {
@@ -465,6 +469,7 @@ void RightMouseDown(bool isShiftHeld)
 	}
 	if (IsPlayerInStore())
 		return;
+	ActionModePrepareSpellTarget();
 	if (SpellSelectFlag) {
 		SetSpell();
 		return;
@@ -570,6 +575,9 @@ void PressKey(SDL_Keycode vkey, uint16_t modState)
 	if (sgnTimeoutCurs != CURSOR_NONE) {
 		return;
 	}
+
+	if (PauseMode != 2 && ActionModeHandleKey(vkey))
+		return;
 
 	KeymapperPress(vkey);
 
@@ -2197,11 +2205,11 @@ void InitKeymapActions()
 	    nullptr,
 	    CaptureScreen);
 	options.Keymapper.AddAction(
-	    "ToggleFirstPerson",
-	    N_("First-person view"),
-	    N_("Toggles the optional first-person view."),
+	    "ToggleActionMode",
+	    N_("Action mode"),
+	    N_("Toggles the optional action mode (close camera, direct controls, lock-on and dodge)."),
 	    SDLK_F4,
-	    [] { ToggleFirstPerson(); },
+	    [] { ToggleActionMode(); },
 	    nullptr,
 	    CanPlayerTakeAction);
 	options.Keymapper.AddAction(
@@ -3667,12 +3675,22 @@ void PrintScreen(SDL_Keycode vkey)
 	ReleaseKey(vkey);
 }
 
-bool FirstPersonGameRunning()
+void ActionCycleSpell(bool next)
+{
+	CycleSpellHotkeys(next);
+}
+
+void ActionDisplaySpells()
+{
+	DisplaySpellsKeyPressed();
+}
+
+bool GameIsRunningForActionMode()
 {
 	return IsGameRunning();
 }
 
-bool FirstPersonNoPanelsOpen()
+bool NoPanelsOpenForActionMode()
 {
 	return CanAutomapBeToggledOff();
 }

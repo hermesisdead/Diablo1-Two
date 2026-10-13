@@ -3,6 +3,7 @@
  *
  * Implementation of monster functionality, AI, actions, spawning, loading, etc.
  */
+#include "action_mode.hpp"
 #include "monster.h"
 
 #include <algorithm>
@@ -1176,6 +1177,8 @@ int GetMinHit()
 void MonsterAttackPlayer(Monster &monster, Player &player, int hit, int minDam, int maxDam)
 {
 	if (player.hasNoLife() || player._pInvincible || HasAnyOf(player._pSpellFlags, SpellFlag::Etherealize))
+		return;
+	if (IsPlayerDodging(player))
 		return;
 	if (monster.position.tile.WalkingDistance(player.position.tile) >= 2)
 		return;

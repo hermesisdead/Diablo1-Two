@@ -53,7 +53,7 @@
 #include "missiles.h"
 #include "nthread.h"
 #include "engine/render/town_weather.hpp"
-#include "engine/render/first_person.hpp"
+#include "action_mode.hpp"
 #include "options.h"
 #include "panels/charpanel.hpp"
 #include "panels/console.hpp"
@@ -233,8 +233,6 @@ void UndrawCursor(const Surface &out)
 
 bool ShouldShowCursor()
 {
-	if (IsFirstPersonFree())
-		return false;
 	if (ControlMode == ControlTypes::KeyboardAndMouse)
 		return true;
 	if (pcurs == CURSOR_TELEPORT)
@@ -1319,12 +1317,6 @@ void DrawView(const Surface &out, Point startPosition)
 #ifdef _DEBUG
 	DebugCoordsMap.clear();
 #endif
-	if (IsFirstPersonView()) {
-		DrawFirstPersonWorld(IsFirstPersonHud() ? out : out.subregionY(0, gnViewportHeight));
-		if (AutomapActive)
-			DrawAutomap(out.subregionY(0, gnViewportHeight));
-		return;
-	}
 	Displacement offset = {};
 	CalcFirstTilePosition(startPosition, offset);
 	DrawGame(out, startPosition, offset);
@@ -1460,10 +1452,12 @@ void DrawView(const Surface &out, Point startPosition)
 	DrawPlrMsg(out);
 	gmenu_draw(out);
 	doom_draw(out);
-	DrawInfoBox(out);
 	UpdateLifeManaPercent(); // Update life/mana totals before rendering any portion of the flask.
-	DrawLifeFlaskUpper(out);
-	DrawManaFlaskUpper(out);
+	if (!IsActionHudShown()) {
+		DrawInfoBox(out);
+		DrawLifeFlaskUpper(out);
+		DrawManaFlaskUpper(out);
+	}
 }
 
 /**
@@ -1881,9 +1875,10 @@ void DrawAndBlit()
 
 	this_sdl_thread::yield();
 	DrawView(out, ViewPosition);
-	if (IsFirstPersonHud() && IsFirstPersonFree()) {
+	DrawActionWorldOverlay(out);
+	if (IsActionHudShown()) {
 		// Slim HUD replaces the main panel.
-		DrawFirstPersonHud(out);
+		DrawActionHud(out);
 		drawCtrlPan = false;
 		drawHealth = false;
 		drawMana = false;
@@ -1910,11 +1905,11 @@ void DrawAndBlit()
 	if (drawChatInput) {
 		DrawChatBox(out);
 	}
-	if (!(IsFirstPersonHud() && IsFirstPersonFree()))
+	if (!IsActionHudShown())
 		DrawXPBar(out);
-	if (*GetOptions().Gameplay.showHealthValues && !(IsFirstPersonHud() && IsFirstPersonFree()))
+	if (*GetOptions().Gameplay.showHealthValues && !IsActionHudShown())
 		DrawFlaskValues(out, { mainPanel.position.x + 134, mainPanel.position.y + 28 }, MyPlayer->_pHitPoints.whole(), MyPlayer->_pMaxHP.whole());
-	if (*GetOptions().Gameplay.showManaValues && !(IsFirstPersonHud() && IsFirstPersonFree()))
+	if (*GetOptions().Gameplay.showManaValues && !IsActionHudShown())
 		DrawFlaskValues(out, { mainPanel.position.x + mainPanel.size.width - 138, mainPanel.position.y + 28 },
 		    (HasAnyOf(InspectPlayer->_pIFlags, ItemSpecialEffect::NoMana) || MyPlayer->hasNoMana()) ? 0 : MyPlayer->_pMana.whole(),
 		    HasAnyOf(InspectPlayer->_pIFlags, ItemSpecialEffect::NoMana) ? 0 : MyPlayer->_pMaxMana.whole());

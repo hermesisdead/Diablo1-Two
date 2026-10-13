@@ -14,6 +14,9 @@
 #endif
 
 #include "engine/palette.h"
+#include "engine/render/scrollrt.h"
+#include "options.h"
+#include "player.h"
 #include "utils/palette_blending.hpp"
 
 namespace devilution {
@@ -97,6 +100,90 @@ void WashDither(const Surface &out, uint8_t color, float fractionTop, float frac
 	}
 }
 
+/** World pixel position of the camera (follows the player, including walking). */
+void CameraWorldPixels(float &x, float &y)
+{
+	x = 0;
+	y = 0;
+	if (MyPlayer == nullptr)
+		return;
+	const Point tile = MyPlayer->position.tile;
+	Displacement off {};
+	if (MyPlayer->isWalking())
+		off = GetOffsetForWalking(MyPlayer->AnimInfo, MyPlayer->_pdir);
+	x = static_cast<float>((tile.x - tile.y) * 32 + off.deltaX);
+	y = static_cast<float>((tile.x + tile.y) * 16 + off.deltaY);
+}
+
+float lastCamX = 0;
+float lastCamY = 0;
+bool haveLastCam = false;
+
+float Hash2(int x, int y)
+{
+	uint32_t h = static_cast<uint32_t>(x) * 0x8DA6B343u ^ static_cast<uint32_t>(y) * 0xD8163841u;
+	h ^= h >> 13;
+	h *= 0x85EBCA6Bu;
+	h ^= h >> 16;
+	return static_cast<float>(h & 0xFFFF) / 65535.0f;
+}
+
+float ValueNoise(float x, float y)
+{
+	const int ix = static_cast<int>(std::floor(x));
+	const int iy = static_cast<int>(std::floor(y));
+	float fx = x - static_cast<float>(ix);
+	float fy = y - static_cast<float>(iy);
+	fx = fx * fx * (3.0f - 2.0f * fx);
+	fy = fy * fy * (3.0f - 2.0f * fy);
+	const float a = Hash2(ix, iy), b = Hash2(ix + 1, iy);
+	const float c = Hash2(ix, iy + 1), d = Hash2(ix + 1, iy + 1);
+	return (a + (b - a) * fx) + ((c + (d - c) * fx) - (a + (b - a) * fx)) * fy;
+}
+
+/**
+ * @brief Ground mist anchored to the world: patches of fog that drift slowly with the wind
+ * and stay put on the ground as the camera moves, instead of a flat screen tint.
+ */
+void DrawWorldMist(const Surface &out, uint8_t color, float density, float seconds)
+{
+	static constexpr uint8_t Bayer[4][4] = {
+		{ 0, 8, 2, 10 },
+		{ 12, 4, 14, 6 },
+		{ 3, 11, 1, 9 },
+		{ 15, 7, 13, 5 },
+	};
+	float camX, camY;
+	CameraWorldPixels(camX, camY);
+	const float zoom = *GetOptions().Graphics.zoom ? 2.0f : 1.0f;
+	const float cx = out.w() * 0.5f, cy = out.h() * 0.5f;
+	const float windX = seconds * 9.0f, windY = seconds * 3.0f;
+	const uint8_t *const lookup = paletteTransparencyLookup[color];
+	constexpr int Block = 4;
+	// Dither pattern locked to the world too, so it does not shimmer like a screen filter.
+	const int ox = static_cast<int>(camX * zoom) & 3;
+	const int oy = static_cast<int>(camY * zoom) & 3;
+	for (int by = 0; by < out.h(); by += Block) {
+		for (int bx = 0; bx < out.w(); bx += Block) {
+			const float wx = camX + (bx + Block * 0.5f - cx) / zoom + windX;
+			const float wy = (camY + (by + Block * 0.5f - cy) / zoom) * 2.0f + windY; // undo the isometric squash
+			float n = ValueNoise(wx / 150.0f, wy / 150.0f) * 0.65f + ValueNoise(wx / 55.0f + 17.0f, wy / 55.0f - 9.0f) * 0.35f;
+			n = std::clamp((n - 0.48f) / 0.32f, 0.0f, 1.0f) * density;
+			const int threshold = static_cast<int>(n * 16.0f);
+			if (threshold <= 0)
+				continue;
+			for (int y = by; y < std::min(by + Block, out.h()); y++) {
+				uint8_t *row = out.at(0, y);
+				const uint8_t *bayerRow = Bayer[(y + oy) & 3];
+				for (int x = bx; x < std::min(bx + Block, out.w()); x++) {
+					if (bayerRow[(x + ox) & 3] < threshold)
+						row[x] = lookup[row[x]];
+				}
+			}
+		}
+	}
+}
+
 size_t TargetParticleCount(TownWeather weather, int area)
 {
 	switch (weather) {
@@ -149,7 +236,33 @@ void UpdateParticles(int w, int h, float dt)
 		for (Particle &p : particles)
 			RespawnParticle(p, w, h, true);
 	}
+	// Keep particles anchored to the world when the camera moves.
+	float camX, camY;
+	CameraWorldPixels(camX, camY);
+	const float zoom = *GetOptions().Graphics.zoom ? 2.0f : 1.0f;
+	float shiftX = 0, shiftY = 0;
+	if (haveLastCam) {
+		shiftX = (camX - lastCamX) * zoom;
+		shiftY = (camY - lastCamY) * zoom;
+		if (std::fabs(shiftX) > 200 || std::fabs(shiftY) > 200)
+			shiftX = shiftY = 0; // teleport / level change
+	}
+	lastCamX = camX;
+	lastCamY = camY;
+	haveLastCam = true;
 	for (Particle &p : particles) {
+		p.x -= shiftX;
+		p.y -= shiftY;
+		if (p.x < -40.0f)
+			p.x += static_cast<float>(w) + 80.0f;
+		else if (p.x > static_cast<float>(w) + 40.0f)
+			p.x -= static_cast<float>(w) + 80.0f;
+		if (currentWeather == TownWeather::Snow || currentWeather == TownWeather::Embers) {
+			if (p.y < -12.0f)
+				p.y += static_cast<float>(h) + 24.0f;
+			else if (p.y > static_cast<float>(h) + 12.0f)
+				p.y -= static_cast<float>(h) + 24.0f;
+		}
 		switch (currentWeather) {
 		case TownWeather::Rain:
 			p.y += p.speed * dt;
@@ -186,6 +299,7 @@ void InitTownWeather()
 	rngState ^= static_cast<uint64_t>(ticks) * 0xD1342543DE82EF95ULL;
 	particles.clear();
 	particleAreaW = particleAreaH = 0;
+	haveLastCam = false;
 	lightningActive = false;
 	lastTicks = ticks;
 	nextLightningTicks = ticks + 3000 + NextRandom() % 6000;
@@ -240,7 +354,10 @@ void DrawTownWeather(const Surface &out)
 	switch (currentWeather) {
 	case TownWeather::Rain:
 	case TownWeather::Storm: {
-		WashDither(out, darkColor, 0.3f, 0.3f);
+		(void)darkColor;
+		// No full-screen tint: rain is just streaks (storms add a little drifting mist).
+		if (currentWeather == TownWeather::Storm)
+			DrawWorldMist(out, rainColor, 0.18f, static_cast<float>(now) / 1000.0f);
 		for (const Particle &p : particles) {
 			const int px = static_cast<int>(p.x);
 			const int py = static_cast<int>(p.y);
@@ -269,7 +386,7 @@ void DrawTownWeather(const Surface &out)
 		break;
 	}
 	case TownWeather::Snow:
-		WashDither(out, fogColor, 0.12f, 0.2f);
+		DrawWorldMist(out, snowColor, 0.12f, static_cast<float>(now) / 1000.0f);
 		for (const Particle &p : particles) {
 			const int px = static_cast<int>(p.x);
 			const int py = static_cast<int>(p.y);
@@ -279,8 +396,8 @@ void DrawTownWeather(const Surface &out)
 		}
 		break;
 	case TownWeather::Fog:
-		// Thicker towards the bottom of the viewport, like ground fog.
-		WashDither(out, fogColor, 0.18f, 0.55f);
+		// Patches of ground fog that stay on the ground as you walk through them.
+		DrawWorldMist(out, fogColor, 0.42f, static_cast<float>(now) / 1000.0f);
 		break;
 	case TownWeather::Embers:
 		for (const Particle &p : particles) {

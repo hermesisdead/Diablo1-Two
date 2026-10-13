@@ -3,6 +3,7 @@
  *
  * Implementation of missile functionality.
  */
+#include "action_mode.hpp"
 #include "missiles.h"
 
 #include <algorithm>
@@ -1061,6 +1062,9 @@ bool MonsterTrapHit(Monster &monster, int mindam, int maxdam, int dist, MissileI
 bool PlayerMHit(Player &player, Monster *monster, int dist, int mind, int maxd, MissileID mtype, DamageType damageType, bool shift, DeathReason deathReason, bool *blocked)
 {
 	*blocked = false;
+
+	if (IsPlayerDodging(player))
+		return false;
 
 	if (player.hasNoLife()) {
 		return false;

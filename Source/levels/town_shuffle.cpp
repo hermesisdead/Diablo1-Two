@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <vector>
 
 #include "engine/point.hpp"
@@ -125,128 +126,255 @@ private:
 	std::vector<uint16_t> cells_;
 };
 
-bool InFixedRect(int x, int y)
-{
-	return std::any_of(FixedRects.begin(), FixedRects.end(), [&](const Rect &r) { return x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1; });
-}
-
 bool IsSolid(uint16_t piece)
 {
 	return HasAnyOf(SOLData[piece], TileProperties::Solid);
 }
 
-bool InBuildingRect(int x, int y)
-{
-	return std::any_of(BuildingRects.begin(), BuildingRects.end(), [&](const Rect &r) { return x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1; });
-}
+/** Houses that trade places. Landmarks (cathedral, dungeon entrances, fountain, graveyard) stay put. */
+constexpr std::array<TownBuilding, 9> MovableBuildings = { {
+    TownBuilding::Tavern,
+    TownBuilding::Smithy,
+    TownBuilding::Healer,
+    TownBuilding::GillianHouse,
+    TownBuilding::WitchHut,
+    TownBuilding::SpawnHouse,
+    TownBuilding::FarnhamHouse,
+    TownBuilding::HouseA,
+    TownBuilding::HouseB,
+} };
+constexpr size_t MovableCount = MovableBuildings.size();
 
-/** Single-cell solid objects (trees, rocks, stumps) of the classic town's interior, to be scattered again. */
-std::vector<uint16_t> CollectDecorations(const Grid &classic)
+/** Tight, megatile-aligned box around a building's main structure (its plot). */
+Rect PlotOf(const Grid &classic, TownBuilding building)
 {
-	std::vector<uint16_t> result;
-	for (int x = Border; x < TownSize - Border; x++) {
-		for (int y = Border; y < TownSize - Border; y++) {
-			if (!IsSolid(classic.at(x, y)) || InFixedRect(x, y) || InBuildingRect(x, y))
+	const Rect &r = BuildingRects[static_cast<size_t>(building)];
+	// Largest connected group of solid cells in the cut: the house itself, not stray trees or fences.
+	const int w = r.width(), h = r.height();
+	std::vector<int> component(static_cast<size_t>(w * h), -1);
+	int bestComponent = -1;
+	size_t bestSize = 0;
+	int next = 0;
+	for (int sx = 0; sx < w; sx++) {
+		for (int sy = 0; sy < h; sy++) {
+			if (component[sx * h + sy] != -1 || !IsSolid(classic.at(r.x0 + sx, r.y0 + sy)))
 				continue;
-			bool isolated = true;
-			for (int dx = -1; dx <= 1 && isolated; dx++)
-				for (int dy = -1; dy <= 1 && isolated; dy++)
-					if ((dx != 0 || dy != 0) && IsSolid(classic.at(x + dx, y + dy)))
-						isolated = false;
-			if (isolated)
-				result.push_back(classic.at(x, y));
+			std::deque<Point> queue { Point { sx, sy } };
+			component[sx * h + sy] = next;
+			size_t size = 0;
+			while (!queue.empty()) {
+				const Point c = queue.front();
+				queue.pop_front();
+				size++;
+				for (int dx = -1; dx <= 1; dx++) {
+					for (int dy = -1; dy <= 1; dy++) {
+						const int nx = c.x + dx, ny = c.y + dy;
+						if (nx < 0 || ny < 0 || nx >= w || ny >= h || component[nx * h + ny] != -1)
+							continue;
+						if (!IsSolid(classic.at(r.x0 + nx, r.y0 + ny)))
+							continue;
+						component[nx * h + ny] = next;
+						queue.push_back({ nx, ny });
+					}
+				}
+			}
+			if (size > bestSize) {
+				bestSize = size;
+				bestComponent = next;
+			}
+			next++;
 		}
 	}
+	Rect box { r.x1, r.y1, r.x0, r.y0 };
+	for (int sx = 0; sx < w; sx++) {
+		for (int sy = 0; sy < h; sy++) {
+			if (component[sx * h + sy] != bestComponent)
+				continue;
+			box.x0 = std::min(box.x0, r.x0 + sx);
+			box.y0 = std::min(box.y0, r.y0 + sy);
+			box.x1 = std::max(box.x1, r.x0 + sx);
+			box.y1 = std::max(box.y1, r.y0 + sy);
+		}
+	}
+	if (bestComponent < 0)
+		return r;
+	// Margin for eaves and doorsteps (more at the front, where art overhangs), snapped to megatiles.
+	box.x0 = std::max(r.x0, box.x0 - 1) & ~1;
+	box.y0 = std::max(r.y0, box.y0 - 1) & ~1;
+	box.x1 = std::min(r.x1, box.x1 + 2) | 1;
+	box.y1 = std::min(r.y1, box.y1 + 2) | 1;
+	return box;
+}
+
+struct GroundPattern {
+	std::array<uint16_t, 4> pieces;
+};
+
+/** The most common plain-ground megatiles, used to fill a vacated plot so it blends in. */
+std::vector<GroundPattern> FindGroundPatterns(const Grid &classic)
+{
+	std::vector<std::pair<GroundPattern, int>> counts;
+	for (int x = Border; x < TownSize - Border; x += 2) {
+		for (int y = Border; y < TownSize - Border; y += 2) {
+			const GroundPattern g { { classic.at(x, y), classic.at(x + 1, y), classic.at(x, y + 1), classic.at(x + 1, y + 1) } };
+			if (std::any_of(g.pieces.begin(), g.pieces.end(), IsSolid))
+				continue;
+			auto it = std::find_if(counts.begin(), counts.end(), [&](const auto &e) { return e.first.pieces == g.pieces; });
+			if (it == counts.end())
+				counts.emplace_back(g, 1);
+			else
+				it->second++;
+		}
+	}
+	std::sort(counts.begin(), counts.end(), [](const auto &a, const auto &b) { return a.second > b.second; });
+	std::vector<GroundPattern> result;
+	for (size_t i = 0; i < counts.size() && i < 3; i++)
+		result.push_back(counts[i].first);
+	if (result.empty())
+		result.push_back({ { GroundPiece, GroundPiece, GroundPiece, GroundPiece } });
 	return result;
+}
+
+bool IsPlainGround(const Grid &classic, const std::vector<GroundPattern> &patterns, int x, int y)
+{
+	const uint16_t piece = classic.at(x, y);
+	if (IsSolid(piece))
+		return false;
+	for (const GroundPattern &g : patterns)
+		if (std::find(g.pieces.begin(), g.pieces.end(), piece) != g.pieces.end())
+			return true;
+	return false;
+}
+
+bool Contains(const Rect &r, int x, int y)
+{
+	return x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1;
 }
 
 bool TryLayout(uint64_t seed, const Grid &classic, Grid &out, std::array<Displacement, BuildingCount> &shifts)
 {
 	LayoutRng rng(seed);
 	out = classic;
+	shifts.fill({ 0, 0 });
 
-	// Cut every building out and clear re-scatterable interior decoration.
-	for (const Rect &r : BuildingRects) {
-		for (int x = r.x0; x <= r.x1; x++)
-			for (int y = r.y0; y <= r.y1; y++)
-				out.at(x, y) = GroundPiece;
+	const std::vector<GroundPattern> ground = FindGroundPatterns(classic);
+	std::array<Rect, MovableCount> plots {};
+	for (size_t i = 0; i < MovableCount; i++) {
+		plots[i] = PlotOf(classic, MovableBuildings[i]);
+		if (seed % 256 == 0)
+			LogVerbose("town plot {}: ({},{})-({},{})", i, plots[i].x0, plots[i].y0, plots[i].x1, plots[i].y1);
 	}
-	std::vector<bool> occupied(TownSize * TownSize, false);
-	auto occ = [&](int x, int y) -> std::vector<bool>::reference { return occupied[static_cast<size_t>(x) * TownSize + y]; };
-	for (int x = 0; x < TownSize; x++) {
-		for (int y = 0; y < TownSize; y++) {
-			const bool inBorder = std::min({ x, y, TownSize - 1 - x, TownSize - 1 - y }) < Border;
-			if (InFixedRect(x, y)) {
-				occ(x, y) = true;
-			} else if (inBorder) {
-				if (IsSolid(out.at(x, y)))
-					occ(x, y) = true;
-			} else if (IsSolid(out.at(x, y))) {
-				out.at(x, y) = GroundPiece;
+
+	// Clear every plot to plain ground, a whole megatile at a time.
+	for (const Rect &plot : plots) {
+		for (int x = plot.x0; x <= plot.x1; x += 2) {
+			for (int y = plot.y0; y <= plot.y1; y += 2) {
+				const GroundPattern &g = ground[(static_cast<uint32_t>(x * 7 + y * 13) ^ static_cast<uint32_t>(seed)) % ground.size()];
+				out.at(x, y) = g.pieces[0];
+				out.at(x + 1, y) = g.pieces[1];
+				out.at(x, y + 1) = g.pieces[2];
+				out.at(x + 1, y + 1) = g.pieces[3];
 			}
 		}
 	}
-	for (size_t i = 0; i < FixedPointCount; i++) {
-		for (int x = FixedPoints[i].x - 2; x <= FixedPoints[i].x + 2; x++)
-			for (int y = FixedPoints[i].y - 2; y <= FixedPoints[i].y + 2; y++)
-				if (x >= 0 && y >= 0 && x < TownSize && y < TownSize)
-					occ(x, y) = true;
-	}
 
-	// Largest buildings first.
-	std::array<size_t, BuildingCount> order {};
-	for (size_t i = 0; i < BuildingCount; i++)
-		order[i] = i;
-	std::stable_sort(order.begin(), order.end(), [](size_t a, size_t b) {
-		return BuildingRects[a].width() * BuildingRects[a].height() > BuildingRects[b].width() * BuildingRects[b].height();
+	// Assign houses to plots. A house keeps its front (the +x/+y corner, where its door and
+	// owner are) on the plot's front corner, so it still faces the road that plot was built on.
+	std::array<size_t, MovableCount> lotOrder {};
+	std::array<size_t, MovableCount> pool {};
+	for (size_t i = 0; i < MovableCount; i++)
+		lotOrder[i] = pool[i] = i;
+	for (size_t i = MovableCount - 1; i > 0; i--) {
+		std::swap(lotOrder[i], lotOrder[rng.range(0, static_cast<int>(i) + 1)]);
+		std::swap(pool[i], pool[rng.range(0, static_cast<int>(i) + 1)]);
+	}
+	const auto fits = [&](size_t building, size_t lot, Rect &where) {
+		const Rect &src = plots[building];
+		const Rect &dst = plots[lot];
+		where = { dst.x1 - src.width() + 1, dst.y1 - src.height() + 1, dst.x1, dst.y1 };
+		if (where.x0 < Border || where.y0 < Border)
+			return false;
+		for (int x = where.x0; x <= where.x1; x++) {
+			for (int y = where.y0; y <= where.y1; y++) {
+				if (Contains(dst, x, y))
+					continue;
+				// Spilling over the plot is only allowed onto plain ground nobody else uses.
+				if (!IsPlainGround(classic, ground, x, y))
+					return false;
+				for (size_t other = 0; other < MovableCount; other++)
+					if (other != lot && Contains(plots[other], x, y))
+						return false;
+				for (size_t b = 0; b < BuildingCount; b++) {
+					if (std::find(MovableBuildings.begin(), MovableBuildings.end(), static_cast<TownBuilding>(b)) != MovableBuildings.end())
+						continue;
+					if (Contains(BuildingRects[b], x, y))
+						return false;
+				}
+				for (const Rect &r : FixedRects)
+					if (Contains(r, x, y))
+						return false;
+			}
+		}
+		return true;
+	};
+	// Lots are the nine original plots: houses only move onto sites that already sit on Tristram's roads.
+	const size_t lotCount = MovableCount;
+	std::vector<size_t> lotTry(lotCount);
+	for (size_t i = 0; i < lotCount; i++)
+		lotTry[i] = i;
+
+	// Big houses choose first so small ones cannot take the only plots they fit on.
+	std::stable_sort(pool.begin(), pool.end(), [&](size_t l, size_t r) {
+		return plots[l].width() * plots[l].height() > plots[r].width() * plots[r].height();
 	});
 
-	for (const size_t index : order) {
-		const Rect &src = BuildingRects[index];
-		const int w = src.width();
-		const int h = src.height();
-		bool placed = false;
-		for (int attempt = 0; attempt < 400 && !placed; attempt++) {
-			const int nx = rng.range(3, TownSize - 3 - w) & ~1;
-			const int ny = rng.range(3, TownSize - 3 - h) & ~1;
-			bool free = true;
-			for (int x = nx - 1; x <= nx + w && free; x++)
-				for (int y = ny - 1; y <= ny + h && free; y++)
-					if (x >= 0 && y >= 0 && x < TownSize && y < TownSize && occ(x, y))
-						free = false;
-			if (!free)
-				continue;
-			for (int x = 0; x < w; x++)
-				for (int y = 0; y < h; y++)
-					out.at(nx + x, ny + y) = classic.at(src.x0 + x, src.y0 + y);
-			for (int x = nx - 2; x < nx + w + 2; x++)
-				for (int y = ny - 2; y < ny + h + 2; y++)
-					if (x >= 0 && y >= 0 && x < TownSize && y < TownSize)
-						occ(x, y) = true;
-			shifts[index] = { nx - src.x0, ny - src.y0 };
-			placed = true;
-		}
-		if (!placed)
+	// Backtracking search: every house gets its own plot.
+	std::array<size_t, MovableCount> assignment {};
+	std::array<Rect, MovableCount> where {};
+	std::vector<bool> lotUsed(lotCount, false);
+	int budget = 6000;
+	std::function<bool(size_t)> assign = [&](size_t depth) -> bool {
+		if (depth == MovableCount)
+			return true;
+		if (--budget < 0)
 			return false;
-	}
-
-	// Scatter the town's trees and rocks again. Never next to another solid cell, so they cannot seal off paths.
-	for (const uint16_t decoration : CollectDecorations(classic)) {
-		for (int attempt = 0; attempt < 30; attempt++) {
-			const int x = rng.range(Border, TownSize - Border);
-			const int y = rng.range(Border, TownSize - Border);
-			if (occ(x, y))
+		const size_t building = pool[depth];
+		for (size_t i = lotTry.size(); i > 1; i--)
+			std::swap(lotTry[i - 1], lotTry[rng.range(0, static_cast<int>(i))]);
+		const std::vector<size_t> order = lotTry;
+		for (const size_t lot : order) {
+			if (lotUsed[lot])
 				continue;
-			bool clear = true;
-			for (int dx = -1; dx <= 1 && clear; dx++)
-				for (int dy = -1; dy <= 1 && clear; dy++)
-					if (IsSolid(out.at(x + dx, y + dy)))
-						clear = false;
-			if (!clear)
+			Rect w;
+			if (!fits(building, lot, w))
 				continue;
-			out.at(x, y) = decoration;
-			break;
+			lotUsed[lot] = true;
+			assignment[building] = lot;
+			where[building] = w;
+			if (assign(depth + 1))
+				return true;
+			lotUsed[lot] = false;
 		}
+		return false;
+	};
+	if (!assign(0)) {
+		LogVerbose("town layout: no assignment found");
+		return false;
+	}
+	size_t moved = 0;
+	for (size_t building = 0; building < MovableCount; building++) {
+		const Rect &src = plots[building];
+		const Rect &w = where[building];
+		for (int x = 0; x < src.width(); x++)
+			for (int y = 0; y < src.height(); y++)
+				out.at(w.x0 + x, w.y0 + y) = classic.at(src.x0 + x, src.y0 + y);
+		shifts[static_cast<size_t>(MovableBuildings[building])] = { w.x0 - src.x0, w.y0 - src.y0 };
+		if (assignment[building] != building)
+			moved++;
+	}
+	if (moved < 2) {
+		LogVerbose("town layout: too similar to the classic town");
+		return false;
 	}
 
 	// Everything that must stay reachable has to connect to the player spawn.
@@ -277,13 +405,19 @@ bool TryLayout(uint64_t seed, const Grid &classic, Grid &out, std::array<Displac
 					return true;
 		return false;
 	};
-	for (size_t i = 0; i < FixedPointCount; i++)
-		if (!reachable(FixedPoints[i]))
+	// The hive landing (index 0) only opens with its quest, so it is not required here.
+	for (size_t i = 1; i < FixedPointCount; i++)
+		if (!reachable(FixedPoints[i])) {
+			LogVerbose("town layout: fixed point {} unreachable", i);
 			return false;
+		}
 	for (const AttachedPoint &a : AttachedPoints) {
 		const Displacement s = shifts[static_cast<size_t>(a.building)];
-		if (!reachable({ a.position.x + s.deltaX, a.position.y + s.deltaY }))
+		const Point moved { a.position.x + s.deltaX, a.position.y + s.deltaY };
+		if (!reachable(moved)) {
+			LogVerbose("town layout: attached point ({}, {}) unreachable", moved.x, moved.y);
 			return false;
+		}
 	}
 	return true;
 }

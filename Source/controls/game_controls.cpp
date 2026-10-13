@@ -1,3 +1,4 @@
+#include "action_mode.hpp"
 #include "controls/game_controls.h"
 
 #include <cstdint>
@@ -319,6 +320,9 @@ void PressControllerButton(ControllerButton button)
 			break;
 		}
 	}
+
+	if (ActionModeHandleButton(button))
+		return;
 
 	const PadmapperOptions::Action *action = GetOptions().Padmapper.findAction(button, IsControllerButtonPressed);
 	if (action == nullptr) return;
