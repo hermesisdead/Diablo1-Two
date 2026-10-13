@@ -776,6 +776,30 @@ std::optional<Point> OrbitProject(float worldX, float worldY, float height, cons
 	return p;
 }
 
+std::optional<OrbitScreenPoint> OrbitProjectEx(float worldX, float worldY, float height, const Surface &out)
+{
+	if (LastOutW != out.w() || LastOutH != out.h())
+		return std::nullopt;
+	const Camera &cam = LastCamera;
+	const CamVert v = ToCamera(cam, { worldX, worldY, height }, 0, 0);
+	if (v.c.z < NearPlane)
+		return std::nullopt;
+	const ScreenVert s = Project(cam, v);
+	return OrbitScreenPoint {
+		Point { static_cast<int>(s.sx * LastScale), static_cast<int>(s.sy * LastScale) },
+		v.c.z,
+		cam.focal / v.c.z * LastScale,
+	};
+}
+
+bool OrbitSceneVisible(Point screen, float depth)
+{
+	const int x = screen.x / LastScale, y = screen.y / LastScale;
+	if (x < 0 || y < 0 || x >= Fb.w || y >= Fb.h)
+		return false;
+	return depth < Fb.depth[static_cast<size_t>(y) * Fb.w + x];
+}
+
 bool OrbitMonsterRenderPosition(int monsterId, float &x, float &y)
 {
 	if (monsterId < 0 || monsterId >= static_cast<int>(MaxMonsters) || !MonsterSmooth[monsterId].valid)

@@ -798,6 +798,7 @@ GraphicsOptions::GraphicsOptions()
     , perPixelLighting("Per-pixel Lighting", OptionEntryFlags::None, N_("Per-pixel Lighting"), N_("Subtile lighting for smoother light gradients."), DEFAULT_PER_PIXEL_LIGHTING)
     , colorCycling("Color Cycling", OptionEntryFlags::None, N_("Color Cycling"), N_("Color cycling effect used for water, lava, and acid animation."), true)
     , townWeather("Town Weather", OptionEntryFlags::None, N_("Town Weather"), N_("Randomized weather effects such as rain, snow and fog in Tristram."), true)
+    , dungeonMoods("Dungeon Moods", OptionEntryFlags::None, N_("Dungeon Moods"), N_("Every dungeon level rolls its own atmosphere: drifting fog, dust motes in the torchlight, frost, embers or dripping ceilings."), true)
     , dungeonColorVariation("Dungeon Color Variation", OptionEntryFlags::CantChangeInGame, N_("Dungeon Color Variation"), N_("Every dungeon level gets its own color mood."), true)
     , alternateNestArt("Alternate nest art", OptionEntryFlags::OnlyHellfire | OptionEntryFlags::CantChangeInGame, N_("Alternate nest art"), N_("The game will use an alternative palette for Hellfire’s nest tileset."), false)
 #if SDL_VERSION_ATLEAST(2, 0, 0)
@@ -831,6 +832,7 @@ std::vector<OptionEntryBase *> GraphicsOptions::GetEntries()
 		&perPixelLighting,
 		&colorCycling,
 		&townWeather,
+		&dungeonMoods,
 		&dungeonColorVariation,
 		&alternateNestArt,
 #if SDL_VERSION_ATLEAST(2, 0, 0)

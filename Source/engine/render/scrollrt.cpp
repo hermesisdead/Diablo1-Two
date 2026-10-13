@@ -52,6 +52,7 @@
 #include "minitext.h"
 #include "missiles.h"
 #include "nthread.h"
+#include "engine/render/dungeon_mood.hpp"
 #include "engine/render/town_weather.hpp"
 #include "action_mode.hpp"
 #include "engine/render/orbit_view.hpp"
@@ -1321,7 +1322,10 @@ void DrawView(const Surface &out, Point startPosition)
 	DebugCoordsMap.clear();
 #endif
 	if (IsOrbitViewActive()) {
-		DrawOrbitView(IsActionHudEnabled() ? out : out.subregionY(0, gnViewportHeight));
+		const Surface orbitOut = IsActionHudEnabled() ? out : out.subregionY(0, gnViewportHeight);
+		DrawOrbitView(orbitOut);
+		if (leveltype != DTYPE_TOWN && !AutomapActive)
+			DrawDungeonMood(orbitOut);
 		if (leveltype == DTYPE_TOWN && *GetOptions().Graphics.townWeather && !AutomapActive)
 			DrawTownWeather(out.subregionY(0, gnViewportHeight));
 		if (AutomapActive)
@@ -1331,6 +1335,8 @@ void DrawView(const Surface &out, Point startPosition)
 	Displacement offset = {};
 	CalcFirstTilePosition(startPosition, offset);
 	DrawGame(out, startPosition, offset);
+	if (leveltype != DTYPE_TOWN && !AutomapActive)
+		DrawDungeonMood(out.subregionY(0, gnViewportHeight));
 	if (leveltype == DTYPE_TOWN && *GetOptions().Graphics.townWeather && !AutomapActive)
 		DrawTownWeather(out.subregionY(0, gnViewportHeight));
 	if (AutomapActive) {

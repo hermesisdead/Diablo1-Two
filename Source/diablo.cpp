@@ -941,6 +941,12 @@ void RunGameLoop(interface_mode uMsg)
 			++devCaptureFrames;
 			if (devCaptureFrames % 20 == 0)
 				LogVerbose("devcap frame {}", devCaptureFrames);
+			if (const char *burst = std::getenv("DEVILUTIONX_DEV_CAPTURE_FRAMES"); burst != nullptr && devCaptureFrames > 240) {
+				// Burst capture for animated previews: every other frame, then quit.
+				CaptureScreen();
+				if (devCaptureFrames >= 240 + std::atoi(burst))
+					gbRunGame = false;
+			}
 			if (devCaptureFrames == 240) {
 				if (std::getenv("DEVILUTIONX_DEV_DUMPTOWN") != nullptr) {
 					FILE *tf = std::fopen((paths::PrefPath() + "town_objects.csv").c_str(), "w");
@@ -1011,7 +1017,8 @@ void RunGameLoop(interface_mode uMsg)
 					}
 				}
 				CaptureScreen();
-				gbRunGame = false;
+				if (std::getenv("DEVILUTIONX_DEV_CAPTURE_FRAMES") == nullptr)
+					gbRunGame = false;
 			}
 		}
 #endif

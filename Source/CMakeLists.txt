@@ -81,6 +81,7 @@ set(libdevilutionx_SRCS
 
   engine/render/automap_render.cpp
   engine/render/scrollrt.cpp
+  engine/render/dungeon_mood.cpp
   engine/render/town_weather.cpp
   action_mode.cpp
   engine/render/orbit_view.cpp

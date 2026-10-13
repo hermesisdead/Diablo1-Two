@@ -39,6 +39,18 @@ void DrawOrbitView(const Surface &out);
 /** @brief Screen position of a world point at the given height (in tiles), for HUD markers. */
 std::optional<Point> OrbitProject(float worldX, float worldY, float height, const Surface &out);
 
+struct OrbitScreenPoint {
+	Point pos;           // screen position in out's pixels (may be off screen)
+	float depth;         // camera distance, comparable with OrbitSceneVisible
+	float pixelsPerTile; // screen size of one tile at this distance
+};
+
+/** @brief Like OrbitProject, but also returns depth and scale, and keeps off-screen points. */
+std::optional<OrbitScreenPoint> OrbitProjectEx(float worldX, float worldY, float height, const Surface &out);
+
+/** @brief True if something at this depth would be in front of the rendered scene at the pixel. */
+bool OrbitSceneVisible(Point screen, float depth);
+
 /** @brief Smoothed render position of a monster (tile units, centre of tile = +0.5). */
 bool OrbitMonsterRenderPosition(int monsterId, float &x, float &y);
 

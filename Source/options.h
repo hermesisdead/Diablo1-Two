@@ -564,6 +564,8 @@ struct GraphicsOptions : OptionCategoryBase {
 	OptionEntryBoolean colorCycling;
 	/** @brief Randomized weather effects in town. */
 	OptionEntryBoolean townWeather;
+	/** @brief Randomized per-level atmosphere (fog, dust, embers...) in dungeons. */
+	OptionEntryBoolean dungeonMoods;
 	/** @brief Per-level colour variation in dungeons. */
 	OptionEntryBoolean dungeonColorVariation;
 	/** @brief Use alternate nest palette. */
