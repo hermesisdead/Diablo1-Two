@@ -83,6 +83,7 @@ set(libdevilutionx_SRCS
   engine/render/scrollrt.cpp
   engine/render/town_weather.cpp
   action_mode.cpp
+  engine/render/orbit_view.cpp
 
   items/validation.cpp
 
@@ -172,6 +173,7 @@ set(libdevilutionx_SRCS
 set(_optimize_in_debug_srcs
   engine/render/clx_render.cpp
   engine/render/dun_render.cpp
+  engine/render/orbit_view.cpp
   engine/render/text_render.cpp
   utils/cel_to_clx.cpp
   utils/cl2_to_clx.cpp

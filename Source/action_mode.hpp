@@ -54,6 +54,9 @@ bool ActionModeHandleRightStick(float x, float y);
 /** @brief Per game tick movement. Returns true if action mode handled it. */
 bool ActionModeMovement(Player &player);
 
+/** @brief The mouse is steering the 3D camera (cursor hidden). */
+bool IsActionMouseCaptured();
+
 /** @brief True while the local player is in the invulnerable part of a dodge. */
 bool IsPlayerDodging(const Player &player);
 

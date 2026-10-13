@@ -54,6 +54,7 @@
 #include "nthread.h"
 #include "engine/render/town_weather.hpp"
 #include "action_mode.hpp"
+#include "engine/render/orbit_view.hpp"
 #include "options.h"
 #include "panels/charpanel.hpp"
 #include "panels/console.hpp"
@@ -233,6 +234,8 @@ void UndrawCursor(const Surface &out)
 
 bool ShouldShowCursor()
 {
+	if (IsActionMouseCaptured())
+		return false;
 	if (ControlMode == ControlTypes::KeyboardAndMouse)
 		return true;
 	if (pcurs == CURSOR_TELEPORT)
@@ -1317,6 +1320,14 @@ void DrawView(const Surface &out, Point startPosition)
 #ifdef _DEBUG
 	DebugCoordsMap.clear();
 #endif
+	if (IsOrbitViewActive()) {
+		DrawOrbitView(IsActionHudEnabled() ? out : out.subregionY(0, gnViewportHeight));
+		if (leveltype == DTYPE_TOWN && *GetOptions().Graphics.townWeather && !AutomapActive)
+			DrawTownWeather(out.subregionY(0, gnViewportHeight));
+		if (AutomapActive)
+			DrawAutomap(out.subregionY(0, gnViewportHeight));
+		return;
+	}
 	Displacement offset = {};
 	CalcFirstTilePosition(startPosition, offset);
 	DrawGame(out, startPosition, offset);

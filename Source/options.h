@@ -592,6 +592,8 @@ struct GameplayOptions : OptionCategoryBase {
 	OptionEntryBoolean actionMode;
 	/** @brief Slim HUD replacing the main panel while in action mode. */
 	OptionEntryBoolean actionHud;
+	/** @brief Elden Ring style 3D third-person camera in action mode. */
+	OptionEntryBoolean actionCamera3D;
 	/** @brief Use the extended procedural room generator for Cathedral levels (single player only). */
 	OptionEntryBoolean proceduralDungeons;
 	/** @brief Do not let the mouse leave the application window. */

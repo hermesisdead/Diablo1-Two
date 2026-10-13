@@ -1,8 +1,13 @@
 /**
  * @file action_mode.cpp
  *
- * Optional action mode: close-up camera over the original isometric art and
- * Souls-like controls.
+ * Optional action mode with Souls-like controls. By default the level is shown through an
+ * Elden Ring style orbiting third-person camera (see engine/render/orbit_view.cpp); the
+ * "Third-Person Camera" option off keeps a close-up isometric camera instead.
+ *
+ * Movement is camera-relative in the 3D view. Mouse (captured while no panel is open) or the
+ * right stick orbits the camera; it lazily swings behind the hero while running and frames
+ * hero and enemy while locked on (then a right-stick flick switches targets).
  *
  * Keyboard & mouse (while no panel is open)
  *   WASD / arrows  move            Space  dodge (costs stamina, brief invulnerability)
@@ -45,6 +50,7 @@
 #include "engine/backbuffer_state.hpp"
 #include "engine/palette.h"
 #include "engine/point.hpp"
+#include "engine/render/orbit_view.hpp"
 #include "engine/render/primitive_render.hpp"
 #include "engine/render/scrollrt.h"
 #include "engine/render/text_render.hpp"
@@ -296,6 +302,63 @@ void StepTowards(Player &player, Direction dir)
 	NetSendCmdLoc(player.getId(), true, CMD_WALKXY, target);
 }
 
+/** Camera-relative movement input: fx right, fy forward, from WASD/arrows or the left stick. */
+bool ReadMoveVector(float &fx, float &fy)
+{
+	fx = fy = 0;
+	int numKeys = 0;
+	const auto *keys = SDL_GetKeyboardState(&numKeys);
+	const auto pressed = [&](SDL_Scancode code) { return code < numKeys && keys[code] != 0; };
+	if (!ChatFlag) {
+		if (pressed(SDL_SCANCODE_A) || pressed(SDL_SCANCODE_LEFT))
+			fx -= 1;
+		if (pressed(SDL_SCANCODE_D) || pressed(SDL_SCANCODE_RIGHT))
+			fx += 1;
+		if (pressed(SDL_SCANCODE_W) || pressed(SDL_SCANCODE_UP))
+			fy += 1;
+		if (pressed(SDL_SCANCODE_S) || pressed(SDL_SCANCODE_DOWN))
+			fy -= 1;
+	}
+	if (fx == 0 && fy == 0 && leftStickX * leftStickX + leftStickY * leftStickY > 0.3f * 0.3f) {
+		fx = leftStickX;
+		fy = leftStickY;
+	}
+	return fx != 0 || fy != 0;
+}
+
+/** Grid angle of a camera-relative input vector. */
+float WorldAngleOf(float fx, float fy)
+{
+	const float yaw = OrbitCameraYaw();
+	const float wx = std::cos(yaw) * fy - std::sin(yaw) * fx;
+	const float wy = std::sin(yaw) * fy + std::cos(yaw) * fx;
+	return std::atan2(wy, wx);
+}
+
+Direction GridAngleToDirection(float angle)
+{
+	int idx = static_cast<int>(std::lround((angle * 180.0f / 3.14159265f - 45.0f) / 45.0f));
+	idx = ((idx % 8) + 8) % 8;
+	return static_cast<Direction>(idx);
+}
+
+/** Movement direction for this tick, if any, honouring the camera in the 3D view. */
+std::optional<Direction> CurrentMoveDirection()
+{
+	if (IsOrbitViewActive()) {
+		float fx, fy;
+		if (!ReadMoveVector(fx, fy))
+			return std::nullopt;
+		return GridAngleToDirection(WorldAngleOf(fx, fy));
+	}
+	const AxisDirection input = ReadMoveInput();
+	if (!HasMoveInput(input))
+		return std::nullopt;
+	return ToDirection(input);
+}
+
+bool MouseCaptured = false;
+
 void StartDodge()
 {
 	Player &player = *MyPlayer;
@@ -303,9 +366,8 @@ void StartDodge()
 		return;
 	if (player._pmode != PM_STAND && !player.isWalking())
 		return; // can't roll out of an attack or a spell
-	const AxisDirection input = ReadMoveInput();
-	if (HasMoveInput(input)) {
-		DodgeDirection = ToDirection(input);
+	if (const std::optional<Direction> dir = CurrentMoveDirection()) {
+		DodgeDirection = *dir;
 	} else {
 		DodgeDirection = Opposite(player._pdir); // backstep
 	}
@@ -396,62 +458,71 @@ void DoSpell()
 	PerformSpellAction();
 }
 
-/** Interact with the nearest item, object, NPC or talkable monster around the player. */
-void DoInteract()
+enum class InteractKind { None, Item, Object, Towner, Monster };
+struct InteractTarget {
+	InteractKind kind = InteractKind::None;
+	int id = -1;
+	Point position {};
+};
+
+/** The nearest item, object, NPC or talkable monster around the player. */
+InteractTarget FindInteractTarget()
 {
 	const Player &player = *MyPlayer;
 	const Point me = player.position.future;
 	const Point ahead = me + player._pdir;
 	int bestScore = 1 << 30;
-	enum class Kind { None, Item, Object, Towner, Monster } kind = Kind::None;
-	int bestId = -1;
-	Point bestPos {};
-	const auto consider = [&](Kind k, int id, Point pos, int priority) {
+	InteractTarget best;
+	const auto consider = [&](InteractKind k, int id, Point pos, int priority) {
 		const int dist = std::max(std::abs(pos.x - me.x), std::abs(pos.y - me.y));
 		if (dist > 2)
 			return;
 		const int score = dist * 10 + (pos == ahead ? -5 : 0) + priority;
 		if (score < bestScore) {
 			bestScore = score;
-			kind = k;
-			bestId = id;
-			bestPos = pos;
+			best = { k, id, pos };
 		}
 	};
 	for (int i = 0; i < ActiveItemCount; i++) {
 		const int id = ActiveItems[i];
-		consider(Kind::Item, id, Items[id].position, 0);
+		consider(InteractKind::Item, id, Items[id].position, 0);
 	}
 	for (int i = 0; i < ActiveObjectCount; i++) {
 		const int id = ActiveObjects[i];
 		const Object &object = Objects[id];
 		if (!object.canInteractWith() || object.IsDisabled())
 			continue;
-		consider(Kind::Object, id, object.position, 2);
+		consider(InteractKind::Object, id, object.position, 2);
 	}
 	if (leveltype == DTYPE_TOWN) {
 		for (size_t i = 0; i < Towners.size(); i++)
-			consider(Kind::Towner, static_cast<int>(i), Towners[i].position, 1);
+			consider(InteractKind::Towner, static_cast<int>(i), Towners[i].position, 1);
 	} else {
 		for (size_t i = 0; i < ActiveMonsterCount; i++) {
 			const int id = static_cast<int>(ActiveMonsters[i]);
 			if (CanTalkToMonst(Monsters[id]))
-				consider(Kind::Monster, id, Monsters[id].position.tile, 1);
+				consider(InteractKind::Monster, id, Monsters[id].position.tile, 1);
 		}
 	}
-	switch (kind) {
-	case Kind::Item:
-		NetSendCmdLocParam1(true, invflag ? CMD_GOTOGETITEM : CMD_GOTOAGETITEM, bestPos, static_cast<uint16_t>(bestId));
+	return best;
+}
+
+void DoInteract()
+{
+	const InteractTarget t = FindInteractTarget();
+	switch (t.kind) {
+	case InteractKind::Item:
+		NetSendCmdLocParam1(true, invflag ? CMD_GOTOGETITEM : CMD_GOTOAGETITEM, t.position, static_cast<uint16_t>(t.id));
 		break;
-	case Kind::Object:
+	case InteractKind::Object:
 		LastPlayerAction = PlayerActionType::OperateObject;
-		NetSendCmdLoc(MyPlayerId, true, CMD_OPOBJXY, bestPos);
+		NetSendCmdLoc(MyPlayerId, true, CMD_OPOBJXY, t.position);
 		break;
-	case Kind::Towner:
-		NetSendCmdLocParam1(true, CMD_TALKXY, bestPos, static_cast<uint16_t>(bestId));
+	case InteractKind::Towner:
+		NetSendCmdLocParam1(true, CMD_TALKXY, t.position, static_cast<uint16_t>(t.id));
 		break;
-	case Kind::Monster:
-		NetSendCmdParam1(true, CMD_ATTACKID, static_cast<uint16_t>(bestId));
+	case InteractKind::Monster:
+		NetSendCmdParam1(true, CMD_ATTACKID, static_cast<uint16_t>(t.id));
 		break;
 	default:
 		break;
@@ -472,7 +543,7 @@ void FaceLockTarget()
 void EnsureZoom()
 {
 	auto &zoom = GetOptions().Graphics.zoom;
-	if (IsActionMode()) {
+	if (IsActionMode() && !IsOrbitViewActive()) {
 		if (!*zoom) {
 			zoom.SetValue(true);
 			ForcedZoom = true;
@@ -525,6 +596,7 @@ void ToggleActionMode()
 	DodgeActive = false;
 	DodgeStepsLeft = 0;
 	Stamina = MaxStamina;
+	OrbitCameraReset();
 	EnsureZoom();
 	CalculatePanelAreas();
 	CalcViewportGeometry();
@@ -549,6 +621,41 @@ void ActionModeUpdate()
 	if (std::getenv("DEVILUTIONX_DEV_ACTIONLOCK") != nullptr && LockedTarget() == nullptr)
 		LockedMonster = PickLockTarget();
 #endif
+	// Capture the mouse for camera control in the 3D view while nothing needs the cursor.
+	const bool wantCapture = IsOrbitViewActive() && IsActionModeFree() && ControlMode == ControlTypes::KeyboardAndMouse;
+	if (wantCapture != MouseCaptured) {
+		SDL_SetRelativeMouseMode(wantCapture ? SDL_TRUE : SDL_FALSE);
+		MouseCaptured = wantCapture;
+		int ignoredX, ignoredY;
+		SDL_GetRelativeMouseState(&ignoredX, &ignoredY);
+	}
+	if (IsOrbitViewActive()) {
+		float turnX = 0, turnY = 0;
+		bool manual = false;
+		if (MouseCaptured) {
+			int mx = 0, my = 0;
+			SDL_GetRelativeMouseState(&mx, &my);
+			turnX += mx * 0.0042f;
+			turnY += my * 0.0032f;
+			manual = manual || mx != 0 || my != 0;
+		}
+		const Monster *lockTarget = LockedTarget();
+		if (lockTarget == nullptr && IsActionModeFree()) {
+			const float sx = rightStickX, sy = rightStickY;
+			if (sx * sx + sy * sy > 0.04f) {
+				turnX += sx * 2.8f * dt;
+				turnY -= sy * 1.6f * dt;
+				manual = true;
+			}
+		}
+		float fx = 0, fy = 0;
+		const bool moving = IsActionModeFree() && ReadMoveVector(fx, fy);
+		std::optional<Point> lockTile;
+		if (lockTarget != nullptr)
+			lockTile = lockTarget->position.tile;
+		OrbitCameraUpdate(dt, turnX, turnY, lockTile, moving, moving ? WorldAngleOf(fx, fy) : 0.0f, manual);
+	}
+
 	if (!IsActionModeFree()) {
 		AttackHeldByMouse = false;
 		return;
@@ -568,6 +675,22 @@ void ActionModeAfterCursor()
 {
 	if (!IsActionModeFree())
 		return;
+	if (IsOrbitViewActive()) {
+		// The mouse steers the camera here, so the cursor does not pick targets.
+		pcursmonst = -1;
+		pcursitem = -1;
+		ObjectUnderCursor = nullptr;
+		PlayerUnderCursor = nullptr;
+		const Player &player = *MyPlayer;
+		Point aim = player.position.future;
+		for (int i = 0; i < 5; i++) {
+			const Point next = aim + player._pdir;
+			if (!InDungeonBounds(next))
+				break;
+			aim = next;
+		}
+		cursPosition = aim;
+	}
 	const Monster *target = LockedTarget();
 	if (target == nullptr)
 		return;
@@ -623,6 +746,15 @@ bool ActionModeHandleLeftMouse(bool isShiftHeld)
 	(void)isShiftHeld;
 	if (!IsActionModeFree() || pcurs != CURSOR_HAND || !MyPlayer->HoldItem.isEmpty())
 		return false;
+	if (IsOrbitViewActive()) {
+		if (leveltype == DTYPE_TOWN) {
+			DoInteract();
+			return true;
+		}
+		AttackHeldByMouse = true;
+		DoAttack(false);
+		return true;
+	}
 	const bool overHudArea = GetMainPanel().contains(MousePosition);
 	if (overHudArea && !IsActionHudShown())
 		return false; // the real panel is visible there
@@ -704,8 +836,17 @@ bool ActionModeHandleRightStick(float x, float y)
 		RightStickArmed = true;
 	else if (mag > 0.75f && RightStickArmed) {
 		RightStickArmed = false;
-		if (LockedTarget() != nullptr)
-			SwitchLockTarget(x, y);
+		if (LockedTarget() != nullptr) {
+			if (IsOrbitViewActive()) {
+				// Flick in camera space: turn it into a screen-like vector for the picker.
+				const float angle = WorldAngleOf(x, y);
+				const float wx = std::cos(angle), wy = std::sin(angle);
+				// Inverse of the isometric screen mapping used by SwitchLockTarget.
+				SwitchLockTarget(wx - wy, -(wx + wy) * 0.5f);
+			} else {
+				SwitchLockTarget(x, y);
+			}
+		}
 	}
 	return true; // no free cursor while playing; it returns as soon as a panel opens
 }
@@ -718,16 +859,21 @@ bool ActionModeMovement(Player &player)
 		return true;
 	if (DodgeActive)
 		return true;
-	const AxisDirection input = ReadMoveInput();
-	if (!HasMoveInput(input)) {
+	const std::optional<Direction> dir = CurrentMoveDirection();
+	if (!dir) {
 		if (MovedByInputLastTick && player.walkpath[0] != WALK_NONE && player.destAction == ACTION_NONE)
 			NetSendCmdLoc(player.getId(), true, CMD_WALKXY, player.position.future); // stop
 		MovedByInputLastTick = false;
 		return true;
 	}
 	MovedByInputLastTick = true;
-	StepTowards(player, ToDirection(input));
+	StepTowards(player, *dir);
 	return true;
+}
+
+bool IsActionMouseCaptured()
+{
+	return MouseCaptured && IsActionModeFree();
 }
 
 bool IsPlayerDodging(const Player &player)
@@ -847,11 +993,25 @@ void DrawLockMarker(const Surface &out, const HudColors &c)
 	const Monster *target = LockedTarget();
 	if (target == nullptr || !target->animInfo.sprites)
 		return;
-	const std::optional<Point> feet = MonsterScreenFeet(*target);
-	if (!feet)
-		return;
-	const int scale = *GetOptions().Graphics.zoom ? 2 : 1;
-	const int spriteH = target->animInfo.currentSprite().height() * scale;
+	std::optional<Point> feet;
+	int spriteH = 0;
+	if (IsOrbitViewActive()) {
+		float mx, my;
+		if (!OrbitMonsterRenderPosition(static_cast<int>(target->getId()), mx, my))
+			return;
+		const float worldH = target->animInfo.currentSprite().height() / 44.0f;
+		feet = OrbitProject(mx, my, 0.0f, out);
+		const std::optional<Point> head = OrbitProject(mx, my, worldH, out);
+		if (!feet || !head)
+			return;
+		spriteH = std::max(8, feet->y - head->y);
+	} else {
+		feet = MonsterScreenFeet(*target);
+		if (!feet)
+			return;
+		const int scale = *GetOptions().Graphics.zoom ? 2 : 1;
+		spriteH = target->animInfo.currentSprite().height() * scale;
+	}
 	const Point chest { feet->x, feet->y - spriteH * 2 / 5 };
 	// Souls-style lock dot: white core, dark ring.
 	FillRect(out, chest.x - 3, chest.y - 2, 7, 5, c.black);
@@ -939,6 +1099,30 @@ void DrawInteractPrompt(const Surface &out)
 {
 	std::string text;
 	UiFlags color = UiFlags::ColorWhite;
+	if (IsOrbitViewActive()) {
+		const InteractTarget t = FindInteractTarget();
+		switch (t.kind) {
+		case InteractKind::Item:
+			text = std::string(Items[t.id].getName());
+			color = Items[t.id].getTextColor();
+			break;
+		case InteractKind::Object:
+			text = std::string(Objects[t.id].name().str());
+			break;
+		case InteractKind::Towner:
+			text = std::string(Towners[t.id].name);
+			break;
+		case InteractKind::Monster:
+			text = std::string(Monsters[t.id].name());
+			break;
+		default:
+			break;
+		}
+		if (!text.empty()) {
+			const bool pad = ControlMode != ControlTypes::KeyboardAndMouse;
+			text = StrCat(pad ? "(A) " : "[E] ", text);
+		}
+	} else
 	if (pcursitem != -1) {
 		const Item &item = Items[pcursitem];
 		text = std::string(item.getName());
