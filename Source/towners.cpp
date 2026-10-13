@@ -682,6 +682,11 @@ void TalkToGirl(Player &player, Towner &girl)
 	}
 }
 
+void TalkToGambler(Player & /*player*/, Towner & /*gambler*/)
+{
+	StartStore(TalkID::Gambler);
+}
+
 const TownerData TownersData[] = {
 	// clang-format off
 	// type          init (nullptr = default)  talk
@@ -698,6 +703,7 @@ const TownerData TownersData[] = {
 	{ TOWN_COWFARM, InitCowFarmer, TalkToCowFarmer   },
 	{ TOWN_FARMER,  nullptr,       TalkToFarmer      },
 	{ TOWN_GIRL,    nullptr,       TalkToGirl        },
+	{ TOWN_GAMBLER, nullptr,       TalkToGambler     },
 	// clang-format on
 };
 
@@ -721,6 +727,7 @@ const std::unordered_map<_talker_id, const char *> TownerShortNames = {
 	{ TOWN_FARMER, "lester" },
 	{ TOWN_GIRL, "celia" },
 	{ TOWN_COWFARM, "nut" },
+	{ TOWN_GAMBLER, "tremain" },
 };
 
 size_t GetNumTownerTypes()
@@ -792,6 +799,9 @@ void InitTowners()
 			break;
 		case TOWN_BMAID:
 			entry.position += TownBuildingShift(TownBuilding::GillianHouse);
+			break;
+		case TOWN_GAMBLER:
+			entry.position += TownBuildingShift(TownBuilding::Fountain);
 			break;
 		default:
 			break;

@@ -62,6 +62,8 @@
 #include "hwcursor.hpp"
 #include "init.hpp"
 #include "inv.h"
+#include "engine/assets.hpp"
+#include "utils/str_split.hpp"
 #include "levels/drlg_l1.h"
 #include "levels/forest.hpp"
 #include "levels/drlg_l2.h"
@@ -945,9 +947,66 @@ void RunGameLoop(interface_mode uMsg)
 				LogVerbose("devcap frame {}", devCaptureFrames);
 			if (devCaptureFrames == 20 && std::getenv("DEVILUTIONX_DEV_FOREST") != nullptr && leveltype == DTYPE_TOWN)
 				EnterForest();
+			if (const char *check = std::getenv("DEVILUTIONX_DEV_ASSETCHECK"); check != nullptr && devCaptureFrames == 5) {
+				for (const std::string_view path : SplitByChar(check, ';')) {
+					const AssetRef ref = FindAsset(path);
+					LogInfo("ASSET {} {} {}", ref.ok() ? "FOUND" : "missing", path, ref.ok() ? ref.size() : 0);
+					if (ref.ok() && std::getenv("DEVILUTIONX_DEV_ASSETDUMP") != nullptr) {
+						size_t size = 0;
+						const std::unique_ptr<std::byte[]> data = LoadFileInMem<std::byte>(std::string(path).c_str(), &size);
+						std::string name(path);
+						std::replace(name.begin(), name.end(), '\\', '_');
+						std::replace(name.begin(), name.end(), '/', '_');
+						if (FILE *f = std::fopen((paths::PrefPath() + name).c_str(), "wb"); f != nullptr) {
+							std::fwrite(data.get(), 1, size, f);
+							std::fclose(f);
+						}
+					}
+				}
+			}
+			if (const char *clvl = std::getenv("DEVILUTIONX_DEV_CLVL"); clvl != nullptr && devCaptureFrames == 22) {
+				while (MyPlayer->getCharacterLevel() < std::atoi(clvl))
+					NextPlrLevel(*MyPlayer);
+				Stash.gold = 500000;
+				MyPlayer->_pStrength = MyPlayer->_pBaseStr = 150; // test hero can use what he gambles
+				MyPlayer->_pDexterity = MyPlayer->_pBaseDex = 150;
+				MyPlayer->_pMagic = MyPlayer->_pBaseMag = 150;
+				CalcPlrInv(*MyPlayer, true);
+			}
+			if (devCaptureFrames == 25 && leveltype == DTYPE_TOWN) {
+				if (const Towner *gambler = GetTowner(TOWN_GAMBLER); gambler != nullptr)
+					LogInfo("GAMBLER at {},{}", gambler->position.x, gambler->position.y);
+			}
+			if (const char *store = std::getenv("DEVILUTIONX_DEV_STORE"); store != nullptr && devCaptureFrames == 40) {
+				StartStore(TalkID::Gambler);
+				if (std::string_view(store) == "gamblebuy") {
+					CurrentTextLine = 14;
+					StoreEnter();
+				}
+			}
+			if (const char *buys = std::getenv("DEVILUTIONX_DEV_GAMBLETEST"); buys != nullptr && devCaptureFrames >= 50 && devCaptureFrames % 10 == 0) {
+				static int bought = 0;
+				if (bought < std::atoi(buys)) {
+					if (ActiveStore == TalkID::GamblerBuy) {
+						CurrentTextLine = 5;
+						StoreEnter();
+					} else if (ActiveStore == TalkID::Confirm) {
+						CurrentTextLine = 18;
+						StoreEnter();
+						bought++;
+						LogInfo("GAMBLE bought #{}", bought);
+					}
+				} else if (ActiveStore != TalkID::None) {
+					ActiveStore = TalkID::None;
+					for (int i = 0; i < MyPlayer->_pNumInv; i++) {
+						const Item &item = MyPlayer->InvList[i];
+						LogInfo("GAMBLE got {} quality {} ({})", item.getName().str(), static_cast<int>(item._iMagical), item._iIName);
+					}
+				}
+			}
 			if (const char *rares = std::getenv("DEVILUTIONX_DEV_RARETEST"); rares != nullptr && devCaptureFrames == 30)
 				DevRareItemTest(std::atoi(rares));
-			if (const char *hover = std::getenv("DEVILUTIONX_DEV_HOVERINV"); hover != nullptr && devCaptureFrames > 30) {
+			if (const char *hover = std::getenv("DEVILUTIONX_DEV_HOVERINV"); hover != nullptr && devCaptureFrames > 30 && ActiveStore == TalkID::None) {
 				// Point the mouse at a backpack slot so the item details show.
 				invflag = true;
 				const int slot = SLOTXY_INV_FIRST + std::atoi(hover);

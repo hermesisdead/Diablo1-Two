@@ -66,6 +66,8 @@ enum class TalkID : uint8_t {
 	Tavern,
 	Drunk,
 	Barmaid,
+	Gambler,
+	GamblerBuy,
 };
 
 /** Currently active store */

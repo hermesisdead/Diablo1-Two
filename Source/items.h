@@ -537,6 +537,11 @@ _item_indexes RndItemForMonsterLevel(int8_t monsterLevel);
 [[nodiscard]] int ScaledDropLevel(int sourceLevel);
 /** @brief The affix powers of a rare item, in the order they were rolled. */
 [[nodiscard]] std::vector<item_effect_type> GetRareItemPowers(const Item &item);
+/**
+ * @brief Rolls the gambler's stock: unidentified equipment around the hero's level, each one a
+ * hidden magic, rare or (rarely) unique item. @p prices holds what the gambler asks for each.
+ */
+void SpawnGambleItems(std::vector<Item> &items, std::vector<int> &prices, int count);
 #ifdef _DEBUG
 /** @brief Test harness: rolls many rares, checks they regenerate identically, drops a few to look at. */
 void DevRareItemTest(int count);

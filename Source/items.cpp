@@ -3547,6 +3547,55 @@ std::vector<item_effect_type> GetRareItemPowers(const Item &item)
 	return powers;
 }
 
+void SpawnGambleItems(std::vector<Item> &items, std::vector<int> &prices, int count)
+{
+	items.clear();
+	prices.clear();
+	if (MyPlayer == nullptr)
+		return;
+	const Player &player = *MyPlayer;
+	const int heroLevel = player.getCharacterLevel();
+	for (int n = 0; n < count; n++) {
+		const int itemLevel = std::clamp(heroLevel + RandomIntBetween(-4, 4), 1, 60);
+		const _item_indexes idx = GetItemIndexForDroppableItem(true, [itemLevel](const ItemData &data) {
+			if (data.iMinMLvl > itemLevel || data.iMiscId == IMISC_UNIQUE)
+				return false;
+			switch (data.itype) {
+			case ItemType::Sword:
+			case ItemType::Axe:
+			case ItemType::Mace:
+			case ItemType::Bow:
+			case ItemType::Shield:
+			case ItemType::LightArmor:
+			case ItemType::Helm:
+			case ItemType::MediumArmor:
+			case ItemType::HeavyArmor:
+			case ItemType::Staff:
+			case ItemType::Ring:
+			case ItemType::Amulet:
+				return true;
+			default:
+				return false;
+			}
+		});
+		Item item {};
+		// Odds per pick: ~6% get a shot at a unique, ~17% are rares, the rest plain magic.
+		const int roll = GenerateRnd(1000);
+		int uper = 1;
+		if (roll < 60)
+			uper = 15;
+		else if (roll < 230 && *GetOptions().Gameplay.rareItems)
+			item.dwBuff |= CF_RARE;
+		SetupAllItems(player, item, idx, AdvanceRndSeed(), itemLevel, uper, true, false);
+		SetupItem(item);
+		item._iIdentified = false;
+		item._iStatFlag = player.CanUseItem(item);
+		const int baseValue = AllItemsList[static_cast<size_t>(idx)].iValue;
+		prices.push_back(std::min(200 + 2 * baseValue + 12 * heroLevel * heroLevel + 40 * itemLevel, 250000));
+		items.push_back(item);
+	}
+}
+
 #ifdef _DEBUG
 void DevRareItemTest(int count)
 {

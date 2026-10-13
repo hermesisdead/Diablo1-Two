@@ -56,6 +56,10 @@ StaticVector<Item, NumSmithItemsHf> PremiumItems;
 StaticVector<Item, NumHealerItemsHf> HealerItems;
 
 StaticVector<Item, NumWitchItemsHf> WitchItems;
+/** Tremain's gambling stock (unidentified) and his asking prices. */
+std::vector<Item> GamblerItems;
+std::vector<int> GamblerPrices;
+constexpr int GambleStockSize = 15;
 
 int BoyItemLevel;
 Item BoyItem;
@@ -86,6 +90,7 @@ const char *TownerNameForTalkID(TalkID s)
 	case TalkID::Tavern: return "ogden";
 	case TalkID::Drunk: return "farnham";
 	case TalkID::Barmaid: return "gillian";
+	case TalkID::Gambler: return "tremain";
 	default: return nullptr;
 	}
 }
@@ -759,6 +764,52 @@ void StartWitchBuy()
 	NumTextLines = std::max(CurrentItemIndex - 4, 0);
 }
 
+void StartGambler()
+{
+	IsTextFullSize = false;
+	HasScrollbar = false;
+	AddSText(0, 2, _("Tremain's table"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
+	AddSText(0, 7, _("\"Feeling lucky, friend?\""), UiFlags::ColorWhite | UiFlags::AlignCenter, false);
+	AddSText(0, 10, _("Would you like to:"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
+	AddSText(0, 14, _("Gamble"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
+	AddSText(0, 18, _("Leave the table"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
+	AddSLine(5);
+	CurrentItemIndex = 18;
+}
+
+/** The gambler's list: base items only, all in plain white so nothing gives the roll away. */
+void ScrollGamblerBuy(int idx)
+{
+	ClearSText(5, 21);
+	PreviousScrollPos = 5;
+	const int count = static_cast<int>(GamblerItems.size());
+	for (int l = 5; l < 20 && idx < count; l += 4) {
+		const Item &item = GamblerItems[idx];
+		const UiFlags itemColor = item._iStatFlag ? UiFlags::ColorWhite : UiFlags::ColorRed;
+		AddSText(20, l, item.getName(), itemColor, true, item._iCurs, true);
+		AddSTextVal(l, GamblerPrices[idx]);
+		PrintStoreItem(item, l + 1, itemColor, true);
+		NextScrollPos = l;
+		idx++;
+	}
+	if (CurrentTextLine != -1 && !TextLine[CurrentTextLine].isSelectable() && CurrentTextLine != BackButtonLine())
+		CurrentTextLine = NextScrollPos;
+}
+
+void StartGamblerBuy()
+{
+	IsTextFullSize = true;
+	HasScrollbar = true;
+	ScrollPos = 0;
+	RenderGold = true;
+	AddSText(20, 1, _("Pick one. No refunds."), UiFlags::ColorWhitegold, false);
+	AddSLine(3);
+	ScrollGamblerBuy(ScrollPos);
+	AddItemListBackButton();
+	CurrentItemIndex = static_cast<int>(GamblerItems.size());
+	NumTextLines = std::max(CurrentItemIndex - 4, 0);
+}
+
 bool WitchSellOk(int i)
 {
 	const Item *pI;
@@ -936,7 +987,9 @@ void StoreConfirm(Item &item)
 	HasScrollbar = false;
 	ClearSText(5, 23);
 
-	const UiFlags itemColor = item.getTextColorWithStatCheck();
+	UiFlags itemColor = item.getTextColorWithStatCheck();
+	if (OldActiveStore == TalkID::GamblerBuy && item._iStatFlag)
+		itemColor = UiFlags::ColorWhite; // a gamble stays a mystery until it is bought
 	AddSText(20, 8, item.getName(), itemColor, false);
 	AddSTextVal(8, item._iIvalue);
 	PrintStoreItem(item, 9, itemColor);
@@ -946,6 +999,9 @@ void StoreConfirm(Item &item)
 	switch (OldActiveStore) {
 	case TalkID::BoyBuy:
 		prompt = _("Do we have a deal?");
+		break;
+	case TalkID::GamblerBuy:
+		prompt = _("Take your chances with this one?");
 		break;
 	case TalkID::StorytellerIdentify:
 		prompt = _("Are you sure you want to identify this item?");
@@ -1580,6 +1636,62 @@ void WitchEnter()
 	}
 }
 
+void GamblerEnter()
+{
+	switch (CurrentTextLine) {
+	case 14:
+		// A fresh table every time you sit down, like Diablo II's gamblers.
+		SpawnGambleItems(GamblerItems, GamblerPrices, GambleStockSize);
+		StartStore(TalkID::GamblerBuy);
+		break;
+	case 18:
+		ActiveStore = TalkID::None;
+		break;
+	}
+}
+
+void GamblerBuyEnter()
+{
+	if (CurrentTextLine == BackButtonLine()) {
+		StartStore(TalkID::Gambler);
+		CurrentTextLine = 14;
+		return;
+	}
+
+	OldTextLine = CurrentTextLine;
+	OldScrollPos = ScrollPos;
+	OldActiveStore = TalkID::GamblerBuy;
+
+	const int idx = ScrollPos + ((CurrentTextLine - PreviousScrollPos) / 4);
+	if (idx < 0 || idx >= static_cast<int>(GamblerItems.size()))
+		return;
+
+	if (!PlayerCanAfford(GamblerPrices[idx])) {
+		StartStore(TalkID::NoMoney);
+		return;
+	}
+	if (!StoreAutoPlace(GamblerItems[idx], false)) {
+		StartStore(TalkID::NoRoom);
+		return;
+	}
+
+	TempItem = GamblerItems[idx];
+	TempItem._iIvalue = GamblerPrices[idx]; // the confirm screen shows the asking price
+	StartStore(TalkID::Confirm);
+}
+
+void GamblerBuyItem()
+{
+	const int idx = OldScrollPos + ((OldTextLine - PreviousScrollPos) / 4);
+	if (idx < 0 || idx >= static_cast<int>(GamblerItems.size()))
+		return;
+	TakePlrsMoney(GamblerPrices[idx]);
+	StoreAutoPlace(GamblerItems[idx], true);
+	GamblerItems.erase(GamblerItems.begin() + idx);
+	GamblerPrices.erase(GamblerPrices.begin() + idx);
+	CalcPlrInv(*MyPlayer, true);
+}
+
 /**
  * @brief Purchases an item from the witch.
  */
@@ -1850,6 +1962,9 @@ void ConfirmEnter(Item &item)
 			break;
 		case TalkID::BoyBuy:
 			BoyBuyItem(BoyItem, item._iIvalue);
+			break;
+		case TalkID::GamblerBuy:
+			GamblerBuyItem();
 			break;
 		case TalkID::HealerBuy:
 			HealerBuyItem(item);
@@ -2389,6 +2504,15 @@ void StartStore(TalkID s)
 	case TalkID::Barmaid:
 		StartBarmaid();
 		break;
+	case TalkID::Gambler:
+		StartGambler();
+		break;
+	case TalkID::GamblerBuy:
+		if (!GamblerItems.empty())
+			StartGamblerBuy();
+		else
+			StartGambler();
+		break;
 	case TalkID::None:
 		break;
 	}
@@ -2456,6 +2580,9 @@ void DrawSText(const Surface &out)
 		case TalkID::WitchBuy:
 			ScrollWitchBuy(ScrollPos);
 			break;
+		case TalkID::GamblerBuy:
+			ScrollGamblerBuy(ScrollPos);
+			break;
 		case TalkID::HealerBuy:
 			ScrollHealerBuy(ScrollPos);
 			break;
@@ -2503,7 +2630,12 @@ void StoreESC()
 	case TalkID::Tavern:
 	case TalkID::Drunk:
 	case TalkID::Barmaid:
+	case TalkID::Gambler:
 		ActiveStore = TalkID::None;
+		break;
+	case TalkID::GamblerBuy:
+		StartStore(TalkID::Gambler);
+		CurrentTextLine = 14;
 		break;
 	case TalkID::Gossip:
 		StartStore(OldActiveStore);
@@ -2772,6 +2904,12 @@ void StoreEnter()
 		break;
 	case TalkID::Barmaid:
 		BarmaidEnter();
+		break;
+	case TalkID::Gambler:
+		GamblerEnter();
+		break;
+	case TalkID::GamblerBuy:
+		GamblerBuyEnter();
 		break;
 	case TalkID::None:
 		break;

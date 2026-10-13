@@ -37,6 +37,8 @@ enum _talker_id : uint8_t {
 	TOWN_FARMER,
 	TOWN_GIRL,
 	TOWN_COWFARM,
+	/** Tremain, the cut priest from Diablo's data, now running a gambling table. */
+	TOWN_GAMBLER,
 	// Note: Enum values are parsed from TSV using magic_enum
 	// The actual count is determined dynamically from TSV data
 };
