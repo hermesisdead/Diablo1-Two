@@ -475,3 +475,10 @@ uwp-project/Assets/ui_art
 /tmp/
 /compile_commands.json
 /tools/tmp
+
+# Output of build-windows.bat
+/.vcpkg/
+/devilutionx.exe
+/devilutionx.pdb
+/*.dll
+/source/

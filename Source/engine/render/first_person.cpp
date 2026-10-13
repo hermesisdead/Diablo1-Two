@@ -20,6 +20,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
+#include <optional>
 #include <vector>
 
 #include "controls/control_mode.hpp"
