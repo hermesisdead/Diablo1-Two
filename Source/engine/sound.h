@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 
+#include "engine/ambience_synth.hpp"
 #include "levels/gendung.h"
 #include "utils/attributes.h"
 
@@ -78,6 +79,17 @@ void sound_disable_music(bool disable);
 int sound_get_or_set_music_volume(int volume);
 int sound_get_or_set_sound_volume(int volume);
 int SoundGetOrSetAudioCuesVolume(int volume);
+int sound_get_or_set_ambience_volume(int volume);
+
+/**
+ * @brief Keeps the weather ambience playing: call every frame with the wanted track and its
+ * level (0..1). Changing track crossfades; level changes are smoothed.
+ */
+void UpdateAmbience(AmbienceTrack track, float level);
+/** @brief Stops the ambience immediately (level change, leaving the game). */
+void StopAmbience();
+/** @brief A thunder clap at the given level (0..1), on the ambience volume. */
+void PlayThunder(float level);
 void music_mute();
 void music_unmute();
 

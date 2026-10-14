@@ -42,6 +42,7 @@ void GamemenuNewGame(bool bActivate);
 void GamemenuOptions(bool bActivate);
 void GamemenuMusicVolume(bool bActivate);
 void GamemenuSoundVolume(bool bActivate);
+void GamemenuAmbienceVolume(bool bActivate);
 void GamemenuBrightness(bool bActivate);
 void GamemenuSpeed(bool bActivate);
 
@@ -72,6 +73,7 @@ TMenuItem sgOptionsMenu[] = {
 	// dwFlags,                     pszStr,              fnMenu
 	{ GMENU_ENABLED | GMENU_SLIDER, nullptr,             &GamemenuMusicVolume  },
 	{ GMENU_ENABLED | GMENU_SLIDER, nullptr,             &GamemenuSoundVolume  },
+	{ GMENU_ENABLED | GMENU_SLIDER, nullptr,             &GamemenuAmbienceVolume },
 	{ GMENU_ENABLED | GMENU_SLIDER, N_("Gamma"),         &GamemenuBrightness   },
 	{ GMENU_ENABLED | GMENU_SLIDER, N_("Speed"),         &GamemenuSpeed        },
 	{ GMENU_ENABLED               , N_("Previous Menu"), &GamemenuPrevious     },
@@ -87,6 +89,11 @@ const char *const MusicToggleNames[] = {
 const char *const SoundToggleNames[] = {
 	N_("Sound"),
 	N_("Sound Disabled"),
+};
+/** Specifies the menu names for the weather ambience slider. */
+const char *const AmbienceToggleNames[] = {
+	N_("Ambience"),
+	N_("Ambience Disabled"),
 };
 
 void GamemenuUpdateSingle()
@@ -149,43 +156,49 @@ void GamemenuGetSound()
 	GamemenuSoundMusicToggle(SoundToggleNames, &sgOptionsMenu[1], sound_get_or_set_sound_volume(1));
 }
 
+void GamemenuGetAmbience()
+{
+	GamemenuSoundMusicToggle(AmbienceToggleNames, &sgOptionsMenu[2], sound_get_or_set_ambience_volume(1));
+}
+
 void GamemenuGetBrightness()
 {
-	gmenu_slider_steps(&sgOptionsMenu[2], 21);
-	gmenu_slider_set(&sgOptionsMenu[2], 0, 100, UpdateBrightness(-1));
+	gmenu_slider_steps(&sgOptionsMenu[3], 21);
+	gmenu_slider_set(&sgOptionsMenu[3], 0, 100, UpdateBrightness(-1));
 }
 
 void GamemenuGetSpeed()
 {
 	if (gbIsMultiplayer) {
-		sgOptionsMenu[3].removeFlags(GMENU_ENABLED | GMENU_SLIDER);
+		sgOptionsMenu[4].removeFlags(GMENU_ENABLED | GMENU_SLIDER);
 		if (sgGameInitInfo.nTickRate >= 50)
-			sgOptionsMenu[3].pszStr = _("Speed: Fastest").data();
+			sgOptionsMenu[4].pszStr = _("Speed: Fastest").data();
 		else if (sgGameInitInfo.nTickRate >= 40)
-			sgOptionsMenu[3].pszStr = _("Speed: Faster").data();
+			sgOptionsMenu[4].pszStr = _("Speed: Faster").data();
 		else if (sgGameInitInfo.nTickRate >= 30)
-			sgOptionsMenu[3].pszStr = _("Speed: Fast").data();
+			sgOptionsMenu[4].pszStr = _("Speed: Fast").data();
 		else if (sgGameInitInfo.nTickRate == 20)
-			sgOptionsMenu[3].pszStr = _("Speed: Normal").data();
+			sgOptionsMenu[4].pszStr = _("Speed: Normal").data();
 		return;
 	}
 
-	sgOptionsMenu[3].addFlags(GMENU_ENABLED | GMENU_SLIDER);
+	sgOptionsMenu[4].addFlags(GMENU_ENABLED | GMENU_SLIDER);
 
-	sgOptionsMenu[3].pszStr = _("Speed").data();
-	gmenu_slider_steps(&sgOptionsMenu[3], 46);
-	gmenu_slider_set(&sgOptionsMenu[3], 20, 50, sgGameInitInfo.nTickRate);
+	sgOptionsMenu[4].pszStr = _("Speed").data();
+	gmenu_slider_steps(&sgOptionsMenu[4], 46);
+	gmenu_slider_set(&sgOptionsMenu[4], 20, 50, sgGameInitInfo.nTickRate);
 }
 
 int GamemenuSliderBrightness()
 {
-	return gmenu_slider_get(&sgOptionsMenu[2], 0, 100);
+	return gmenu_slider_get(&sgOptionsMenu[3], 0, 100);
 }
 
 void GamemenuOptions(bool /*bActivate*/)
 {
 	GamemenuGetMusic();
 	GamemenuGetSound();
+	GamemenuGetAmbience();
 	GamemenuGetBrightness();
 	GamemenuGetSpeed();
 	gmenu_set_items(sgOptionsMenu, nullptr);
@@ -247,6 +260,17 @@ void GamemenuSoundVolume(bool bActivate)
 	GamemenuGetSound();
 }
 
+void GamemenuAmbienceVolume(bool bActivate)
+{
+	if (bActivate) {
+		// Clicking the label toggles between off and full.
+		sound_get_or_set_ambience_volume(sound_get_or_set_ambience_volume(1) > VOLUME_MIN ? VOLUME_MIN : VOLUME_MAX);
+	} else {
+		sound_get_or_set_ambience_volume(GamemenuSliderMusicSound(&sgOptionsMenu[2]));
+	}
+	GamemenuGetAmbience();
+}
+
 void GamemenuBrightness(bool bActivate)
 {
 	int brightness;
@@ -268,9 +292,9 @@ void GamemenuSpeed(bool bActivate)
 			sgGameInitInfo.nTickRate = 20;
 		else
 			sgGameInitInfo.nTickRate = 50;
-		gmenu_slider_set(&sgOptionsMenu[3], 20, 50, sgGameInitInfo.nTickRate);
+		gmenu_slider_set(&sgOptionsMenu[4], 20, 50, sgGameInitInfo.nTickRate);
 	} else {
-		sgGameInitInfo.nTickRate = gmenu_slider_get(&sgOptionsMenu[3], 20, 50);
+		sgGameInitInfo.nTickRate = gmenu_slider_get(&sgOptionsMenu[4], 20, 50);
 	}
 
 	GetOptions().Gameplay.tickRate.SetValue(sgGameInitInfo.nTickRate);

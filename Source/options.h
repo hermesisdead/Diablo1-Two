@@ -512,6 +512,8 @@ struct AudioOptions : OptionCategoryBase {
 	OptionEntryInt<int> audioCuesVolume;
 	/** @brief Music volume. */
 	OptionEntryInt<int> musicVolume;
+	/** @brief Weather ambience volume (rain, wind, crickets...). */
+	OptionEntryInt<int> ambienceVolume;
 	/** @brief Player emits sound when walking. */
 	OptionEntryBoolean walkingSound;
 	/** @brief Automatically equipping items on pickup emits the equipment sound. */

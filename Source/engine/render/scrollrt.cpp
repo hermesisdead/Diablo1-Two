@@ -54,7 +54,6 @@
 #include "nthread.h"
 #include "engine/render/dungeon_mood.hpp"
 #include "levels/forest.hpp"
-#include "engine/render/town_weather.hpp"
 #include "action_mode.hpp"
 #include "engine/render/orbit_view.hpp"
 #include "options.h"
@@ -1326,11 +1325,9 @@ void DrawView(const Surface &out, Point startPosition)
 	if (IsOrbitViewActive()) {
 		const Surface orbitOut = IsActionHudEnabled() ? out : out.subregionY(0, gnViewportHeight);
 		DrawOrbitView(orbitOut);
-		if (leveltype != DTYPE_TOWN && !AutomapActive)
+		if (!AutomapActive)
 			DrawDungeonMood(orbitOut);
 		DrawForestHud(out.subregionY(0, gnViewportHeight));
-		if (leveltype == DTYPE_TOWN && *GetOptions().Graphics.townWeather && !AutomapActive)
-			DrawTownWeather(out.subregionY(0, gnViewportHeight));
 		if (AutomapActive)
 			DrawAutomap(out.subregionY(0, gnViewportHeight));
 		return;
@@ -1338,11 +1335,9 @@ void DrawView(const Surface &out, Point startPosition)
 	Displacement offset = {};
 	CalcFirstTilePosition(startPosition, offset);
 	DrawGame(out, startPosition, offset);
-	if (leveltype != DTYPE_TOWN && !AutomapActive)
+	if (!AutomapActive)
 		DrawDungeonMood(out.subregionY(0, gnViewportHeight));
 	DrawForestHud(out.subregionY(0, gnViewportHeight));
-	if (leveltype == DTYPE_TOWN && *GetOptions().Graphics.townWeather && !AutomapActive)
-		DrawTownWeather(out.subregionY(0, gnViewportHeight));
 	if (AutomapActive) {
 		DrawAutomap(out.subregionY(0, gnViewportHeight));
 	}

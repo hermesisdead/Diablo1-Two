@@ -228,6 +228,7 @@ void FreeGame()
 	FreeGameMem();
 	stream_stop();
 	music_stop();
+	StopAmbience();
 }
 
 bool ProcessInput()
@@ -1012,6 +1013,12 @@ void RunGameLoop(interface_mode uMsg)
 				const size_t index = std::min<size_t>(std::atoi(hover), skills.size() - 1);
 				SkillTreeTab = skills[index].tab;
 				MousePosition = GetPanelPosition(UiPanels::Spell, { (skills[index].column == 0 ? 62 : skills[index].column == 1 ? 160 : 258), 44 + skills[index].row * 45 + 19 });
+			}
+			if (std::getenv("DEVILUTIONX_DEV_GAMEMENU") != nullptr) {
+				if (devCaptureFrames == 40)
+					gamemenu_on();
+				if (devCaptureFrames == 42)
+					gmenu_presskeys(SDLK_RETURN); // Options
 			}
 			if (devCaptureFrames == 25 && leveltype == DTYPE_TOWN) {
 				if (const Towner *gambler = GetTowner(TOWN_GAMBLER); gambler != nullptr)

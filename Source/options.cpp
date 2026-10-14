@@ -514,6 +514,7 @@ AudioOptions::AudioOptions()
     , soundVolume("Sound Volume", OptionEntryFlags::Invisible, "Sound Volume", "Movie and SFX volume.", VOLUME_MAX)
     , audioCuesVolume("Audio Cues Volume", OptionEntryFlags::Invisible, "Audio Cues Volume", "Navigation audio cues volume.", VOLUME_MAX)
     , musicVolume("Music Volume", OptionEntryFlags::Invisible, "Music Volume", "Music Volume.", VOLUME_MAX)
+    , ambienceVolume("Ambience Volume", OptionEntryFlags::Invisible, "Ambience Volume", "Weather ambience volume.", VOLUME_MAX)
     , walkingSound("Walking Sound", OptionEntryFlags::None, N_("Walking Sound"), N_("Player emits sound when walking."), true)
     , autoEquipSound("Auto Equip Sound", OptionEntryFlags::None, N_("Auto Equip Sound"), N_("Automatically equipping items on pickup emits the equipment sound."), false)
     , itemPickupSound("Item Pickup Sound", OptionEntryFlags::None, N_("Item Pickup Sound"), N_("Picking up items emits the items pickup sound."), false)
@@ -530,6 +531,7 @@ std::vector<OptionEntryBase *> AudioOptions::GetEntries()
 		&soundVolume,
 		&audioCuesVolume,
 		&musicVolume,
+		&ambienceVolume,
 		&walkingSound,
 		&autoEquipSound,
 		&itemPickupSound,
@@ -797,8 +799,8 @@ GraphicsOptions::GraphicsOptions()
     , zoom("Zoom", OptionEntryFlags::None, N_("Zoom"), N_("Zoom on when enabled."), false)
     , perPixelLighting("Per-pixel Lighting", OptionEntryFlags::None, N_("Per-pixel Lighting"), N_("Subtile lighting for smoother light gradients."), DEFAULT_PER_PIXEL_LIGHTING)
     , colorCycling("Color Cycling", OptionEntryFlags::None, N_("Color Cycling"), N_("Color cycling effect used for water, lava, and acid animation."), true)
-    , townWeather("Town Weather", OptionEntryFlags::None, N_("Town Weather"), N_("Randomized weather effects such as rain, snow and fog in Tristram."), true)
-    , dungeonMoods("Dungeon Moods", OptionEntryFlags::None, N_("Dungeon Moods"), N_("Every dungeon level rolls its own atmosphere: drifting fog, dust motes in the torchlight, frost, embers or dripping ceilings."), true)
+    , townWeather("Town Weather", OptionEntryFlags::None, N_("Town Weather"), N_("Changing weather in Tristram and the Darkwood: rain, thunderstorms, snow, wind, fog and fireflies, each with its own ambient sound."), true)
+    , dungeonMoods("Dungeon Moods", OptionEntryFlags::None, N_("Dungeon Moods"), N_("Every visit to a dungeon level rolls its own atmosphere and ambient sound: fog, dust, frost, embers, dripping water, ash, spores or blood mist."), true)
     , dungeonColorVariation("Dungeon Color Variation", OptionEntryFlags::CantChangeInGame, N_("Dungeon Color Variation"), N_("Every dungeon level gets its own color mood."), true)
     , alternateNestArt("Alternate nest art", OptionEntryFlags::OnlyHellfire | OptionEntryFlags::CantChangeInGame, N_("Alternate nest art"), N_("The game will use an alternative palette for Hellfire’s nest tileset."), false)
 #if SDL_VERSION_ATLEAST(2, 0, 0)

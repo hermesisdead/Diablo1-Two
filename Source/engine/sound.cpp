@@ -293,6 +293,7 @@ void snd_init()
 void snd_deinit()
 {
 	if (gbSndInited) {
+		StopAmbience();
 		ClearDuplicateSounds();
 #ifdef USE_SDL3
 		MIX_DestroyMixer(CurrentMixer);

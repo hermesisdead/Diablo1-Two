@@ -1,10 +1,11 @@
 /**
  * @file dungeon_mood.hpp
  *
- * Randomized atmosphere for dungeon levels: drifting fog, dust motes catching the torchlight,
- * frost sparkles, rising embers and dripping ceilings. Each level rolls its mood from its
- * dungeon seed, so a level keeps its mood for the whole game and a new game re-rolls it.
- * The effects only show where the level is lit, so darkness stays dark.
+ * Weather and atmosphere for every area: Tristram and the Darkwood get outdoor weather (rain,
+ * thunderstorms, snow, wind-blown leaves, fireflies, fog) that changes every few minutes;
+ * dungeon levels roll an atmosphere on each visit (mist, dust, frost, embers, drips, ash,
+ * spores, blood mist). Each weather has its own ambient sound loop.
+ * Effects only show where the level is lit, so darkness stays dark.
  */
 #pragma once
 
@@ -16,11 +17,20 @@ namespace devilution {
 
 enum class DungeonMood : uint8_t {
 	Clear,
-	Mist,   // drifting grey fog with a few motes
-	Dust,   // golden dust motes in the light, faint haze
-	Frost,  // pale blue haze and slowly falling ice glitter
-	Embers, // rising sparks and a dull red haze
-	Drips,  // water dripping from the ceiling onto the floor, with splash rings
+	Mist,      // drifting grey fog with a few motes
+	Dust,      // golden dust motes in the light, faint haze
+	Frost,     // pale blue haze and slowly falling ice glitter
+	Embers,    // rising sparks and a dull red haze
+	Drips,     // water dripping from the ceiling onto the floor, with splash rings
+	Rain,      // outdoor: rain streaks and splashes
+	Storm,     // outdoor: heavy slanting rain, darker sky, lightning and thunder
+	Snow,      // outdoor: drifting snowflakes and a white haze
+	Wind,      // outdoor: gusts carrying leaves and dust
+	Fireflies, // outdoor at night: blinking fireflies over a low mist
+	Ash,       // falling ash and a smoky haze
+	Spores,    // glowing spores rising through a damp green haze
+	BloodMist, // thick red fog
+	COUNT
 };
 
 /** @brief The mood of the current dungeon level (Clear in town or when disabled). */

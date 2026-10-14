@@ -168,7 +168,10 @@ echo What's new to try:
 echo   - Tristram: walk to the western edge of the woods for "Into the Darkwood"
 echo     ^(endless, level-scaled monster waves; single player^).
 echo   - Tremain the Gambler stands by the fountain; shops now use the item grid.
-echo   - Rare ^(yellow^) items and level-scaled loot; dungeon moods ^(fog, dust...^).
+echo   - Rare ^(yellow^) items and level-scaled loot.
+echo   - Diablo II style skill trees: press T to spend skill points.
+echo   - Weather everywhere ^(rain, storms, snow, wind, fireflies, ash...^) with
+echo     ambient sound; adjust it with the Ambience slider in the in-game Options.
 echo   - F4 toggles action mode ^(close camera, WASD, dodge, lock-on^).
 echo   Options for all of these are under Settings ^> Gameplay / Graphics.
 echo.
