@@ -46,6 +46,12 @@ echo.
 rem --- Locate the source tree ------------------------------------------------
 if exist "%OUT_DIR%\CMakeLists.txt" (
     set "SRC_DIR=%OUT_DIR%"
+    rem Running from a checkout of the repository: pull the latest changes first
+    rem (skipped quietly if there are local edits or no network).
+    where git >nul 2>nul && if exist "%OUT_DIR%\.git" (
+        echo Updating this checkout ...
+        git -C "%OUT_DIR%" pull --ff-only || echo [WARN] Could not update, building what is here.
+    )
 ) else (
     set "SRC_DIR=%OUT_DIR%\source"
     where git >nul 2>nul || (
@@ -158,7 +164,13 @@ if not exist "%OUT_DIR%\DIABDAT.MPQ" if not exist "%OUT_DIR%\diabdat.mpq" if not
     echo       ^(or spawn.mpq for the shareware version; hellfire*.mpq for Hellfire^).
     echo.
 )
-echo In game: F4 toggles the first-person view.
+echo What's new to try:
+echo   - Tristram: walk to the western edge of the woods for "Into the Darkwood"
+echo     ^(endless, level-scaled monster waves; single player^).
+echo   - Tremain the Gambler stands by the fountain; shops now use the item grid.
+echo   - Rare ^(yellow^) items and level-scaled loot; dungeon moods ^(fog, dust...^).
+echo   - F4 toggles action mode ^(close camera, WASD, dodge, lock-on^).
+echo   Options for all of these are under Settings ^> Gameplay / Graphics.
 echo.
 pause
 exit /b 0
