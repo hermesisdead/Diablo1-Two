@@ -30,6 +30,7 @@
 #include "panels/info_box.hpp"
 #include "panels/quest_log.hpp"
 #include "qol/stash.h"
+#include "levels/desert.hpp"
 #include "qol/visual_store.h"
 #include "tables/townerdat.hpp"
 #include "towners.h"
@@ -63,6 +64,13 @@ void RefreshGamblerStock()
 {
 	constexpr int GambleStockSize = 15;
 	SpawnGambleItems(GamblerItems, GamblerPrices, GambleStockSize);
+}
+
+std::vector<Item> PriestItems;
+
+void RefreshPriestStock()
+{
+	SpawnPriestItems(PriestItems, 20);
 }
 
 int BoyItemLevel;
@@ -781,6 +789,69 @@ void StartGambler()
 	CurrentItemIndex = 18;
 }
 
+void StartPriest()
+{
+	IsTextFullSize = false;
+	HasScrollbar = false;
+	AddSText(0, 2, _("Brother Kalim's wares"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
+	AddSText(0, 7, _("\"The desert tests the soul, traveller.\""), UiFlags::ColorWhite | UiFlags::AlignCenter, false);
+	AddSText(0, 10, _("Would you like to:"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
+	AddSText(0, 14, _("Buy blessed items"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
+	AddSText(0, 18, _("Leave"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
+	AddSLine(5);
+	CurrentItemIndex = 18;
+}
+
+void ScrollPriestBuy(int idx)
+{
+	ClearSText(5, 21);
+	PreviousScrollPos = 5;
+	const int count = static_cast<int>(PriestItems.size());
+	for (int l = 5; l < 20 && idx < count; l += 4) {
+		const Item &item = PriestItems[idx];
+		const UiFlags itemColor = item.getTextColorWithStatCheck();
+		AddSText(20, l, item.getName(), itemColor, true, item._iCurs, true);
+		AddSTextVal(l, item._iIvalue);
+		PrintStoreItem(item, l + 1, itemColor, true);
+		NextScrollPos = l;
+		idx++;
+	}
+	if (CurrentTextLine != -1 && !TextLine[CurrentTextLine].isSelectable() && CurrentTextLine != BackButtonLine())
+		CurrentTextLine = NextScrollPos;
+}
+
+void StartPriestBuy()
+{
+	IsTextFullSize = true;
+	HasScrollbar = true;
+	ScrollPos = 0;
+	RenderGold = true;
+	AddSText(20, 1, _("I have these blessed items for sale:"), UiFlags::ColorWhitegold, false);
+	AddSLine(3);
+	ScrollPriestBuy(ScrollPos);
+	AddItemListBackButton();
+	CurrentItemIndex = static_cast<int>(PriestItems.size());
+	NumTextLines = std::max(CurrentItemIndex - 4, 0);
+}
+
+void StartCaravan()
+{
+	IsTextFullSize = false;
+	HasScrollbar = false;
+	AddSText(0, 2, _("Jamal's caravan"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
+	if (InDesertRegion()) {
+		AddSText(0, 8, _("Would you like to go"), UiFlags::ColorWhite | UiFlags::AlignCenter, false);
+		AddSText(0, 10, _("back to Tristram?"), UiFlags::ColorWhite | UiFlags::AlignCenter, false);
+	} else {
+		AddSText(0, 8, _("Would you like to travel"), UiFlags::ColorWhite | UiFlags::AlignCenter, false);
+		AddSText(0, 10, _("to Sand Tristram?"), UiFlags::ColorWhite | UiFlags::AlignCenter, false);
+	}
+	AddSText(0, 14, _("Yes"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
+	AddSText(0, 18, _("No"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
+	AddSLine(5);
+	CurrentItemIndex = 18;
+}
+
 /** The gambler's list: base items only, all in plain white so nothing gives the roll away. */
 void ScrollGamblerBuy(int idx)
 {
@@ -1014,6 +1085,7 @@ void StoreConfirm(Item &item)
 	case TalkID::SmithPremiumBuy:
 	case TalkID::WitchBuy:
 	case TalkID::SmithBuy:
+	case TalkID::PriestBuy:
 		prompt = _("Are you sure you want to buy this item?");
 		break;
 	case TalkID::WitchRecharge:
@@ -1640,6 +1712,72 @@ void WitchEnter()
 	}
 }
 
+void PriestEnter()
+{
+	switch (CurrentTextLine) {
+	case 14:
+		if (*GetOptions().Gameplay.storeUi == StoreUi::VisualGrid) {
+			ActiveStore = TalkID::None;
+			OpenVisualStore(VisualStoreVendor::Priest);
+			break;
+		}
+		StartStore(TalkID::PriestBuy);
+		break;
+	case 18:
+		ActiveStore = TalkID::None;
+		break;
+	}
+}
+
+void PriestBuyEnter()
+{
+	if (CurrentTextLine == BackButtonLine()) {
+		StartStore(TalkID::Priest);
+		CurrentTextLine = 14;
+		return;
+	}
+	OldTextLine = CurrentTextLine;
+	OldScrollPos = ScrollPos;
+	OldActiveStore = TalkID::PriestBuy;
+	const int idx = ScrollPos + ((CurrentTextLine - PreviousScrollPos) / 4);
+	if (idx < 0 || idx >= static_cast<int>(PriestItems.size()))
+		return;
+	if (!PlayerCanAfford(PriestItems[idx]._iIvalue)) {
+		StartStore(TalkID::NoMoney);
+		return;
+	}
+	if (!StoreAutoPlace(PriestItems[idx], false)) {
+		StartStore(TalkID::NoRoom);
+		return;
+	}
+	TempItem = PriestItems[idx];
+	StartStore(TalkID::Confirm);
+}
+
+void PriestBuyItem()
+{
+	const int idx = OldScrollPos + ((OldTextLine - PreviousScrollPos) / 4);
+	if (idx < 0 || idx >= static_cast<int>(PriestItems.size()))
+		return;
+	TakePlrsMoney(PriestItems[idx]._iIvalue);
+	StoreAutoPlace(PriestItems[idx], true);
+	PriestItems.erase(PriestItems.begin() + idx);
+	CalcPlrInv(*MyPlayer, true);
+}
+
+void CaravanEnter()
+{
+	switch (CurrentTextLine) {
+	case 14:
+		ActiveStore = TalkID::None;
+		TravelByCaravan(!InDesertRegion());
+		break;
+	case 18:
+		ActiveStore = TalkID::None;
+		break;
+	}
+}
+
 void GamblerEnter()
 {
 	switch (CurrentTextLine) {
@@ -1975,6 +2113,9 @@ void ConfirmEnter(Item &item)
 		case TalkID::GamblerBuy:
 			GamblerBuyItem();
 			break;
+		case TalkID::PriestBuy:
+			PriestBuyItem();
+			break;
 		case TalkID::HealerBuy:
 			HealerBuyItem(item);
 			break;
@@ -2308,6 +2449,8 @@ void SetupTownStores()
 	SpawnHealer(l);
 	SpawnBoy(myPlayer.getCharacterLevel());
 	SpawnPremium(myPlayer);
+	if (InDesertRegion())
+		RefreshPriestStock();
 }
 
 void FreeStoreMem()
@@ -2522,6 +2665,18 @@ void StartStore(TalkID s)
 		else
 			StartGambler();
 		break;
+	case TalkID::Priest:
+		StartPriest();
+		break;
+	case TalkID::PriestBuy:
+		if (!PriestItems.empty())
+			StartPriestBuy();
+		else
+			StartPriest();
+		break;
+	case TalkID::Caravan:
+		StartCaravan();
+		break;
 	case TalkID::None:
 		break;
 	}
@@ -2592,6 +2747,9 @@ void DrawSText(const Surface &out)
 		case TalkID::GamblerBuy:
 			ScrollGamblerBuy(ScrollPos);
 			break;
+		case TalkID::PriestBuy:
+			ScrollPriestBuy(ScrollPos);
+			break;
 		case TalkID::HealerBuy:
 			ScrollHealerBuy(ScrollPos);
 			break;
@@ -2640,10 +2798,16 @@ void StoreESC()
 	case TalkID::Drunk:
 	case TalkID::Barmaid:
 	case TalkID::Gambler:
+	case TalkID::Priest:
+	case TalkID::Caravan:
 		ActiveStore = TalkID::None;
 		break;
 	case TalkID::GamblerBuy:
 		StartStore(TalkID::Gambler);
+		CurrentTextLine = 14;
+		break;
+	case TalkID::PriestBuy:
+		StartStore(TalkID::Priest);
 		CurrentTextLine = 14;
 		break;
 	case TalkID::Gossip:
@@ -2919,6 +3083,15 @@ void StoreEnter()
 		break;
 	case TalkID::GamblerBuy:
 		GamblerBuyEnter();
+		break;
+	case TalkID::Priest:
+		PriestEnter();
+		break;
+	case TalkID::PriestBuy:
+		PriestBuyEnter();
+		break;
+	case TalkID::Caravan:
+		CaravanEnter();
 		break;
 	case TalkID::None:
 		break;

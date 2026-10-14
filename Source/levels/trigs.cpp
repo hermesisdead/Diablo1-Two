@@ -14,6 +14,7 @@
 #include "cursor.h"
 #include "diablo_msg.hpp"
 #include "game_mode.hpp"
+#include "levels/desert.hpp"
 #include "levels/forest.hpp"
 #include "levels/town_shuffle.hpp"
 #include "multi.h"
@@ -110,6 +111,10 @@ bool IsWarpOpen(dungeon_type type)
 
 void InitTownTriggers()
 {
+	if (InDesertRegion()) {
+		InitDesertTownTriggers();
+		return;
+	}
 	numtrigs = 0;
 
 	// Cathedral
@@ -353,6 +358,8 @@ void InitVPTriggers()
 
 bool ForceTownTrig()
 {
+	if (InDesertRegion())
+		return ForceDesertTownTrig();
 	for (const uint16_t tileId : TownDownList) {
 		if (dPiece[cursPosition.x][cursPosition.y] == tileId) {
 			InfoString = _("Down to dungeon");

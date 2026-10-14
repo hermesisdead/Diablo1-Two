@@ -170,6 +170,7 @@ echo     ^(endless, level-scaled monster waves; single player^).
 echo   - Tremain the Gambler stands by the fountain; shops now use the item grid.
 echo   - Rare ^(yellow^) items and level-scaled loot.
 echo   - Diablo II style skill trees: press T to spend skill points.
+echo   - Sand Tristram: talk to Jamal by the cows ^(next to the cow with bags^).
 echo   - Weather everywhere ^(rain, storms, snow, wind, fireflies, ash...^) with
 echo     ambient sound; adjust it with the Ambience slider in the in-game Options.
 echo   - F4 toggles action mode ^(close camera, WASD, dodge, lock-on^).

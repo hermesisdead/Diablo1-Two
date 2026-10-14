@@ -24,6 +24,8 @@ _item_indexes RemapItemIdxFromSpawn(_item_indexes i);
 _item_indexes RemapItemIdxToSpawn(_item_indexes i);
 bool IsHeaderValid(uint32_t magicNumber);
 void LoadHotkeys();
+/** @brief The save holds the current level's state (items lying around, ...). */
+bool CurrentLevelSaveExists();
 void LoadHeroItems(Player &player);
 /**
  * @brief Remove invalid inventory items from the inventory grid

@@ -29,6 +29,7 @@
 #include "capture.h"
 #include "class_skills.hpp"
 #include "panels/skill_tree.hpp"
+#include "levels/desert.hpp"
 #include "control/control.hpp"
 #include "cursor.h"
 #include "dead.h"
@@ -954,6 +955,8 @@ void RunGameLoop(interface_mode uMsg)
 			++devCaptureFrames;
 			if (devCaptureFrames % 20 == 0)
 				LogVerbose("devcap frame {}", devCaptureFrames);
+			if (devCaptureFrames == 12 && std::getenv("DEVILUTIONX_DEV_DESERT") != nullptr && leveltype == DTYPE_TOWN && !InDesertRegion())
+				TravelByCaravan(true);
 			if (devCaptureFrames == 20 && std::getenv("DEVILUTIONX_DEV_FOREST") != nullptr && leveltype == DTYPE_TOWN)
 				EnterForest();
 			if (const char *check = std::getenv("DEVILUTIONX_DEV_ASSETCHECK"); check != nullptr && devCaptureFrames == 5) {
@@ -1026,7 +1029,10 @@ void RunGameLoop(interface_mode uMsg)
 			}
 			if (const char *vstore = std::getenv("DEVILUTIONX_DEV_VSTORE"); vstore != nullptr && devCaptureFrames == 40) {
 				const std::string_view v = vstore;
-				if (v == "gambler") {
+				if (v == "priest") {
+					RefreshPriestStock();
+					OpenVisualStore(VisualStoreVendor::Priest);
+				} else if (v == "gambler") {
 					RefreshGamblerStock();
 					OpenVisualStore(VisualStoreVendor::Gambler);
 				} else {
@@ -1049,7 +1055,13 @@ void RunGameLoop(interface_mode uMsg)
 				}
 			}
 			if (const char *store = std::getenv("DEVILUTIONX_DEV_STORE"); store != nullptr && devCaptureFrames == 40) {
-				StartStore(TalkID::Gambler);
+				const std::string_view sv = store;
+				if (sv == "caravango") {
+					StartStore(TalkID::Caravan);
+					CurrentTextLine = 14;
+					StoreEnter();
+				} else
+				StartStore(std::string_view(store) == "caravan" ? TalkID::Caravan : (std::string_view(store) == "priest" ? TalkID::Priest : TalkID::Gambler));
 				if (std::string_view(store) == "gamblebuy") {
 					CurrentTextLine = 14;
 					StoreEnter();
@@ -1618,6 +1630,13 @@ std::expected<void, std::string> LoadLvlGFX()
 	switch (leveltype) {
 	case DTYPE_TOWN:
 	case DTYPE_FOREST: { // the forest is built from the town tileset
+		if (InDesertRegion()) {
+			// Sand Tristram and the Desert Wastes have their own tiles.
+			ASSIGN_OR_RETURN(pDungeonCels, LoadFileInMemWithStatus(std::string(DesertCelPath).c_str()));
+			ASSIGN_OR_RETURN(pMegaTiles, LoadFileInMemWithStatus<MegaTile>(std::string(DesertTilPath).c_str()));
+			ASSIGN_OR_RETURN(pSpecialCels, LoadCelWithStatus("levels\\towndata\\towns", SpecialCelWidth));
+			return {};
+		}
 		auto cel = LoadFileInMemWithStatus("nlevels\\towndata\\town.cel");
 		if (!cel.has_value()) {
 			ASSIGN_OR_RETURN(pDungeonCels, LoadFileInMemWithStatus("levels\\towndata\\town.cel"));
@@ -3553,7 +3572,7 @@ std::expected<void, std::string> LoadGameLevelTown(bool firstflag, lvl_entry lvl
 
 	IncProgress();
 
-	if (!firstflag && lvldir != ENTRY_LOAD && myPlayer._pLvlVisited[currlevel] && !gbIsMultiplayer)
+	if (!firstflag && lvldir != ENTRY_LOAD && myPlayer._pLvlVisited[currlevel] && !gbIsMultiplayer && CurrentLevelSaveExists())
 		RETURN_IF_ERROR(LoadLevel());
 	if (gbIsMultiplayer)
 		DeltaLoadLevel();

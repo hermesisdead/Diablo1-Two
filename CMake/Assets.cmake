@@ -159,6 +159,10 @@ set(devilutionx_assets
   levels/l2data/bonechat.dun
   levels/towndata/automap.dun
   levels/towndata/automap.amp
+  levels/desertdata/desert.cel
+  levels/desertdata/desert.min
+  levels/desertdata/desert.sol
+  levels/desertdata/desert.til
   lua_internal/get_lua_function_signature.lua
   lua/devilutionx/events.lua
   lua/inspect.lua
@@ -216,8 +220,14 @@ set(devilutionx_assets
   txtdata/spells/classskills.tsv
   txtdata/spells/spelldat.tsv
   txtdata/text/textdat.tsv
+  txtdata/desert/pieces.tsv
+  txtdata/towners/desert_towners.tsv
   txtdata/towners/quest_dialog.tsv
   txtdata/towners/towners.tsv
+  towners/desert/caravan.trn
+  towners/desert/packbags.cel
+  towners/desert/priest.trn
+  towners/desert/smith.trn
   ui_art/diablo.pal
   ui_art/creditsw.clx
   ui_art/dvl_but_sml.clx

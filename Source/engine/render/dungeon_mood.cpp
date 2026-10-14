@@ -20,6 +20,7 @@
 #include "engine/render/orbit_view.hpp"
 #include "engine/render/scrollrt.h"
 #include "engine/sound.h"
+#include "levels/desert.hpp"
 #include "levels/dun_tile_data.hpp"
 #include "levels/gendung.h"
 #include "levels/tile_properties.hpp"
@@ -302,6 +303,11 @@ struct Weight {
 
 std::vector<Weight> MoodTable()
 {
+	if (InDesertRegion() && IsAnyOf(leveltype, DTYPE_TOWN, DTYPE_FOREST)) {
+		// Sand Tristram and the wastes: dust, wind-driven sand, the odd storm rolling in.
+		return { { DungeonMood::Clear, 30 }, { DungeonMood::Wind, 28 }, { DungeonMood::Dust, 20 }, { DungeonMood::Storm, 8 },
+			{ DungeonMood::Ash, 6 }, { DungeonMood::Mist, 4 }, { DungeonMood::Embers, 4 } };
+	}
 	switch (leveltype) {
 	case DTYPE_TOWN:
 		return { { DungeonMood::Clear, 22 }, { DungeonMood::Rain, 18 }, { DungeonMood::Storm, 12 }, { DungeonMood::Snow, 14 },
@@ -616,7 +622,7 @@ AmbienceTrack TrackFor(DungeonMood mood, float &level)
 		if (leveltype == DTYPE_TOWN)
 			return AmbienceTrack::Breeze;
 		if (leveltype == DTYPE_FOREST)
-			return AmbienceTrack::NightForest;
+			return InDesertRegion() ? AmbienceTrack::Breeze : AmbienceTrack::NightForest;
 		return AmbienceTrack::None;
 	case DungeonMood::Mist:
 		if (outdoor) {
@@ -626,7 +632,7 @@ AmbienceTrack TrackFor(DungeonMood mood, float &level)
 		return AmbienceTrack::Drone;
 	case DungeonMood::Dust:
 		level = 0.6f;
-		return AmbienceTrack::Drone;
+		return outdoor ? AmbienceTrack::Breeze : AmbienceTrack::Drone;
 	case DungeonMood::Frost:
 		level = 0.8f;
 		return AmbienceTrack::ColdWind;

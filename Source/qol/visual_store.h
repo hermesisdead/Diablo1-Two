@@ -23,6 +23,8 @@ enum class VisualStoreVendor : uint8_t {
 	Boy,
 	/** Tremain's gambling table: unidentified goods whose quality stays hidden until bought. */
 	Gambler,
+	/** Brother Kalim in Sand Tristram: identified magic and rare items. */
+	Priest,
 };
 
 enum class VisualStoreTab : uint8_t {

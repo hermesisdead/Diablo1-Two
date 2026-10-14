@@ -2368,6 +2368,7 @@ void CreatePlayer(Player &player, HeroClass c)
 	player.forestSeed = 0;
 	player.forestTier = 0;
 	player.forestBestWave = 0;
+	player.inDesert = false;
 
 	player.setCharacterLevel(1);
 	player._pClass = c;

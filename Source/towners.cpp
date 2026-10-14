@@ -1,6 +1,7 @@
 #include "towners.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <unordered_map>
 
@@ -10,6 +11,8 @@
 #include "engine/load_cel.hpp"
 #include "engine/load_file.hpp"
 #include "engine/random.hpp"
+#include "engine/render/clx_render.hpp"
+#include "levels/desert.hpp"
 #include "game_mode.hpp"
 #include "inv.h"
 #include "minitext.h"
@@ -129,6 +132,19 @@ void InitTownerFromData(Towner &towner, const TownerDataEntry &entry)
 
 	if (!entry.animPath.empty()) {
 		LoadTownerAnimations(towner, entry.animPath.c_str(), entry.animFrames, entry.animDelay);
+		// Desert folk wear different colours from the sprites they borrow.
+		const char *trnPath = nullptr;
+		if (entry.type == TOWN_CARAVAN)
+			trnPath = "towners\\desert\\caravan.trn";
+		else if (entry.type == TOWN_PRIEST)
+			trnPath = "towners\\desert\\priest.trn";
+		else if (entry.type == TOWN_SMITH && InDesertRegion())
+			trnPath = "towners\\desert\\smith.trn";
+		if (trnPath != nullptr && towner.ownedAnim) {
+			std::array<uint8_t, 256> trn;
+			LoadFileInMem(trnPath, trn);
+			ClxApplyTrans(*towner.ownedAnim, trn.data());
+		}
 	}
 
 	// Set gossip from TSV data
@@ -169,6 +185,13 @@ void InitCows(Towner &towner, const TownerDataEntry &entry)
 	dMonster[offset.x][offset.y] = -cowId;
 	offset = position + Direction::North;
 	dMonster[offset.x][offset.y] = -cowId;
+}
+
+/** @brief The caravan's cow: a cow facing south-west, with its load drawn on top. */
+void InitPackCow(Towner &towner, const TownerDataEntry &entry)
+{
+	InitCows(towner, entry);
+	towner.ownedOverlay = LoadCel("towners\\desert\\packbags", 128);
 }
 
 /**
@@ -687,6 +710,16 @@ void TalkToGambler(Player & /*player*/, Towner & /*gambler*/)
 	StartStore(TalkID::Gambler);
 }
 
+void TalkToPriest(Player & /*player*/, Towner & /*priest*/)
+{
+	StartStore(TalkID::Priest);
+}
+
+void TalkToCaravan(Player & /*player*/, Towner & /*caravan*/)
+{
+	StartStore(TalkID::Caravan);
+}
+
 const TownerData TownersData[] = {
 	// clang-format off
 	// type          init (nullptr = default)  talk
@@ -704,6 +737,9 @@ const TownerData TownersData[] = {
 	{ TOWN_FARMER,  nullptr,       TalkToFarmer      },
 	{ TOWN_GIRL,    nullptr,       TalkToGirl        },
 	{ TOWN_GAMBLER, nullptr,       TalkToGambler     },
+	{ TOWN_PRIEST,  nullptr,       TalkToPriest      },
+	{ TOWN_CARAVAN, nullptr,       TalkToCaravan     },
+	{ TOWN_PACKCOW, InitPackCow,   TalkToCow         },
 	// clang-format on
 };
 
@@ -728,6 +764,9 @@ const std::unordered_map<_talker_id, const char *> TownerShortNames = {
 	{ TOWN_GIRL, "celia" },
 	{ TOWN_COWFARM, "nut" },
 	{ TOWN_GAMBLER, "tremain" },
+	{ TOWN_PRIEST, "kalim" },
+	{ TOWN_CARAVAN, "jamal" },
+	{ TOWN_PACKCOW, "packcow" },
 };
 
 size_t GetNumTownerTypes()
@@ -751,6 +790,9 @@ bool IsTownerPresent(_talker_id npc)
 		return gbIsHellfire && sgGameInitInfo.bCowQuest != 0;
 	case TOWN_GIRL:
 		return gbIsHellfire && sgGameInitInfo.bTheoQuest != 0 && MyPlayer->_pLvlVisited[17] && Quests[Q_GIRL]._qactive != QUEST_DONE;
+	case TOWN_CARAVAN:
+	case TOWN_PACKCOW:
+		return IsDesertAvailable();
 	default:
 		return true;
 	}
@@ -770,11 +812,14 @@ void InitTowners()
 	assert(!CowSprites);
 
 	// Load towner data from TSV files
-	LoadTownerData();
+	const bool desert = InDesertRegion();
+	LoadTownerData(desert);
 	TownerAnimOrderStorage.clear();
 
 	// Move towners along with the building they stand at (identity for the classic layout).
 	for (TownerDataEntry &entry : TownersDataEntries) {
+		if (desert)
+			break; // the camp's people stand where its own table puts them
 		switch (entry.type) {
 		case TOWN_SMITH:
 			entry.position += TownBuildingShift(TownBuilding::Smithy);
@@ -847,6 +892,7 @@ void FreeTownerGFX()
 {
 	for (Towner &towner : Towners) {
 		towner.ownedAnim = std::nullopt;
+		towner.ownedOverlay = std::nullopt;
 	}
 	CowSprites = std::nullopt;
 }

@@ -49,6 +49,8 @@ extern std::unordered_map<_talker_id, std::array<_speech_id, MAXQUESTS>> TownerQ
  * - txtdata/towners/quest_dialog.tsv - Quest dialog mappings
  */
 void LoadTownerData();
+/** @brief Loads the townspeople of Sand Tristram (desert_towners.tsv) instead of Tristram's. */
+void LoadTownerData(bool desert);
 
 /**
  * @brief Gets the quest dialog speech ID for a towner and quest combination.

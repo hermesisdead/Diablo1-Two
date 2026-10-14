@@ -12,3 +12,5 @@ TOWN_COW	Cow	58	16	SouthWest	128		12	3
 TOWN_COW	Cow	56	14	NorthWest	128		12	3		
 TOWN_COW	Cow	59	20	North	128		12	3		
 TOWN_GAMBLER	Tremain the Gambler	66	73	SouthWest	96	towners\priest\priest8	33	4		
+TOWN_CARAVAN	Jamal the Caravan Master	61	21	SouthWest	96	towners\twnf\twnfn	16	3		0,1,2,2,1,0,15,14,13,13,14,15,0,1,2,2,1,0,15,14,13,13,14,15,0,1,2,2,1,0,15,14,13,13,14,15,0,1,2,2,1,0,15,14,13,13,14,15,0,1,2,2,1,0,15,14,13,13,14,15,0,1,2,2,1,0,15,14,13,13,14,15,0,1,2,2,1,0,15,14,13,13,14,15,0,1,2,1,0,15,14,13,13,14,15,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
+TOWN_PACKCOW	Pack Cow	62	17	SouthWest	128		12	3		

@@ -93,6 +93,9 @@ std::span<Item> GetVendorItems(VisualStoreVendor vendor, VisualStoreTab tab)
 	case VisualStoreVendor::Gambler: {
 		return { GamblerItems.data(), GamblerItems.size() };
 	}
+	case VisualStoreVendor::Priest: {
+		return { PriestItems.data(), PriestItems.size() };
+	}
 	}
 	return {};
 }
@@ -145,7 +148,8 @@ bool VendorAcceptsSale()
 	switch (VisualStore.vendor) {
 	case VisualStoreVendor::Smith:
 	case VisualStoreVendor::Witch:
-	case VisualStoreVendor::Gambler: {
+	case VisualStoreVendor::Gambler:
+	case VisualStoreVendor::Priest: {
 		return true;
 	}
 	case VisualStoreVendor::Healer:
@@ -494,6 +498,10 @@ void DrawVisualStore(const Surface &out)
 		DrawString(out, _("Tremain's table"), { panelPos + Displacement { 100, 21 }, { 200, 22 } }, { .flags = UiFlags::AlignRight | UiFlags::VerticalCenter | UiFlags::ColorWhitegold });
 		break;
 	}
+	case VisualStoreVendor::Priest: {
+		DrawString(out, _("Brother Kalim's wares"), { panelPos + Displacement { 100, 21 }, { 200, 22 } }, { .flags = UiFlags::AlignRight | UiFlags::VerticalCenter | UiFlags::ColorWhitegold });
+		break;
+	}
 	case VisualStoreVendor::Witch:
 	case VisualStoreVendor::Boy:
 	case VisualStoreVendor::Healer: {
@@ -751,6 +759,10 @@ void CheckVisualStoreItem(Point mousePosition, bool isCtrlHeld, bool isShiftHeld
 		GamblerPrices.erase(GamblerPrices.begin() + itemIndex);
 		break;
 	}
+	case VisualStoreVendor::Priest: {
+		PriestItems.erase(PriestItems.begin() + itemIndex);
+		break;
+	}
 	}
 
 	pcursstoreitem = -1;
@@ -791,7 +803,8 @@ bool CanSellToCurrentVendor(const Item &item)
 
 	switch (VisualStore.vendor) {
 	case VisualStoreVendor::Smith:
-	case VisualStoreVendor::Gambler: {
+	case VisualStoreVendor::Gambler:
+	case VisualStoreVendor::Priest: {
 		return SmithWillBuy(item);
 	}
 	case VisualStoreVendor::Witch: {

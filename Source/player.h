@@ -371,6 +371,8 @@ public:
 	uint8_t forestTier;
 	/** Highest Darkwood wave this hero has cleared. */
 	uint16_t forestBestWave;
+	/** In Sand Tristram or the Desert Wastes rather than Tristram (single player). */
+	bool inDesert;
 
 	[[nodiscard]] std::string_view name() const
 	{

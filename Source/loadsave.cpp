@@ -18,6 +18,7 @@
 #include "automap.h"
 #include "class_skills.hpp"
 #include "codec.h"
+#include "levels/desert.hpp"
 #include "control/control.hpp"
 #include "cursor.h"
 #include "cursor_defs.hpp"
@@ -642,7 +643,8 @@ void LoadPlayer(LoadHelper &file, Player &player)
 	player.forestTier = file.NextLE<uint8_t>();
 	file.Skip(1);
 	player.forestBestWave = file.NextLE<uint16_t>();
-	file.Skip(8); // Available bytes
+	player.inDesert = file.NextLE<uint8_t>() != 0;
+	file.Skip(7); // Available bytes
 	CalcPlrInv(player, false);
 
 	player.executedSpell = player.queuedSpell; // Ensures backwards compatibility
@@ -1054,6 +1056,10 @@ void GetLevelNames(std::string_view prefix, char *out)
 	if (setlevel) {
 		suf = 's';
 		num = static_cast<uint8_t>(setlvlnum);
+	} else if (currlevel == 0 && InDesertRegion()) {
+		// Sand Tristram keeps its own ground items, apart from Tristram's.
+		suf = 's';
+		num = DesertTownSaveSlot;
 	} else {
 		suf = 'l';
 		num = currlevel;
@@ -1069,6 +1075,19 @@ void GetTempLevelNames(char *szTemp)
 void GetPermLevelNames(char *szPerm)
 {
 	return GetLevelNames("perm", szPerm);
+}
+
+bool CurrentLevelSaveExistsImpl()
+{
+	char szName[MaxMpqPathSize];
+	std::optional<SaveReader> archive = OpenSaveArchive(gSaveNumber);
+	if (!archive)
+		return false;
+	GetTempLevelNames(szName);
+	if (archive->HasFile(szName))
+		return true;
+	GetPermLevelNames(szName);
+	return archive->HasFile(szName);
 }
 
 bool LevelFileExists(SaveWriter &archive)
@@ -1497,7 +1516,8 @@ void SavePlayer(SaveHelper &file, const Player &player)
 	file.WriteLE<uint8_t>(player.forestTier);
 	file.Skip(1);
 	file.WriteLE<uint16_t>(player.forestBestWave);
-	file.Skip(8); // Available bytes
+	file.WriteLE<uint8_t>(player.inDesert ? 1 : 0);
+	file.Skip(7); // Available bytes
 
 	// Omit pointer _pNData
 	// Omit pointer _pWData
@@ -2136,6 +2156,11 @@ bool IsStashSizeValid(size_t stashSize, uint32_t pages, uint32_t itemCount)
 }
 
 } // namespace
+
+bool CurrentLevelSaveExists()
+{
+	return CurrentLevelSaveExistsImpl();
+}
 
 std::expected<void, std::string> ConvertLevels(SaveWriter &saveWriter)
 {

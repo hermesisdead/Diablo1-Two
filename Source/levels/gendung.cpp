@@ -1,5 +1,7 @@
 #include "levels/gendung.h"
 
+#include "levels/desert.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -302,7 +304,7 @@ void InitGlobals()
 	memset(dSpecial, 0, sizeof(dSpecial));
 	uint8_t defaultLight = leveltype == DTYPE_TOWN ? 0 : 15;
 	if (leveltype == DTYPE_FOREST)
-		defaultLight = 9; // moonlight: the forest stays dimly visible beyond the hero's light
+		defaultLight = InDesertRegion() ? 3 : 9; // moonlight in the forest; the desert lies under a hazy sun
 #ifdef _DEBUG
 	if (DisableLighting)
 		defaultLight = 0;

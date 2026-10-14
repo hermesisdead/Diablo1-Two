@@ -542,6 +542,8 @@ _item_indexes RndItemForMonsterLevel(int8_t monsterLevel);
  * hidden magic, rare or (rarely) unique item. @p prices holds what the gambler asks for each.
  */
 void SpawnGambleItems(std::vector<Item> &items, std::vector<int> &prices, int count);
+/** @brief Brother Kalim's wares: identified magic (and some rare) items around the hero's level. */
+void SpawnPriestItems(std::vector<Item> &items, int count);
 #ifdef _DEBUG
 /** @brief Test harness: rolls many rares, checks they regenerate identically, drops a few to look at. */
 void DevRareItemTest(int count);

@@ -91,6 +91,7 @@ set(libdevilutionx_SRCS
   levels/setmaps.cpp
   levels/themes.cpp
   levels/tile_properties.cpp
+  levels/desert.cpp
   levels/forest.cpp
   levels/town.cpp
   levels/town_shuffle.cpp

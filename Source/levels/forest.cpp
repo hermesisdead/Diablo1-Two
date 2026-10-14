@@ -26,6 +26,7 @@
 #ifdef _DEBUG
 #include "debug.h"
 #endif
+#include "levels/desert.hpp"
 #include "levels/dun_tile_data.hpp"
 #include "levels/gendung.h"
 #include "levels/tile_properties.hpp"
@@ -626,6 +627,17 @@ void CreateForest(uint32_t seed)
 
 	// Paint megatiles.
 	memset(dungeon, 0, sizeof(dungeon));
+	if (InDesertRegion()) {
+		// The Desert Wastes: the same clearings and trails, painted in sand and sandstone.
+		uint8_t cells[MegaW][MegaW];
+		for (int j = 0; j < MegaW; j++) {
+			for (int i = 0; i < MegaW; i++) {
+				const bool border = i < 8 || j < 8 || i > ExitMega || j > ExitMega;
+				cells[i][j] = (border || Grid[i][j] == Cell::Woods) ? 0 : (Grid[i][j] == Cell::Trail ? 2 : 1);
+			}
+		}
+		PaintDesertWastes(cells, seed);
+	} else {
 	std::array<std::array<bool, MegaW>, MegaW> tree {};
 	for (int j = 0; j < MegaW; j++) {
 		for (int i = 0; i < MegaW; i++) {
@@ -658,6 +670,7 @@ void CreateForest(uint32_t seed)
 			}
 			PlaceMegatile(i, j, id);
 		}
+	}
 	}
 
 	dminPosition = { 16, 16 };
@@ -699,7 +712,7 @@ bool ForceForestTrig()
 {
 	if (cursPosition.WalkingDistance(ForestExit) > 1)
 		return false;
-	InfoString = _("Back to Tristram");
+	InfoString = InDesertRegion() ? _("Back to Sand Tristram") : _("Back to Tristram");
 	cursPosition = ForestExit;
 	return true;
 }
@@ -744,7 +757,7 @@ void ResetForestWaves()
 	Waves = {};
 	Waves.phase = WavePhase::Break;
 	Waves.phaseTicks = 4 * TicksPerSecond; // a moment to look around before the first wave
-	ShowBanner(std::string(_("The Darkwood")));
+	ShowBanner(std::string(InDesertRegion() ? _("The Desert Wastes") : _("The Darkwood")));
 }
 
 void UpdateForestWaves()

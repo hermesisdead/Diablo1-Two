@@ -95,9 +95,8 @@ void ParseAnimOrder(std::string_view value, std::vector<uint8_t> &out)
 	});
 }
 
-void LoadTownersFromFile()
+void LoadTownersFromFile(std::string_view filename = "txtdata\\towners\\towners.tsv")
 {
-	const std::string_view filename = "txtdata\\towners\\towners.tsv";
 	DataFile dataFile = DataFile::loadOrDie(filename);
 	dataFile.skipHeaderOrDie(filename);
 
@@ -214,6 +213,15 @@ void LoadQuestDialogFromFile()
 void LoadTownerData()
 {
 	LoadTownersFromFile();
+	LoadQuestDialogFromFile();
+}
+
+void LoadTownerData(bool desert)
+{
+	if (desert)
+		LoadTownersFromFile("txtdata\\towners\\desert_towners.tsv");
+	else
+		LoadTownersFromFile();
 	LoadQuestDialogFromFile();
 }
 

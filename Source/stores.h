@@ -68,6 +68,9 @@ enum class TalkID : uint8_t {
 	Barmaid,
 	Gambler,
 	GamblerBuy,
+	Priest,
+	PriestBuy,
+	Caravan,
 };
 
 /** Currently active store */
@@ -99,6 +102,9 @@ extern std::vector<Item> GamblerItems;
 extern std::vector<int> GamblerPrices;
 /** Re-rolls Tremain's table. */
 void RefreshGamblerStock();
+/** Brother Kalim's magic items (Sand Tristram). */
+extern std::vector<Item> PriestItems;
+void RefreshPriestStock();
 
 /** Current level of the item sold by Wirt */
 extern DVL_API_FOR_TEST int BoyItemLevel;

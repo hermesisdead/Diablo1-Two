@@ -7,6 +7,7 @@
 #include "engine/random.hpp"
 #include "engine/world_tile.hpp"
 #include "game_mode.hpp"
+#include "levels/desert.hpp"
 #include "levels/drlg_l1.h"
 #include "levels/town_shuffle.hpp"
 #include "levels/trigs.h"
@@ -382,6 +383,11 @@ void CleanTownFountain()
 
 void CreateTown(lvl_entry entry)
 {
+	if (InDesertRegion()) {
+		CreateDesertTown(entry);
+		return;
+	}
+
 	dminPosition = { 10, 10 };
 	dmaxPosition = { 84, 84 };
 
@@ -430,6 +436,10 @@ void CreateTown(lvl_entry entry)
 			ViewPosition = ViewPosition + TownBuildingShift(TownBuilding::Hell);
 		else if (TWarpFrom == 21)
 			ViewPosition = ViewPosition + TownBuildingShift(TownBuilding::Grave);
+	}
+	if (ArrivingByCaravan()) {
+		ViewPosition = TristramCaravanArrival;
+		ClearCaravanArrival();
 	}
 #ifdef _DEBUG
 	LogVerbose("CreateTown entry {} layout seed {} multiplayer {}", static_cast<int>(entry), TownLayoutSeed, gbIsMultiplayer);

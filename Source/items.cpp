@@ -3616,6 +3616,51 @@ void SpawnGambleItems(std::vector<Item> &items, std::vector<int> &prices, int co
 	}
 }
 
+void SpawnPriestItems(std::vector<Item> &items, int count)
+{
+	items.clear();
+	if (MyPlayer == nullptr)
+		return;
+	const Player &player = *MyPlayer;
+	const int heroLevel = player.getCharacterLevel();
+	for (int n = 0; n < count; n++) {
+		const int itemLevel = std::clamp(heroLevel + RandomIntBetween(-3, 3), 1, 60);
+		const _item_indexes idx = GetItemIndexForDroppableItem(true, [itemLevel](const ItemData &data) {
+			if (data.iMinMLvl > itemLevel || data.iMiscId == IMISC_UNIQUE)
+				return false;
+			switch (data.itype) {
+			case ItemType::Sword:
+			case ItemType::Axe:
+			case ItemType::Mace:
+			case ItemType::Bow:
+			case ItemType::Shield:
+			case ItemType::LightArmor:
+			case ItemType::Helm:
+			case ItemType::MediumArmor:
+			case ItemType::HeavyArmor:
+			case ItemType::Staff:
+			case ItemType::Ring:
+			case ItemType::Amulet:
+				return true;
+			default:
+				return false;
+			}
+		});
+		Item item {};
+		if (GenerateRnd(100) < 18 && *GetOptions().Gameplay.rareItems)
+			item.dwBuff |= CF_RARE;
+		SetupAllItems(player, item, idx, AdvanceRndSeed(), itemLevel, 1, true, false);
+		SetupItem(item);
+		if (item._iMagical == ITEM_QUALITY_NORMAL)
+			continue; // the priest only deals in enchanted goods
+		item._iIdentified = true;
+		item._iStatFlag = player.CanUseItem(item);
+		// Holy men drive a hard bargain: a premium over the item's worth.
+		item._iIvalue = std::min(item._iIvalue + item._iIvalue / 2, 300000);
+		items.push_back(item);
+	}
+}
+
 #ifdef _DEBUG
 void DevRareItemTest(int count)
 {

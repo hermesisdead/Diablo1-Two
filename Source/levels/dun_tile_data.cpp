@@ -16,6 +16,7 @@
 #include "engine/load_file.hpp"
 #include "engine/point.hpp"
 #include "engine/world_tile.hpp"
+#include "levels/desert.hpp"
 #include "levels/dun_tile.hpp"
 #include "levels/gendung_defs.hpp"
 #include "levels/reencode_dun_cels.hpp"
@@ -72,6 +73,8 @@ std::unique_ptr<uint16_t[]> LoadMinData(size_t &tileCount)
 	switch (leveltype) {
 	case DTYPE_TOWN:
 	case DTYPE_FOREST: {
+		if (InDesertRegion())
+			return LoadFileInMem<uint16_t>(std::string(DesertMinPath).c_str(), &tileCount);
 		auto min = LoadFileInMemWithStatus<uint16_t>("nlevels\\towndata\\town.min", &tileCount);
 		if (!min.has_value()) {
 			return LoadFileInMem<uint16_t>("levels\\towndata\\town.min", &tileCount);
@@ -103,7 +106,14 @@ std::expected<void, std::string> LoadLevelSOLData()
 	switch (leveltype) {
 	case DTYPE_TOWN:
 	case DTYPE_FOREST:
-		if (!LoadIntegralFileInMemWithStatus("nlevels\\towndata\\town.sol", SOLData).has_value()) {
+		if (InDesertRegion()) {
+			// Sand Tristram's own tileset (fewer pieces than town.sol: clear the rest).
+			std::fill(std::begin(SOLData), std::end(SOLData), TileProperties::None);
+			size_t count = 0;
+			const std::unique_ptr<uint8_t[]> sol = LoadFileInMem<uint8_t>(std::string(DesertSolPath).c_str(), &count);
+			for (size_t i = 0; i < count && i < MAXTILES; i++)
+				SOLData[i] = static_cast<TileProperties>(sol[i]);
+		} else if (!LoadIntegralFileInMemWithStatus("nlevels\\towndata\\town.sol", SOLData).has_value()) {
 			RETURN_IF_ERROR(LoadIntegralFileInMemWithStatus("levels\\towndata\\town.sol", SOLData));
 		}
 		if (leveltype == DTYPE_FOREST) {
