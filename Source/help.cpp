@@ -33,6 +33,7 @@ const char *const HelpText[] = {
 	N_("Space: Hide all info screens"),
 	N_("S: Open Speedbook"),
 	N_("B: Open Spellbook"),
+	N_("T: Open Skill Tree (left click a skill to add a point, right click to ready it)"),
 	N_("I: Open Inventory screen"),
 	N_("C: Open Character screen"),
 	N_("Q: Open Quest log"),

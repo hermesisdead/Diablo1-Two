@@ -1,0 +1,13 @@
+id	name	soundId	bookCost10	staffCost10	manaCost	flags	bookLevel	staffLevel	minIntelligence	missiles	manaMultiplier	minMana	staffMin	staffMax
+SkillBash	Bash	CastSkill	0	0	2	Magic,Targeted	-1	-1	0		0	2	0	0
+SkillStun	Stun	CastSkill	0	0	2	Magic,Targeted	-1	-1	0		0	3	0	0
+SkillCleave	Cleave	CastSkill	0	0	3	Magic,Targeted	-1	-1	0		0	4	0	0
+SkillWhirlwind	Whirlwind	CastSkill	0	0	6	Magic,Targeted	-1	-1	0		0	12	0	0
+SkillShout	Shout	CastHealing	0	0	4	Magic	-1	-1	0		0	6	0	0
+SkillWarCry	War Cry	CastSkill	0	0	6	Magic	-1	-1	0		0	12	0	0
+SkillBattleOrders	Battle Orders	CastHealing	0	0	6	Magic	-1	-1	0		0	10	0	0
+SkillMultishot	Multishot	CastSkill	0	0	4	Magic,Targeted	-1	-1	0		0	4	0	0
+SkillFireArrow	Fire Arrow	CastFire	0	0	3	Fire,Targeted	-1	-1	0		0	3	0	0
+SkillStrafe	Strafe	CastSkill	0	0	8	Magic,Targeted	-1	-1	0		0	8	0	0
+SkillInnerSight	Inner Sight	CastLightning	0	0	5	Magic	-1	-1	0		0	5	0	0
+SkillLightningArrow	Lightning Arrow	CastLightning	0	0	5	Lightning,Targeted	-1	-1	0		0	5	0	0

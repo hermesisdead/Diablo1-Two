@@ -16,6 +16,7 @@
 #include <ankerl/unordered_dense.h>
 
 #include "automap.h"
+#include "class_skills.hpp"
 #include "codec.h"
 #include "control/control.hpp"
 #include "cursor.h"
@@ -2380,6 +2381,37 @@ void LoadHotkeys()
 	// Load the selected spell last
 	myPlayer._pRSpell = static_cast<SpellID>(file.NextLE<int32_t>());
 	myPlayer._pRSplType = static_cast<SpellType>(file.NextLE<uint8_t>());
+}
+
+void LoadClassSkills(Player &player)
+{
+	constexpr uint8_t SkillsFileVersion = 1;
+	LoadHelper file(OpenSaveArchive(gSaveNumber), "classskills");
+	if (!file.IsValid(4) || file.NextLE<uint8_t>() != SkillsFileVersion) {
+		ResetClassSkills(player);
+		RefreshClassSkillSpells(player);
+		CalcPlrInv(player, true);
+		return;
+	}
+	const int points = file.NextLE<uint16_t>();
+	const uint8_t count = file.NextLE<uint8_t>();
+	std::vector<uint8_t> levels(count, 0);
+	for (uint8_t i = 0; i < count && file.IsValid(1); i++)
+		levels[i] = file.NextLE<uint8_t>();
+	SetClassSkillState(player, points, levels);
+	LogVerbose("Loaded class skills: {} unspent points, {} entries", points, count);
+}
+
+void SaveClassSkills(SaveWriter &saveWriter, const Player &player)
+{
+	constexpr uint8_t SkillsFileVersion = 1;
+	const size_t count = GetClassSkills().size();
+	SaveHelper file(saveWriter, "classskills", 4 + count);
+	file.WriteLE<uint8_t>(SkillsFileVersion);
+	file.WriteLE<uint16_t>(static_cast<uint16_t>(GetUnspentSkillPoints(player)));
+	file.WriteLE<uint8_t>(static_cast<uint8_t>(count));
+	for (size_t i = 0; i < count; i++)
+		file.WriteLE<uint8_t>(static_cast<uint8_t>(GetClassSkillLevel(player, static_cast<int>(i))));
 }
 
 void SaveHotkeys(SaveWriter &saveWriter, const Player &player)

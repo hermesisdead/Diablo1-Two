@@ -15,6 +15,8 @@
 #include "engine/render/text_render.hpp"
 #include "game_mode.hpp"
 #include "missiles.h"
+#include "class_skills.hpp"
+#include "panels/skill_tree.hpp"
 #include "panels/spell_icons.hpp"
 #include "panels/ui_panels.hpp"
 #include "player.h"
@@ -134,6 +136,10 @@ void FreeSpellBook()
 
 void DrawSpellBook(const Surface &out)
 {
+	if (SkillTreeOpen && ClassHasSkillTree(InspectPlayer->_pClass)) {
+		DrawSkillTree(out);
+		return;
+	}
 	constexpr int SpellBookButtonX = 7;
 	constexpr int SpellBookButtonY = 348;
 	ClxDraw(out, GetPanelPosition(UiPanels::Spell, { 0, 351 }), (*spellBookBackground)[0]);
@@ -191,6 +197,10 @@ void DrawSpellBook(const Surface &out)
 
 void CheckSBook()
 {
+	if (SkillTreeOpen && ClassHasSkillTree(InspectPlayer->_pClass)) {
+		CheckSkillTreeClick(MousePosition);
+		return;
+	}
 	// Icons are drawn in a column near the left side of the panel and aligned with the spell book description entries
 	// Spell icons/buttons are 37x38 pixels, laid out from 11,18 with a 5 pixel margin between each icon. This is close
 	// enough to the height of the space given to spell descriptions that we can reuse that value and subtract the

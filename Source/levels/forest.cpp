@@ -780,6 +780,7 @@ void UpdateForestWaves()
 			if (Waves.wave > player.forestBestWave)
 				player.forestBestWave = static_cast<uint16_t>(Waves.wave);
 			ShowBanner(StrCat(_("Wave"), " ", Waves.wave, " ", _("cleared")));
+			LogVerbose("Forest wave {} cleared, hero life {}", Waves.wave, player._pHitPoints.whole());
 			GiveWaveReward(player);
 			Waves.phase = WavePhase::Break;
 			Waves.phaseTicks = 6 * TicksPerSecond;
@@ -790,8 +791,27 @@ void UpdateForestWaves()
 #ifdef _DEBUG
 	// Test autopilot: god mode and swing at whatever is adjacent.
 	if (std::getenv("DEVILUTIONX_DEV_AUTOFIGHT") != nullptr) {
-		DebugGodMode = true;
-		if (player._pmode == PM_STAND) {
+		DebugGodMode = std::getenv("DEVILUTIONX_DEV_NOGOD") == nullptr;
+		const char *autoSkill = std::getenv("DEVILUTIONX_DEV_AUTOSKILL");
+		if (autoSkill != nullptr && player._pmode == PM_STAND && player.destAction == ACTION_NONE) {
+			// Cast the readied skill at the nearest wave monster within 8 tiles.
+			int best = -1;
+			int bestDist = 9;
+			for (size_t i = 0; i < ActiveMonsterCount; i++) {
+				const Monster &monster = Monsters[ActiveMonsters[i]];
+				const int dist = player.position.tile.WalkingDistance(monster.position.tile);
+				if (IsWaveMonster(monster) && !monster.hasNoLife() && dist < bestDist) {
+					best = static_cast<int>(ActiveMonsters[i]);
+					bestDist = dist;
+				}
+			}
+			if (best >= 0) {
+				static int casts = 0;
+				if (++casts <= 10 || casts % 20 == 0)
+					LogInfo("AUTOSKILL cast #{} spell {} mana {}", casts, static_cast<int>(player._pRSpell), player._pMana.whole());
+				NetSendCmdParam4(true, CMD_SPELLID, static_cast<uint16_t>(best), static_cast<int8_t>(player._pRSpell), static_cast<uint8_t>(SpellType::Spell), 0);
+			}
+		} else if (autoSkill == nullptr && player._pmode == PM_STAND) {
 			for (size_t i = 0; i < ActiveMonsterCount; i++) {
 				const Monster &monster = Monsters[ActiveMonsters[i]];
 				if (IsWaveMonster(monster) && player.position.tile.WalkingDistance(monster.position.tile) <= 1) {

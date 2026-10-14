@@ -62,6 +62,7 @@
 #include "panels/console.hpp"
 #include "panels/partypanel.hpp"
 #include "panels/quest_log.hpp"
+#include "panels/skill_tree.hpp"
 #include "panels/spell_list.hpp"
 #include "plrmsg.h"
 #include "qol/chatlog.h"
@@ -1428,6 +1429,7 @@ void DrawView(const Surface &out, Point startPosition)
 	DrawDurIcon(out);
 
 	DrawLevelButton(out);
+	DrawSkillButton(out);
 
 	if (CharFlag) {
 		DrawChr(out);

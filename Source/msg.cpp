@@ -1695,7 +1695,7 @@ bool InitNewSpell(Player &player, uint16_t wParamSpellID, uint16_t wParamSpellTy
 	wParamSpellType = Swap16LE(wParamSpellType);
 	wParamSpellFrom = Swap16LE(wParamSpellFrom);
 
-	if (wParamSpellID > static_cast<int8_t>(SpellID::LAST))
+	if (wParamSpellID > static_cast<int8_t>(SpellID::LastClassSkill))
 		return false;
 	auto spellID = static_cast<SpellID>(wParamSpellID);
 	if (!IsValidSpell(spellID)) {
@@ -2526,6 +2526,9 @@ size_t OnChangeSpellLevel(const TCmdParam2 &message, Player &player) // NOLINT(m
 {
 	const auto spellID = static_cast<SpellID>(Swap16LE(message.wParam1));
 	const uint8_t spellLevel = std::min(static_cast<uint8_t>(Swap16LE(message.wParam2)), MaxSpellLevel);
+
+	if (static_cast<int8_t>(spellID) <= 0 || static_cast<int8_t>(spellID) > static_cast<int8_t>(SpellID::LastClassSkill))
+		return sizeof(message);
 
 	if (gbBufferMsgs == 1) {
 		BufferMessage(player, &message, sizeof(message));

@@ -997,6 +997,8 @@ bool IsPlayerAdjacentToObject(const Player &player, const Object &object);
 void MakePlrPath(Player &player, Point targetPosition, bool endspace);
 void CheckPlrSpell(bool isShiftHeld, SpellID spellID = MyPlayer->_pRSpell, SpellType spellType = MyPlayer->_pRSplType);
 void SyncPlrAnim(Player &player);
+/** @brief A melee strike from a class skill: extra damage percent, to-hit bonus and optional knockback. */
+bool PlrSkillStrike(Player &player, struct Monster &monster, int damagePercent, int toHitBonus, bool knockback);
 void SyncInitPlrPos(Player &player);
 void SyncInitPlr(Player &player);
 void CheckStats(Player &player);

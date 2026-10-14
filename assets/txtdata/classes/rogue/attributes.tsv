@@ -4,10 +4,10 @@ baseStr	20
 baseMag	15
 baseDex	30
 baseVit	20
-maxStr	55
-maxMag	70
-maxDex	250
-maxVit	80
+maxStr	255
+maxMag	255
+maxDex	255
+maxVit	255
 blockBonus	20
 adjLife	23
 adjMana	5.5

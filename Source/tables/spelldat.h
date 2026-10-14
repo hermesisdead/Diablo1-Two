@@ -84,6 +84,24 @@ enum class SpellID : int8_t {
 	RuneOfStone,
 
 	LAST = RuneOfStone,
+
+	// Class skills (Diablo II style skill trees). They live after LAST so save files, which
+	// store levels for spells up to LAST, stay compatible; their levels come from the class
+	// skill tree instead. Ids must stay below 64 (spell bitmasks and _pSplLvl are 64 wide).
+	SkillBash,
+	FirstClassSkill = SkillBash,
+	SkillStun,
+	SkillCleave,
+	SkillWhirlwind,
+	SkillShout,
+	SkillWarCry,
+	SkillBattleOrders,
+	SkillMultishot,
+	SkillFireArrow,
+	SkillStrafe,
+	SkillInnerSight,
+	SkillLightningArrow,
+	LastClassSkill = SkillLightningArrow,
 	Invalid = -1,
 };
 

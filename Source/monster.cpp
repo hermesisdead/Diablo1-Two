@@ -33,6 +33,7 @@
 #endif
 
 #include "automap.h"
+#include "class_skills.hpp"
 #include "control/control.hpp"
 #include "crawl.hpp"
 #include "cursor.h"
@@ -1207,6 +1208,11 @@ void MonsterAttackPlayer(Monster &monster, Player &player, int hit, int minDam, 
 	blk = std::clamp(blk, 0, 100);
 	if (hper >= hit)
 		return;
+	if (const int dodge = ClassSkillDodgeChance(player); dodge > 0 && GenerateRnd(100) < dodge) {
+		if (player._pmode == PM_STAND)
+			StartPlrBlock(player, GetDirection(player.position.tile, monster.position.tile));
+		return;
+	}
 	if (blkper < blk) {
 		const Direction dir = GetDirection(player.position.tile, monster.position.tile);
 		StartPlrBlock(player, dir);
@@ -4334,7 +4340,9 @@ void ProcessMonsters()
 			}
 		}
 
-		while (true) {
+		// Stunned monsters (Stun, War Cry) stand still until the stun wears off.
+		const bool stunned = monster.mode == MonsterMode::Stand && IsMonsterStunned(monster);
+		while (!stunned) {
 			if ((monster.flags & MFLAG_SEARCH) == 0 || !AiPlanPath(monster)) {
 				AiProc[static_cast<int8_t>(monster.ai)](monster);
 			}

@@ -79,6 +79,18 @@ const SpellIcon SpellITbl[] = {
 /* SpellID::RuneOfNova       */ SpellIcon::PentaStar,
 /* SpellID::RuneOfImmolation */ SpellIcon::PentaStar,
 /* SpellID::RuneOfStone      */ SpellIcon::PentaStar,
+/* SpellID::SkillBash        */ SpellIcon::BloodBoil,
+/* SpellID::SkillStun        */ SpellIcon::PentaStar,
+/* SpellID::SkillCleave      */ SpellIcon::FireCloud,
+/* SpellID::SkillWhirlwind   */ SpellIcon::DoomSerpents,
+/* SpellID::SkillShout       */ SpellIcon::LongHorn,
+/* SpellID::SkillWarCry      */ SpellIcon::RedSkull,
+/* SpellID::SkillBattleOrders*/ SpellIcon::Invisibility,
+/* SpellID::SkillMultishot   */ SpellIcon::HolyBolt,
+/* SpellID::SkillFireArrow   */ SpellIcon::Firebolt,
+/* SpellID::SkillStrafe      */ SpellIcon::ChainLightning,
+/* SpellID::SkillInnerSight  */ SpellIcon::Infravision,
+/* SpellID::SkillLightningArrow */ SpellIcon::ChargedBolt,
 	// clang-format on
 };
 
@@ -149,6 +161,17 @@ void DrawSmallSpellIcon(const Surface &out, Point position, SpellID spell)
 	ClxDrawTRN(out, position, (*SmallSpellIconsBackground)[0], SplTransTbl);
 #endif
 	ClxDrawTRN(out, position, (*SmallSpellIcons)[GetSpellIconFrame(spell)], SplTransTbl);
+}
+
+void DrawSmallSpellIconFrame(const Surface &out, Point position, SpellIcon icon)
+{
+#ifdef UNPACKED_MPQS
+	ClxDrawTRN(out, position, (*SmallSpellIconsBackground)[0], SplTransTbl);
+#endif
+	uint8_t frame = static_cast<uint8_t>(icon);
+	if (frame >= SmallSpellIcons->numSprites())
+		frame = 0;
+	ClxDrawTRN(out, position, (*SmallSpellIcons)[frame], SplTransTbl);
 }
 
 void DrawLargeSpellIconBorder(const Surface &out, Point position, uint8_t color)

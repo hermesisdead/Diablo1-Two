@@ -49,6 +49,7 @@
 #include "objects.h"
 #include "options.h"
 #include "player.h"
+#include "class_skills.hpp"
 #include "qol/autopickup.h"
 #include "qol/stash.h"
 #include "spells.h"
@@ -237,8 +238,18 @@ void StartRangeAttack(Player &player, Direction d, WorldTileCoord cx, WorldTileC
 	player.position.temp = WorldTilePosition { cx, cy };
 }
 
+/** @brief The frame on which a spell takes effect: weapon skills strike like attacks. */
+int SpellActionFrame(const Player &player, SpellID spellId)
+{
+	if (IsWeaponSkill(spellId))
+		return std::max(player._pAFNum - 1, 1);
+	return player._pSFNum;
+}
+
 player_graphic GetPlayerGraphicForSpell(SpellID spellId)
 {
+	if (IsWeaponSkill(spellId))
+		return player_graphic::Attack;
 	switch (GetSpellData(spellId).type()) {
 	case MagicType::Fire:
 		return player_graphic::Fire;
@@ -278,7 +289,16 @@ void StartSpell(Player &player, Direction d, WorldTileCoord cx, WorldTileCoord c
 	auto animationFlags = AnimationDistributionFlags::ProcessAnimationPending;
 	if (player._pmode == PM_SPELL)
 		animationFlags = static_cast<AnimationDistributionFlags>(animationFlags | AnimationDistributionFlags::RepeatedAction);
-	NewPlrAnim(player, GetPlayerGraphicForSpell(player.queuedSpell.spellId), d, animationFlags, 0, player._pSFNum);
+	int8_t skippedAnimationFrames = 0;
+	int8_t distributeFrame = player._pSFNum;
+	if (IsWeaponSkill(player.queuedSpell.spellId)) {
+		distributeFrame = player._pAFNum;
+		if (HasAnyOf(player._pIFlags, ItemSpecialEffect::FastestAttack | ItemSpecialEffect::FasterAttack))
+			skippedAnimationFrames = 2;
+		else if (HasAnyOf(player._pIFlags, ItemSpecialEffect::FastAttack))
+			skippedAnimationFrames = 1;
+	}
+	NewPlrAnim(player, GetPlayerGraphicForSpell(player.queuedSpell.spellId), d, animationFlags, skippedAnimationFrames, distributeFrame);
 
 	PlaySfxLoc(GetSpellData(player.queuedSpell.spellId).sSFX, player.position.tile);
 
@@ -530,9 +550,14 @@ bool DamageWeapon(Player &player, unsigned damageFrequency)
 	return false;
 }
 
+// Active class skill modifiers for the strike in progress (see PlrSkillStrike).
+int SkillStrikeDamagePercent = 0;
+int SkillStrikeToHit = 0;
+bool SkillStrikeKnockback = false;
+
 bool PlrHitMonst(Player &player, Monster &monster, bool adjacentDamage = false)
 {
-	int hper = 0;
+	int hper = SkillStrikeToHit;
 
 	if (!monster.isPossibleToHit())
 		return false;
@@ -574,10 +599,16 @@ bool PlrHitMonst(Player &player, Monster &monster, bool adjacentDamage = false)
 	dam += player._pIBonusDamMod;
 	int dam2 = dam << 6;
 	dam += player._pDamageMod;
+	dam += dam * SkillStrikeDamagePercent / 100;
+
+	if (const int crit = ClassSkillCriticalChance(player); crit > 0 && GenerateRnd(100) < crit) {
+		dam *= 2;
+	}
 
 	const ClassAttributes &classAttributes = GetClassAttributes(player._pClass);
 	if (HasAnyOf(classAttributes.classFlags, PlayerClassFlag::CriticalStrike)) {
-		if (GenerateRnd(100) < player.getCharacterLevel()) {
+		// Capped at the old level cap (50) now that heroes can reach level 99.
+		if (GenerateRnd(100) < std::min<int>(player.getCharacterLevel(), 50)) {
 			dam *= 2;
 		}
 	}
@@ -697,7 +728,7 @@ bool PlrHitMonst(Player &player, Monster &monster, bool adjacentDamage = false)
 	if (monster.hasNoLife()) {
 		M_StartKill(monster, player);
 	} else {
-		if (monster.mode != MonsterMode::Petrified && HasAnyOf(player._pIFlags, ItemSpecialEffect::Knockback))
+		if (monster.mode != MonsterMode::Petrified && (SkillStrikeKnockback || HasAnyOf(player._pIFlags, ItemSpecialEffect::Knockback)))
 			M_GetKnockback(monster, player.position.tile);
 		M_StartHit(monster, player, dam);
 	}
@@ -1011,7 +1042,7 @@ void DamageArmor(Player &player)
 
 bool DoSpell(Player &player)
 {
-	if (player.AnimInfo.currentFrame == player._pSFNum) {
+	if (player.AnimInfo.currentFrame == SpellActionFrame(player, player.executedSpell.spellId)) {
 		CastSpell(
 		    player,
 		    player.executedSpell.spellId,
@@ -1106,7 +1137,7 @@ void CheckNewPath(Player &player, bool pmWillBeCalled)
 			player.Stop();
 			return;
 		}
-		if (player.destAction == ACTION_ATTACKMON)
+		if (player.destAction == ACTION_ATTACKMON || (player.destAction == ACTION_SPELLMON && IsMeleeSkill(player.queuedSpell.spellId)))
 			MakePlrPath(player, monster->position.future, false);
 		break;
 	case ACTION_ATTACKPLR:
@@ -1158,6 +1189,14 @@ void CheckNewPath(Player &player, bool pmWillBeCalled)
 						player.destAction = ACTION_NONE;
 					}
 				}
+			}
+			if (player.destAction == ACTION_SPELLMON && IsMeleeSkill(player.queuedSpell.spellId)
+			    && player.position.future.WalkingDistance(monster->position.future) <= 1) {
+				// Melee skill: close enough now, strike instead of finishing the walk.
+				ClrPlrPath(player);
+				StartSpell(player, GetDirection(player.position.future, monster->position.future), monster->position.future.x, monster->position.future.y);
+				player.destAction = ACTION_NONE;
+				return;
 			}
 
 			switch (player.walkpath[0]) {
@@ -1371,7 +1410,7 @@ void CheckNewPath(Player &player, bool pmWillBeCalled)
 		}
 	}
 
-	if (player._pmode == PM_SPELL && player.AnimInfo.currentFrame >= player._pSFNum) {
+	if (player._pmode == PM_SPELL && player.AnimInfo.currentFrame >= SpellActionFrame(player, player.executedSpell.spellId)) {
 		if (player.destAction == ACTION_SPELL) {
 			d = GetDirection(player.position.tile, { player.destParam1, player.destParam2 });
 			StartSpell(player, d, player.destParam1, player.destParam2);
@@ -1452,7 +1491,12 @@ void ValidatePlayer()
 
 	uint64_t msk = 0;
 	for (auto b = static_cast<size_t>(SpellID::Firebolt); b < SpellsData.size(); b++) {
-		if (GetSpellBookLevel((SpellID)b) != -1) {
+		if (IsCombatSpell(static_cast<SpellID>(b))) {
+			// Learned through the skill tree.
+			msk |= GetSpellBitmask(static_cast<SpellID>(b));
+			if (myPlayer._pSplLvl[b] > MaxClassSkillLevel)
+				myPlayer._pSplLvl[b] = MaxClassSkillLevel;
+		} else if (GetSpellBookLevel((SpellID)b) != -1) {
 			msk |= GetSpellBitmask(static_cast<SpellID>(b));
 			if (myPlayer._pSplLvl[b] > MaxSpellLevel)
 				myPlayer._pSplLvl[b] = MaxSpellLevel;
@@ -1461,6 +1505,10 @@ void ValidatePlayer()
 
 	myPlayer._pMemSpells &= msk;
 	myPlayer._pInfraFlag = false;
+
+	// Combat spell levels always come from the skill tree (shrines and old books can't change them).
+	if (ClassHasSkillTree(myPlayer._pClass))
+		RefreshClassSkillSpells(myPlayer);
 }
 
 HeroClass GetPlayerSpriteClass(HeroClass cls)
@@ -1525,6 +1573,18 @@ void GetPlayerGraphicsPath(std::string_view path, std::string_view prefix, std::
 }
 
 } // namespace
+
+bool PlrSkillStrike(Player &player, Monster &monster, int damagePercent, int toHitBonus, bool knockback)
+{
+	SkillStrikeDamagePercent = damagePercent;
+	SkillStrikeToHit = toHitBonus;
+	SkillStrikeKnockback = knockback;
+	const bool hit = PlrHitMonst(player, monster);
+	SkillStrikeDamagePercent = 0;
+	SkillStrikeToHit = 0;
+	SkillStrikeKnockback = false;
+	return hit;
+}
 
 void Player::CalcScrolls()
 {
@@ -2395,6 +2455,7 @@ void NextPlrLevel(Player &player)
 	} else {
 		player._pStatPts += 5;
 	}
+	OnClassSkillLevelUp(player);
 	const Fixed26_6 hp { player.getClassAttributes().lvlLife };
 
 	player._pMaxHP += hp;
@@ -2488,8 +2549,10 @@ void InitPlayer(Player &player, bool firstTime)
 	if (firstTime) {
 		player._pRSplType = SpellType::Invalid;
 		player._pRSpell = SpellID::Invalid;
-		if (&player == MyPlayer)
+		if (&player == MyPlayer) {
 			LoadHotkeys();
+			LoadClassSkills(player);
+		}
 		player._pSBkSpell = SpellID::Invalid;
 		player.queuedSpell.spellId = player._pRSpell;
 		player.queuedSpell.spellType = player._pRSplType;

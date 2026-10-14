@@ -223,21 +223,44 @@ std::expected<SpellID, std::string> ParseSpellId(std::string_view value)
 	if (value == "RuneOfNova") return SpellID::RuneOfNova;
 	if (value == "RuneOfImmolation") return SpellID::RuneOfImmolation;
 	if (value == "RuneOfStone") return SpellID::RuneOfStone;
+	if (value == "SkillBash") return SpellID::SkillBash;
+	if (value == "SkillStun") return SpellID::SkillStun;
+	if (value == "SkillCleave") return SpellID::SkillCleave;
+	if (value == "SkillWhirlwind") return SpellID::SkillWhirlwind;
+	if (value == "SkillShout") return SpellID::SkillShout;
+	if (value == "SkillWarCry") return SpellID::SkillWarCry;
+	if (value == "SkillBattleOrders") return SpellID::SkillBattleOrders;
+	if (value == "SkillMultishot") return SpellID::SkillMultishot;
+	if (value == "SkillFireArrow") return SpellID::SkillFireArrow;
+	if (value == "SkillStrafe") return SpellID::SkillStrafe;
+	if (value == "SkillInnerSight") return SpellID::SkillInnerSight;
+	if (value == "SkillLightningArrow") return SpellID::SkillLightningArrow;
 	return std::unexpected("Unknown enum value");
 }
 
-void LoadSpellData()
+static void ReadSpellFile(std::string_view filename, bool placeById)
 {
-	SpellsData.clear();
-	const std::string_view filename = "txtdata\\spells\\spelldat.tsv";
 	DataFile dataFile = DataFile::loadOrDie(filename);
-	SpellsData.reserve(dataFile.numRecords() + 1);
-	AddNullSpell();
 	dataFile.skipHeaderOrDie(filename);
 	for (DataFileRecord record : dataFile) {
 		RecordReader reader { record, filename };
-		SpellData &item = SpellsData.emplace_back();
-		reader.advance(); // skip id
+		SpellData *slot;
+		if (placeById) {
+			// Class skills sit at fixed ids after the (Diablo or Hellfire) spell list; fill any gap
+			// with unlearnable placeholders so indices keep matching SpellID.
+			SpellID id = SpellID::Invalid;
+			reader.read("id", id, ParseSpellId);
+			const auto index = static_cast<size_t>(id);
+			while (SpellsData.size() <= index) {
+				SpellData &gap = SpellsData.emplace_back(SpellsData.front());
+				gap.sBookLvl = gap.sStaffLvl = -1;
+			}
+			slot = &SpellsData[index];
+		} else {
+			slot = &SpellsData.emplace_back();
+			reader.advance(); // skip id
+		}
+		SpellData &item = *slot;
 		reader.readString("name", item.sNameText);
 		reader.read("soundId", item.sSFX, ParseSpellSoundId);
 		reader.readInt("bookCost10", item.bookCost10);
@@ -253,6 +276,15 @@ void LoadSpellData()
 		reader.readInt("staffMin", item.sStaffMin);
 		reader.readInt("staffMax", item.sStaffMax);
 	}
+}
+
+void LoadSpellData()
+{
+	SpellsData.clear();
+	AddNullSpell();
+	ReadSpellFile("txtdata\\spells\\spelldat.tsv", /*placeById=*/false);
+	// Class skills come from their own file so mods replacing spelldat.tsv (Hellfire) keep them.
+	ReadSpellFile("txtdata\\spells\\classskills.tsv", /*placeById=*/true);
 	SpellsData.shrink_to_fit();
 }
 

@@ -19,6 +19,7 @@
 #include "DiabloUI/ui_flags.hpp"
 #include "controls/control_mode.hpp"
 #include "controls/plrctrls.h"
+#include "class_skills.hpp"
 #include "cursor.h"
 #include "cursor_defs.hpp"
 #include "engine/backbuffer_state.hpp"
@@ -2197,6 +2198,12 @@ bool UseInvItem(int cii)
 
 	if (item->_iMiscId == IMISC_ARENAPOT && !player.isOnArenaLevel()) {
 		player.Say(HeroSpeech::ThatWontWorkHere);
+		return true;
+	}
+
+	if (item->_iMiscId == IMISC_BOOK && IsCombatSpell(item->_iSpell)) {
+		// Combat spells come from the skill tree now; old books can only be sold.
+		player.Say(HeroSpeech::ICantUseThisYet);
 		return true;
 	}
 

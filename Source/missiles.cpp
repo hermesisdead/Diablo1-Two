@@ -20,6 +20,7 @@
 #include <utility>
 
 #include "appfat.h"
+#include "class_skills.hpp"
 #include "control/control.hpp"
 #include "controls/control_mode.hpp"
 #include "controls/plrctrls.h"
@@ -315,6 +316,10 @@ bool MonsterMHit(const Player &player, Monster &monster, int mindam, int maxdam,
 			dam += player._pDamageMod / 2;
 		if (monster.data().monsterClass == MonsterClass::Demon && HasAnyOf(player._pIFlags, ItemSpecialEffect::TripleDemonDamage))
 			dam *= 3;
+		if (const int crit = ClassSkillCriticalChance(player); crit > 0 && RandomIntLessThan(100) < crit)
+			dam *= 2;
+	} else if (!missileData.isArrow()) {
+		dam += dam * ClassSkillElementBonus(player, damageType) / 100;
 	}
 	const bool resist = monster.isResistant(t, damageType);
 	if (!shift)
@@ -874,7 +879,7 @@ bool IsMissileBlockedByTile(Point tile)
 DamageRange GetDamageAmt(SpellID spell, int spellLevel)
 {
 	assert(MyPlayer != nullptr);
-	assert(spell >= SpellID::FIRST && spell <= SpellID::LAST);
+	assert(spell >= SpellID::FIRST && spell <= SpellID::LastClassSkill);
 
 	const Player &myPlayer = *MyPlayer;
 
@@ -1078,6 +1083,11 @@ bool PlayerMHit(Player &player, Monster *monster, int dist, int mind, int maxd, 
 
 	if (HasAnyOf(player._pSpellFlags, SpellFlag::Etherealize) && missileData.isArrow()) {
 		return false;
+	}
+
+	if (monster != nullptr) {
+		if (const int avoid = ClassSkillAvoidChance(player); avoid > 0 && GenerateRnd(100) < avoid)
+			return false;
 	}
 
 	int hit = GenerateRnd(100);
@@ -2918,6 +2928,17 @@ void ProcessElementalArrow(Missile &missile)
 			default:
 				app_fatal(StrCat("wrong missile ID ", static_cast<int>(missile._mitype)));
 				break;
+			}
+			if (!missile.IsTrap() && missile._micaster == TARGET_MONSTERS && missile._mispllvl > 0) {
+				// Fire Arrow / Lightning Arrow skills add their own elemental damage.
+				const int l = missile._mispllvl;
+				if (damageType == DamageType::Fire) {
+					eMind += 1 + 3 * l;
+					eMaxd += 3 + 5 * l;
+				} else {
+					eMind += 1;
+					eMaxd += 6 + 6 * l;
+				}
 			}
 			missile.setAnimation(eAnim);
 			CheckMissileCol(missile, damageType, eMind, eMaxd, false, missile.position.tile, true);

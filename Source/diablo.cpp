@@ -27,6 +27,8 @@
 #include "appfat.h"
 #include "automap.h"
 #include "capture.h"
+#include "class_skills.hpp"
+#include "panels/skill_tree.hpp"
 #include "control/control.hpp"
 #include "cursor.h"
 #include "dead.h"
@@ -420,7 +422,8 @@ void LeftMouseDown(uint16_t modState)
 				}
 			} else {
 				CheckLevelButton();
-				if (!LevelButtonDown)
+				CheckSkillButton();
+				if (!LevelButtonDown && !SkillButtonDown)
 					LeftMouseCmd(isShiftHeld);
 			}
 		}
@@ -448,6 +451,8 @@ void LeftMouseUp(uint16_t modState)
 	}
 	if (LevelButtonDown)
 		CheckLevelButtonUp();
+	if (SkillButtonDown)
+		CheckSkillButtonUp();
 	if (IsPlayerInStore())
 		ReleaseStoreBtn();
 }
@@ -477,8 +482,11 @@ void RightMouseDown(bool isShiftHeld)
 		SetSpell();
 		return;
 	}
-	if (SpellbookFlag && GetRightPanel().contains(MousePosition))
+	if (SpellbookFlag && GetRightPanel().contains(MousePosition)) {
+		if (SkillTreeOpen)
+			CheckSkillTreeRightClick(MousePosition);
 		return;
+	}
 	if (TryIconCurs())
 		return;
 	if (pcursinvitem != -1 && UseInvItem(pcursinvitem))
@@ -972,6 +980,38 @@ void RunGameLoop(interface_mode uMsg)
 				MyPlayer->_pDexterity = MyPlayer->_pBaseDex = 150;
 				MyPlayer->_pMagic = MyPlayer->_pBaseMag = 150;
 				CalcPlrInv(*MyPlayer, true);
+			}
+			if (const char *skills = std::getenv("DEVILUTIONX_DEV_SKILLS"); skills != nullptr && devCaptureFrames == 23) {
+				// "index:level,index:level" -- spend points on these skills.
+				std::vector<uint8_t> levels(GetClassSkills().size(), 0);
+				int spent = 0;
+				for (const std::string_view entry : SplitByChar(skills, ',')) {
+					const size_t colon = entry.find(':');
+					if (colon == std::string_view::npos)
+						continue;
+					const int index = std::atoi(std::string(entry.substr(0, colon)).c_str());
+					const int level = std::atoi(std::string(entry.substr(colon + 1)).c_str());
+					if (index >= 0 && static_cast<size_t>(index) < levels.size()) {
+						levels[index] = static_cast<uint8_t>(level);
+						spent += level;
+					}
+				}
+				SetClassSkillState(*MyPlayer, std::max(GetUnspentSkillPoints(*MyPlayer) - spent, 0), levels);
+				if (const char *ready = std::getenv("DEVILUTIONX_DEV_READY"); ready != nullptr) {
+					MyPlayer->_pRSpell = static_cast<SpellID>(std::atoi(ready));
+					MyPlayer->_pRSplType = SpellType::Spell;
+				}
+				LogInfo("SKILLS points left {} life {} mana {} ac {} dmg {}-{} bonus {}%", GetUnspentSkillPoints(*MyPlayer), MyPlayer->_pMaxHP.whole(), MyPlayer->_pMaxMana.whole(), MyPlayer->GetArmor(), MyPlayer->_pIMinDam, MyPlayer->_pIMaxDam, MyPlayer->_pIBonusDam);
+			}
+			if (const char *tree = std::getenv("DEVILUTIONX_DEV_SKILLTREE"); tree != nullptr && devCaptureFrames == 30) {
+				ToggleSkillTree();
+				SkillTreeTab = std::atoi(tree);
+			}
+			if (const char *hover = std::getenv("DEVILUTIONX_DEV_SKILLHOVER"); hover != nullptr && devCaptureFrames > 30 && SkillTreeOpen) {
+				const auto skills = GetClassSkills();
+				const size_t index = std::min<size_t>(std::atoi(hover), skills.size() - 1);
+				SkillTreeTab = skills[index].tab;
+				MousePosition = GetPanelPosition(UiPanels::Spell, { (skills[index].column == 0 ? 62 : skills[index].column == 1 ? 160 : 258), 44 + skills[index].row * 45 + 19 });
 			}
 			if (devCaptureFrames == 25 && leveltype == DTYPE_TOWN) {
 				if (const Towner *gambler = GetTowner(TOWN_GAMBLER); gambler != nullptr)
@@ -1730,6 +1770,9 @@ void GameLogic()
 		gGameLogicStep = GameLogicStep::ProcessPlayers;
 		ProcessPlayers();
 	}
+	UpdateClassSkills();
+	if (!SpellbookFlag)
+		SkillTreeOpen = false;
 	if (leveltype != DTYPE_TOWN) {
 		gGameLogicStep = GameLogicStep::ProcessMonsters;
 #ifdef _DEBUG
@@ -1935,6 +1978,12 @@ void SpellBookKeyPressed()
 {
 	if (IsPlayerInStore())
 		return;
+	if (SpellbookFlag && SkillTreeOpen) {
+		// Switch from the skill tree to the spellbook.
+		SkillTreeOpen = false;
+		return;
+	}
+	SkillTreeOpen = false;
 	SpellbookFlag = !SpellbookFlag;
 	if (!IsLeftPanelOpen() && CanPanelsCoverView()) {
 		if (!SpellbookFlag) { // We closed the inventory
@@ -2220,6 +2269,14 @@ void InitKeymapActions()
 	    N_("Open Spellbook."),
 	    'B',
 	    SpellBookKeyPressed,
+	    nullptr,
+	    CanPlayerTakeAction);
+	options.Keymapper.AddAction(
+	    "SkillTree",
+	    N_("Skill tree"),
+	    N_("Open the skill tree."),
+	    'T',
+	    ToggleSkillTree,
 	    nullptr,
 	    CanPlayerTakeAction);
 	for (uint32_t i = 0; i < QuickMessages.size(); ++i) {
@@ -3031,6 +3088,8 @@ int DiabloMain(int argc, char **argv)
 		info.saveNumber = 0;
 		CopyUtf8(info.name, "DevHero", sizeof(info.name));
 		info.heroclass = HeroClass::Warrior;
+		if (const char *cls = std::getenv("DEVILUTIONX_DEV_CLASS"); cls != nullptr)
+			info.heroclass = static_cast<HeroClass>(std::atoi(cls));
 		if (Players.empty())
 			Players.resize(MAX_PLRS);
 		const bool devAutoLoad = std::getenv("DEVILUTIONX_DEV_AUTOLOAD") != nullptr;

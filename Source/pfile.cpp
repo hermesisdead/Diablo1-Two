@@ -22,6 +22,7 @@
 #endif
 
 #include "appfat.h"
+#include "class_skills.hpp"
 #include "codec.h"
 #include "engine/load_file.hpp"
 #include "engine/render/primitive_render.hpp"
@@ -537,6 +538,7 @@ void pfile_write_hero(SaveWriter &saveWriter, bool writeGameData)
 	EncodeHero(saveWriter, &pkplr);
 	if (!gbVanilla) {
 		SaveHotkeys(saveWriter, myPlayer);
+		SaveClassSkills(saveWriter, myPlayer);
 		SaveHeroItems(saveWriter, myPlayer);
 	}
 }
@@ -765,7 +767,9 @@ bool pfile_ui_save_create(_uiheroinfo *heroinfo)
 	EncodeHero(saveWriter, &pkplr);
 	Game2UiPlayer(player, heroinfo, false);
 	if (!gbVanilla) {
+		ResetClassSkills(player);
 		SaveHotkeys(saveWriter, player);
+		SaveClassSkills(saveWriter, player);
 		SaveHeroItems(saveWriter, player);
 	}
 

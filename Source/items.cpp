@@ -29,6 +29,7 @@
 #include "control/control.hpp"
 #include "controls/control_mode.hpp"
 #include "controls/controller_buttons.h"
+#include "class_skills.hpp"
 #include "cursor.h"
 #include "cursor_defs.hpp"
 #include "diablo.h"
@@ -628,7 +629,7 @@ void GetBookSpell(Item &item, int lvl)
 	SpellID bs = SpellID::Firebolt;
 	while (rv > 0) {
 		const int sLevel = GetSpellBookLevel(static_cast<SpellID>(s));
-		if (sLevel != -1 && lvl >= sLevel) {
+		if (sLevel != -1 && lvl >= sLevel && !IsCombatSpell(static_cast<SpellID>(s))) {
 			rv--;
 			bs = static_cast<SpellID>(s);
 		}
@@ -3119,6 +3120,25 @@ void CalcPlrItemVals(Player &player, bool loadgfx)
 				minLightDam += item._iLMinDam;
 				maxLightDam += item._iLMaxDam;
 			}
+		}
+	}
+
+	{
+		// Diablo II style passive skills and warcries.
+		const ClassSkillBonuses skillBonus = GetClassSkillBonuses(player, ac + bonusAc);
+		dam += skillBonus.damagePercent;
+		toHit += skillBonus.toHit;
+		bonusAc += skillBonus.armor;
+		fireRes += skillBonus.fireResist;
+		lightRes += skillBonus.lightningResist;
+		magicRes += skillBonus.magicResist;
+		life += Fixed26_6::fromRaw(static_cast<int>(static_cast<int64_t>(player._pMaxHPBase.raw()) * skillBonus.lifePercent / 100));
+		mana += Fixed26_6::fromRaw(static_cast<int>(static_cast<int64_t>(player._pMaxManaBase.raw()) * skillBonus.manaPercent / 100));
+		switch (skillBonus.attackSpeed) {
+		case 1: flags |= ItemSpecialEffect::QuickAttack; break;
+		case 2: flags |= ItemSpecialEffect::FastAttack; break;
+		case 3: flags |= ItemSpecialEffect::FasterAttack; break;
+		default: break;
 		}
 	}
 

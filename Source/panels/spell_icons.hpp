@@ -85,6 +85,9 @@ void DrawLargeSpellIcon(const Surface &out, Point position, SpellID spell);
  */
 void DrawSmallSpellIcon(const Surface &out, Point position, SpellID spell);
 
+/** @brief Draw a small spell icon by icon frame (skill tree passives have no SpellID). */
+void DrawSmallSpellIconFrame(const Surface &out, Point position, SpellIcon icon);
+
 /**
  * Draw an inset 2px border for a large (56x56) spell icon.
  *

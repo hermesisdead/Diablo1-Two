@@ -5,6 +5,7 @@ include(functions/genex)
 set(libdevilutionx_SRCS
   appfat.cpp
   automap.cpp
+  class_skills.cpp
   capture.cpp
   cursor.cpp
   dead.cpp
@@ -134,6 +135,7 @@ set(libdevilutionx_SRCS
   panels/mainpanel.cpp
   panels/partypanel.cpp
   panels/quest_log.cpp
+  panels/skill_tree.cpp
   panels/spell_book.cpp
   panels/spell_icons.cpp
   panels/spell_list.cpp

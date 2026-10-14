@@ -37,6 +37,9 @@ void RemoveEmptyInventory(Player &player);
  */
 std::expected<void, std::string> LoadGame(bool firstflag);
 void SaveHotkeys(SaveWriter &saveWriter, const Player &player);
+/** @brief Diablo II style skill tree ("classskills" save entry); missing entry = old hero, levels become points. */
+void LoadClassSkills(Player &player);
+void SaveClassSkills(SaveWriter &saveWriter, const Player &player);
 void SaveHeroItems(SaveWriter &saveWriter, Player &player);
 void SaveGameData(SaveWriter &saveWriter);
 void SaveGame();

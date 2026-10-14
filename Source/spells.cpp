@@ -5,6 +5,7 @@
  */
 #include "spells.h"
 
+#include "class_skills.hpp"
 #include "control/control.hpp"
 #include "cursor.h"
 #ifdef _DEBUG
@@ -197,6 +198,10 @@ SpellCheckResult CheckSpell(const Player &player, SpellID sn, SpellType st, bool
 		return SpellCheckResult::Fail_Level0;
 	}
 
+	if (!ClassSkillCanCast(player, sn)) {
+		return SpellCheckResult::Fail_Busy;
+	}
+
 	if (player._pMana < GetManaAmount(player, sn) || HasAnyOf(player._pIFlags, ItemSpecialEffect::NoMana)) {
 		return SpellCheckResult::Fail_NoMana;
 	}
@@ -209,6 +214,12 @@ void CastSpell(Player &player, SpellID spl, WorldTilePosition src, WorldTilePosi
 	Direction dir = player._pdir;
 	if (IsWallSpell(spl)) {
 		dir = player.tempDirection;
+	}
+
+	if (spl >= SpellID::FirstClassSkill && spl <= SpellID::LastClassSkill) {
+		if (CastClassSkill(player, spl, src, dst, spllvl))
+			ConsumeSpell(player, spl);
+		return;
 	}
 
 	bool fizzled = false;
