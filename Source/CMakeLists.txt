@@ -84,6 +84,7 @@ set(libdevilutionx_SRCS
   engine/render/scrollrt.cpp
   engine/render/dungeon_mood.cpp
   action_mode.cpp
+  free_move.cpp
   engine/render/orbit_view.cpp
 
   items/validation.cpp

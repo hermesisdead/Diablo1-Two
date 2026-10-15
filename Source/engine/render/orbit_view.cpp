@@ -12,6 +12,7 @@
  * palettised, with the game's own light map and light tables.
  */
 #include "engine/render/orbit_view.hpp"
+#include "free_move.hpp"
 
 #include <SDL.h>
 
@@ -133,17 +134,13 @@ void SmoothTowards(Smoothed &s, float x, float y, float dt)
 void PlayerTruePosition(float &x, float &y)
 {
 	const Player &player = *MyPlayer;
-	Displacement off {};
-	if (player.isWalking())
-		off = GetOffsetForWalking(player.AnimInfo, player._pdir);
+	const Displacement off = GetPlayerDrawOffset(player);
 	TileToWorld(player.position.tile, off, x, y);
 }
 
 void MonsterTruePosition(const Monster &monster, float &x, float &y)
 {
-	Displacement off {};
-	if (monster.isWalking())
-		off = GetOffsetForWalking(monster.animInfo, monster.direction);
+	const Displacement off = GetMonsterDrawOffset(monster);
 	TileToWorld(monster.position.tile, off, x, y);
 }
 

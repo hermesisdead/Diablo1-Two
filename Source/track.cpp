@@ -4,6 +4,7 @@
  * Implementation of functionality tracking what the mouse cursor is pointing at.
  */
 #include "track.h"
+#include "free_move.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -85,12 +86,14 @@ void RepeatWalk(Player &player)
 	if (!InDungeonBounds(cursPosition))
 		return;
 
-	if (player._pmode != PM_STAND && (!player.isWalking() || player.AnimInfo.getFrameToUseForRendering() <= 6))
+	if (player._pmode != PM_STAND && !(player.isWalking() && (IsPlayerFreeWalking(player) || player.AnimInfo.getFrameToUseForRendering() > 6)))
 		return;
 
 	const Point target = player.GetTargetPosition();
-	if (cursPosition == target)
+	if (cursPosition == target) {
+		FreeMoveUpdateHeldTarget(player);
 		return;
+	}
 
 	if (IsWalkingRequestRedundant(player, cursPosition))
 		return;

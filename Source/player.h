@@ -793,13 +793,7 @@ public:
 	{
 		return previewCelSprite ? *previewCelSprite : AnimInfo.currentSprite();
 	}
-	[[nodiscard]] Displacement getRenderingOffset(const ClxSprite sprite) const
-	{
-		Displacement offset = { -CalculateSpriteTileCenterX(sprite.width()), 0 };
-		if (isWalking())
-			offset += GetOffsetForWalking(AnimInfo, _pdir);
-		return offset;
-	}
+	[[nodiscard]] Displacement getRenderingOffset(const ClxSprite sprite) const;
 
 	/**
 	 * @brief Updates previewCelSprite according to new requested command

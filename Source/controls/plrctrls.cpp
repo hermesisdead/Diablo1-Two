@@ -1,4 +1,5 @@
 #include "action_mode.hpp"
+#include "free_move.hpp"
 #include "controls/plrctrls.h"
 
 #include <algorithm>
@@ -1854,6 +1855,33 @@ void Movement(Player &player)
 		return;
 
 	if (GetLeftStickOrDPadGameUIHandler() == nullptr) {
+		if (IsFreeMovement()) {
+			// Any-angle movement from the analog stick (the D-pad gives eight directions).
+			const AxisDirection dir = GetMoveDirection();
+			float sx = 0;
+			float sy = 0;
+			if (leftStickX * leftStickX + leftStickY * leftStickY > 0.25f * 0.25f) {
+				sx = leftStickX;
+				sy = -leftStickY;
+			} else {
+				sx = dir.x == AxisDirectionX_LEFT ? -1.0f : (dir.x == AxisDirectionX_RIGHT ? 1.0f : 0.0f);
+				sy = dir.y == AxisDirectionY_UP ? -1.0f : (dir.y == AxisDirectionY_DOWN ? 1.0f : 0.0f);
+			}
+			if (sx == 0 && sy == 0) {
+				FreeMoveStopHeading(player);
+				return;
+			}
+			float wx = 0;
+			float wy = 0;
+			ScreenToWorldVector(sx, sy, wx, wy);
+			if (IsStandingGround()) {
+				if (player._pmode == PM_STAND)
+					StartStand(player, FacingForWorldVector(wx, wy));
+				return;
+			}
+			FreeMoveSetHeading(player, wx, wy);
+			return;
+		}
 		WalkInDir(player, GetMoveDirection());
 	}
 }

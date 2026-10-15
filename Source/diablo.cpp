@@ -27,6 +27,7 @@
 #include "appfat.h"
 #include "automap.h"
 #include "capture.h"
+#include "free_move.hpp"
 #include "class_skills.hpp"
 #include "panels/skill_tree.hpp"
 #include "levels/desert.hpp"
@@ -1792,6 +1793,7 @@ void GameLogic()
 	if (!ProcessInput()) {
 		return;
 	}
+	FreeMoveBeginTick();
 	if (gbProcessPlayers) {
 		gGameLogicStep = GameLogicStep::ProcessPlayers;
 		ProcessPlayers();
@@ -1838,6 +1840,9 @@ void GameLogic()
 	pfile_update(false);
 
 	plrctrls_after_game_logic();
+#ifdef _DEBUG
+	FreeMoveDebugTick();
+#endif
 }
 
 void TimeoutCursor(bool bTimeout)
@@ -2367,7 +2372,7 @@ void InitKeymapActions()
 	    "DecreaseBrightness",
 	    N_("Decrease Brightness"),
 	    N_("Reduce screen brightness."),
-	    'F',
+	    'H',
 	    DecreaseBrightness,
 	    nullptr,
 	    CanPlayerTakeAction);
@@ -2377,6 +2382,14 @@ void InitKeymapActions()
 	    N_("Increase screen brightness."),
 	    'G',
 	    IncreaseBrightness,
+	    nullptr,
+	    CanPlayerTakeAction);
+	options.Keymapper.AddAction(
+	    "ToggleFreeMovement",
+	    N_("Free movement"),
+	    N_("Toggles free movement: move at any angle instead of along the tile grid."),
+	    'F',
+	    [] { ToggleFreeMovement(); },
 	    nullptr,
 	    CanPlayerTakeAction);
 	options.Keymapper.AddAction(
@@ -3725,6 +3738,7 @@ std::expected<void, std::string> LoadGameLevel(bool firstflag, lvl_entry lvldir)
 {
 	const _music_id neededTrack = GetLevelMusic(leveltype);
 
+	FreeMoveResetLevel();
 	ClearFloatingNumbers();
 	LoadGameLevelStopMusic(neededTrack);
 	LoadGameLevelResetCursor();

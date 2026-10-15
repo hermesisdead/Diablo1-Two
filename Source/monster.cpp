@@ -70,6 +70,7 @@
 #include "levels/themes.h"
 #include "levels/tile_properties.hpp"
 #include "levels/trigs.h"
+#include "free_move.hpp"
 #include "lighting.h"
 #include "lua/lua_event.hpp"
 #include "minitext.h"
@@ -787,6 +788,14 @@ void StartSpecialStand(Monster &monster, Direction md)
 
 void WalkInDirection(Monster &monster, Direction endDir)
 {
+	if (IsFreeMovement()) {
+		const Direction face = FreeMoveStartMonsterStride(monster, endDir);
+		monster.mode = MonsterMode::MoveNorthwards;
+		NewMonsterAnim(monster, MonsterGraphic::Walk, face, AnimationDistributionFlags::ProcessAnimationPending, -1);
+		FreeMoveSetMonsterStrideTicks(monster);
+		return;
+	}
+	monster.position.freeMove.walking = false;
 	Point dir = { 0, 0 };
 	dir += endDir;
 
@@ -1066,8 +1075,7 @@ void SyncLightPosition(Monster &monster)
 	if (monster.lightId == NO_LIGHT)
 		return;
 
-	const WorldTileDisplacement offset = monster.isWalking() ? monster.position.CalculateWalkingOffset(monster.direction, monster.animInfo) : WorldTileDisplacement {};
-	ChangeLightOffset(monster.lightId, offset.screenToLight());
+	ChangeLightOffset(monster.lightId, GetMonsterLightOffset(monster));
 }
 
 void MonsterIdle(Monster &monster)
@@ -1089,6 +1097,15 @@ void MonsterIdle(Monster &monster)
  */
 bool MonsterWalk(Monster &monster)
 {
+	if (monster.position.freeMove.walking) {
+		const bool strideEnded = FreeMoveMonsterWalk(monster);
+		if (strideEnded) {
+			ChangeLightXY(monster.lightId, monster.position.tile);
+			M_StartStand(monster, monster.direction);
+		}
+		SyncLightPosition(monster);
+		return strideEnded;
+	}
 	// Check if we reached new tile
 	const bool isAnimationEnd = monster.animInfo.isLastFrame();
 	if (isAnimationEnd) {
@@ -4942,6 +4959,13 @@ void Monster::petrify()
 {
 	mode = MonsterMode::Petrified;
 	animInfo.isPetrified = true;
+}
+
+Displacement Monster::getRenderingOffset(const ClxSprite sprite) const
+{
+	Displacement offset = { -CalculateSpriteTileCenterX(sprite.width()), 0 };
+	offset += GetMonsterDrawOffset(*this);
+	return offset;
 }
 
 bool Monster::isWalking() const

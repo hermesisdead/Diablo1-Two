@@ -1373,7 +1373,10 @@ void GenerateLevel(lvl_entry entry)
 	if (LevelSeeds[currlevel])
 		SetRndSeed(*LevelSeeds[currlevel]);
 
-	const size_t minarea = MinimumArea();
+	// The procedural layouts space their rooms out and rarely reach the classic area target on the
+	// deeper levels (level 4 could retry forever), so they aim for three quarters of it. This must
+	// only depend on the level, so a level rebuilt from its saved seed comes out the same.
+	const size_t minarea = UseProceduralRooms() ? MinimumArea() * 3 / 4 : MinimumArea();
 
 	while (true) {
 		DRLG_InitTrans();

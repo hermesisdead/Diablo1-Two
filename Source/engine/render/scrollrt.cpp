@@ -4,6 +4,7 @@
  * Implementation of functionality for rendering the dungeons, monsters and calling other render routines.
  */
 #include "engine/render/scrollrt.h"
+#include "free_move.hpp"
 
 #include <cmath>
 #include <cstddef>
@@ -415,8 +416,7 @@ void DrawPlayerIconHelper(const Surface &out, MissileGraphicID missileGraphicId,
 {
 	const bool lighting = &player != MyPlayer;
 
-	if (player.isWalking())
-		position += GetOffsetForWalking(player.AnimInfo, player._pdir);
+	position += GetPlayerDrawOffset(player);
 
 	position.x -= GetMissileSpriteData(missileGraphicId).animWidth2;
 
@@ -1189,8 +1189,8 @@ void CalcFirstTilePosition(Point &position, Displacement &offset)
 	// Adjust by player offset and tile grid alignment
 	const Player &myPlayer = *MyPlayer;
 	offset = tileOffset;
-	if (myPlayer.isWalking())
-		offset += GetOffsetForWalking(myPlayer.AnimInfo, myPlayer._pdir, true);
+	const Displacement cameraOffset = GetPlayerDrawOffset(myPlayer, true);
+	offset += cameraOffset;
 
 	position += tileShift;
 
@@ -1207,7 +1207,17 @@ void CalcFirstTilePosition(Point &position, Displacement &offset)
 	}
 
 	// Draw areas moving in and out of the screen
-	if (myPlayer.isWalking()) {
+	if (!myPlayer.isWalking() || IsPlayerFreeWalking(myPlayer)) {
+		// Free movement: the hero can be anywhere between tiles.
+		if (cameraOffset.deltaY > 0) {
+			offset.deltaY -= TILE_HEIGHT;
+			position += Direction::North;
+		}
+		if (cameraOffset.deltaX > 0) {
+			offset.deltaX -= TILE_WIDTH;
+			position += Direction::West;
+		}
+	} else {
 		switch (myPlayer._pdir) {
 		case Direction::North:
 		case Direction::NorthEast:

@@ -4,6 +4,7 @@
  * Implementation of cursor tracking functionality.
  */
 #include "cursor.h"
+#include "free_move.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -704,12 +705,11 @@ void AlterMousePositionViaPlayer(Point &screenPosition, const Player &myPlayer)
 	screenPosition.x += xo;
 	screenPosition.y += yo;
 
-	// Adjust for player walking
-	if (myPlayer.isWalking()) {
-		const Displacement offset = GetOffsetForWalking(myPlayer.AnimInfo, myPlayer._pdir, true);
-		screenPosition.x -= offset.deltaX;
-		screenPosition.y -= offset.deltaY;
-
+	// Adjust for the player's position between tiles (walking, or standing off-centre with free movement)
+	const Displacement offset = GetPlayerDrawOffset(myPlayer, true);
+	screenPosition.x -= offset.deltaX;
+	screenPosition.y -= offset.deltaY;
+	if (myPlayer.isWalking() && !IsPlayerFreeWalking(myPlayer)) {
 		// Predict the next frame when walking to avoid input jitter
 		const DisplacementOf<int16_t> offset2 = myPlayer.position.CalculateWalkingOffsetShifted8(myPlayer._pdir, myPlayer.AnimInfo);
 		const DisplacementOf<int16_t> velocity = myPlayer.position.GetWalkingVelocityShifted8(myPlayer._pdir, myPlayer.AnimInfo);
@@ -917,6 +917,13 @@ void CheckCursMove()
 
 	bool flipflag = false;
 	Point currentTile = ConvertToTileGrid(screenPosition);
+	{
+		// Exact world point under the mouse (the diamond of currentTile is centred at x 0, y half a tile).
+		const float sx = static_cast<float>(screenPosition.x % TILE_WIDTH);
+		const float sy = static_cast<float>(screenPosition.y % TILE_HEIGHT) - TILE_HEIGHT / 2.0F;
+		SetFreeMoveCursorPoint(static_cast<float>(currentTile.x) + (sx / 32.0F + sy / 16.0F) / 2.0F,
+		    static_cast<float>(currentTile.y) + (sy / 16.0F - sx / 32.0F) / 2.0F);
+	}
 
 	ShiftToDiamondGridAlignment(screenPosition, currentTile, flipflag);
 

@@ -850,6 +850,7 @@ GameplayOptions::GameplayOptions()
     : OptionCategoryBase("Game", N_("Gameplay"), N_("Gameplay Settings"))
     , tickRate("Speed", OptionEntryFlags::Invisible, "Speed", "Gameplay ticks per second.", 20)
     , runInTown("Run in Town", OptionEntryFlags::CantChangeInMultiPlayer, N_("Run in Town"), N_("Enable jogging/fast walking in town for Diablo and Hellfire. This option was introduced in the expansion."), false)
+    , freeMovement("Free Movement", OptionEntryFlags::None, N_("Free Movement"), N_("The hero and monsters move at any angle instead of stepping along the tile grid. Walls block exactly as before. Single player only. Toggle with F."), true)
     , actionMode("Action Mode", OptionEntryFlags::None, N_("Action Mode"), N_("Close third-person camera with direct movement (WASD / left stick), lock-on, dodge and stamina. Toggle with F4."), false)
     , actionHud("Action HUD", OptionEntryFlags::None, N_("Action HUD"), N_("Replace the main panel with slim health, mana and stamina bars while in action mode."), true)
     , actionCamera3D("Action Camera 3D", OptionEntryFlags::None, N_("Third-Person Camera"), N_("Elden Ring style orbiting camera in action mode: the level is rebuilt in 3D from the game's own tile art. Off keeps the close isometric camera."), true)
@@ -918,6 +919,7 @@ std::vector<OptionEntryBase *> GameplayOptions::GetEntries()
 		&theoQuest,
 		&cowQuest,
 		&runInTown,
+		&freeMovement,
 		&actionMode,
 		&actionHud,
 		&actionCamera3D,

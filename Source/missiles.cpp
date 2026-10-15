@@ -5,6 +5,7 @@
  */
 #include "action_mode.hpp"
 #include "missiles.h"
+#include "free_move.hpp"
 
 #include <algorithm>
 #include <array>
@@ -2857,6 +2858,22 @@ Missile *AddMissile(WorldTilePosition src, WorldTilePosition dst, Direction midi
 	missileData.addFn(missile, parameter);
 	if (parameter.spellFizzled) {
 		return nullptr;
+	}
+
+	// Free movement: a projectile leaves from where its shooter actually stands, not the tile centre.
+	if (IsFreeMovement() && !missile.IsTrap() && id >= 0 && missile.position.velocity != Displacement {} && missile.position.traveled == Displacement {}) {
+		const ActorPosition *shooter = nullptr;
+		if (micaster == TARGET_MONSTERS && static_cast<size_t>(id) < Players.size())
+			shooter = &Players[id].position;
+		else if (micaster == TARGET_PLAYERS && static_cast<size_t>(id) < MaxMonsters)
+			shooter = &Monsters[id].position;
+		if (shooter != nullptr && shooter->tile == src) {
+			const Displacement offset = FreeMoveCurrentScreenOffset(*shooter);
+			if (offset != Displacement {}) {
+				missile.position.traveled = Displacement { offset.deltaX * 65536, offset.deltaY * 65536 };
+				UpdateMissilePos(missile);
+			}
+		}
 	}
 
 	return &missile;

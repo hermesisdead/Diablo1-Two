@@ -173,7 +173,10 @@ echo   - Diablo II style skill trees: press T to spend skill points.
 echo   - Sand Tristram: talk to Jamal by the cows ^(next to the cow with bags^).
 echo   - Weather everywhere ^(rain, storms, snow, wind, fireflies, ash...^) with
 echo     ambient sound; adjust it with the Ambience slider in the in-game Options.
+echo   - Free movement: the hero and monsters move at any angle, not along the
+echo     tile grid. Press F to switch between free movement and the grid.
 echo   - F4 toggles action mode ^(close camera, WASD, dodge, lock-on^).
+echo     In action mode the mana potion moved from F to G.
 echo   Options for all of these are under Settings ^> Gameplay / Graphics.
 echo.
 pause

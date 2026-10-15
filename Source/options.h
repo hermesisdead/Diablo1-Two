@@ -592,6 +592,8 @@ struct GameplayOptions : OptionCategoryBase {
 	OptionEntryInt<int> tickRate;
 	/** @brief Enable double walk speed when in town. */
 	OptionEntryBoolean runInTown;
+	/** @brief Free movement: hero and monsters move at any angle instead of along the tile grid. */
+	OptionEntryBoolean freeMovement;
 	/** @brief Action mode: close camera, direct movement, lock-on, dodge and stamina. */
 	OptionEntryBoolean actionMode;
 	/** @brief Slim HUD replacing the main panel while in action mode. */

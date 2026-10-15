@@ -472,13 +472,7 @@ struct Monster { // note: missing field _mAFNum
 	 */
 	[[nodiscard]] MonsterMode getVisualMonsterMode() const;
 
-	[[nodiscard]] Displacement getRenderingOffset(const ClxSprite sprite) const
-	{
-		Displacement offset = { -CalculateSpriteTileCenterX(sprite.width()), 0 };
-		if (isWalking())
-			offset += GetOffsetForWalking(animInfo, direction);
-		return offset;
-	}
+	[[nodiscard]] Displacement getRenderingOffset(const ClxSprite sprite) const;
 
 	/**
 	 * @brief Sets a tile/dMonster to be occupied by the monster

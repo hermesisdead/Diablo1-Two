@@ -13,7 +13,8 @@
  *   WASD / arrows  move            Space  dodge (costs stamina, brief invulnerability)
  *   Left mouse     light attack    Right mouse  cast the current spell
  *   Q              lock on / off   E      interact (pick up, open, talk)
- *   R              health potion   F      mana potion
+ *   R              health potion   G      mana potion
+ *   F              free movement on / off (any-angle movement, see free_move.hpp)
  *
  * Controller (while no panel is open)
  *   Left stick  move           Right stick  switch lock-on target (flick)
@@ -47,6 +48,7 @@
 #include "cursor.h"
 #include "diablo.h"
 #include "doom.h"
+#include "free_move.hpp"
 #include "engine/backbuffer_state.hpp"
 #include "engine/palette.h"
 #include "engine/point.hpp"
@@ -104,6 +106,8 @@ int DodgeStepsLeft = 0;
 Direction DodgeDirection = Direction::South;
 bool DodgeActive = false;
 uint32_t DodgeStarted = 0;
+/** Free movement: the dodge dash was launched. */
+bool DodgeDashStarted = false;
 
 bool AttackHeldByMouse = false;
 bool MovedByInputLastTick = false;
@@ -342,6 +346,51 @@ Direction GridAngleToDirection(float angle)
 	return static_cast<Direction>(idx);
 }
 
+/** Free movement: world vector of the movement input (any angle), honouring the camera in the 3D view. */
+bool CurrentMoveVector(float &wx, float &wy)
+{
+	if (IsOrbitViewActive()) {
+		float fx, fy;
+		if (!ReadMoveVector(fx, fy))
+			return false;
+		const float angle = WorldAngleOf(fx, fy);
+		wx = std::cos(angle);
+		wy = std::sin(angle);
+		return true;
+	}
+	float sx = 0, sy = 0;
+	int numKeys = 0;
+	const auto *keys = SDL_GetKeyboardState(&numKeys);
+	const auto pressed = [&](SDL_Scancode code) { return code < numKeys && keys[code] != 0; };
+	if (!ChatFlag) {
+		if (pressed(SDL_SCANCODE_A) || pressed(SDL_SCANCODE_LEFT))
+			sx -= 1;
+		if (pressed(SDL_SCANCODE_D) || pressed(SDL_SCANCODE_RIGHT))
+			sx += 1;
+		if (pressed(SDL_SCANCODE_W) || pressed(SDL_SCANCODE_UP))
+			sy -= 1;
+		if (pressed(SDL_SCANCODE_S) || pressed(SDL_SCANCODE_DOWN))
+			sy += 1;
+	}
+	if (sx == 0 && sy == 0 && leftStickX * leftStickX + leftStickY * leftStickY > 0.3f * 0.3f) {
+		sx = leftStickX;
+		sy = -leftStickY;
+	}
+	if (sx == 0 && sy == 0)
+		return false;
+	ScreenToWorldVector(sx, sy, wx, wy);
+	return wx != 0 || wy != 0;
+}
+
+/** World vector of a sprite direction. */
+void DirectionVector(Direction dir, float &wx, float &wy)
+{
+	const Displacement d { dir };
+	const float len = std::hypot(static_cast<float>(d.deltaX), static_cast<float>(d.deltaY));
+	wx = static_cast<float>(d.deltaX) / len;
+	wy = static_cast<float>(d.deltaY) / len;
+}
+
 /** Movement direction for this tick, if any, honouring the camera in the 3D view. */
 std::optional<Direction> CurrentMoveDirection()
 {
@@ -374,6 +423,7 @@ void StartDodge()
 	SpendStamina(DodgeCost);
 	DodgeStepsLeft = DodgeSteps;
 	DodgeActive = true;
+	DodgeDashStarted = false;
 	DodgeStarted = SDL_GetTicks();
 }
 
@@ -385,6 +435,28 @@ void UpdateDodge()
 	if (SDL_GetTicks() - DodgeStarted > 1500) {
 		DodgeActive = false;
 		DodgeStepsLeft = 0;
+		DodgeDashStarted = false;
+		return;
+	}
+	if (IsFreeMovement()) {
+		// A quick dash at any angle.
+		if (!DodgeDashStarted) {
+			if (player._pmode != PM_STAND && !player.isWalking())
+				return;
+			float wx, wy;
+			if (!CurrentMoveVector(wx, wy))
+				DirectionVector(Opposite(player._pdir), wx, wy); // backstep
+			if (!FreeMoveDash(player, wx, wy, static_cast<float>(DodgeSteps), 3.0f)) {
+				DodgeActive = false;
+				return;
+			}
+			DodgeDashStarted = true;
+			return;
+		}
+		if (!FreeMoveIsDashing(player)) {
+			DodgeActive = false;
+			DodgeDashStarted = false;
+		}
 		return;
 	}
 	if (player._pmode == PM_STAND) {
@@ -594,6 +666,7 @@ void ToggleActionMode()
 	opt.SetValue(!*opt);
 	LockedMonster = -1;
 	DodgeActive = false;
+	DodgeDashStarted = false;
 	DodgeStepsLeft = 0;
 	Stamina = MaxStamina;
 	OrbitCameraReset();
@@ -733,7 +806,7 @@ bool ActionModeHandleKey(SDL_Keycode key)
 	case 'R':
 		UseBeltItem(BeltItemType::Healing);
 		return true;
-	case 'F':
+	case 'G':
 		UseBeltItem(BeltItemType::Mana);
 		return true;
 	default:
@@ -859,6 +932,17 @@ bool ActionModeMovement(Player &player)
 		return true;
 	if (DodgeActive)
 		return true;
+	if (IsFreeMovement()) {
+		float wx, wy;
+		if (!CurrentMoveVector(wx, wy)) {
+			FreeMoveStopHeading(player);
+			MovedByInputLastTick = false;
+			return true;
+		}
+		MovedByInputLastTick = true;
+		FreeMoveSetHeading(player, wx, wy);
+		return true;
+	}
 	const std::optional<Direction> dir = CurrentMoveDirection();
 	if (!dir) {
 		if (MovedByInputLastTick && player.walkpath[0] != WALK_NONE && player.destAction == ACTION_NONE)
@@ -961,8 +1045,7 @@ void DrawBar(const Surface &out, const HudColors &c, Point pos, int width, int h
 std::optional<Point> MonsterScreenFeet(const Monster &monster)
 {
 	Point p = GetScreenPosition(monster.position.tile);
-	if (monster.isWalking())
-		p += GetOffsetForWalking(monster.animInfo, monster.direction);
+	p += GetMonsterDrawOffset(monster);
 	p.x += TILE_WIDTH / 2 - 8;
 	p.y -= TILE_HEIGHT / 4;
 	if (*GetOptions().Graphics.zoom) {

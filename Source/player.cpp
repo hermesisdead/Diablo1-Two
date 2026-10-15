@@ -50,6 +50,7 @@
 #include "options.h"
 #include "player.h"
 #include "class_skills.hpp"
+#include "free_move.hpp"
 #include "qol/autopickup.h"
 #include "qol/stash.h"
 #include "spells.h"
@@ -82,8 +83,7 @@ void UpdatePlayerLightOffset(Player &player)
 	if (player.lightId == NO_LIGHT)
 		return;
 
-	const WorldTileDisplacement offset = player.position.CalculateWalkingOffset(player._pdir, player.AnimInfo);
-	ChangeLightOffset(player.lightId, offset.screenToLight());
+	ChangeLightOffset(player.lightId, GetPlayerLightOffset(player));
 }
 
 void WalkInDirection(Player &player, const DirectionSettings &walkParams)
@@ -133,6 +133,7 @@ void HandleWalkMode(Player &player, Direction dir)
 	}
 
 	player._pdir = dir;
+	player.position.freeMove.walking = false;
 
 	// The player's tile position after finishing this movement action
 	player.position.future = player.position.tile + dirModeParams.dir;
@@ -426,6 +427,9 @@ void InitLevelChange(Player &player)
  */
 bool DoWalk(Player &player)
 {
+	if (player.position.freeMove.walking)
+		return FreeMoveDoWalk(player);
+
 	// Play walking sound effect on certain animation frames
 	if (*GetOptions().Audio.walkingSound && (leveltype != DTYPE_TOWN || sgGameInitInfo.bRunInTown == 0)) {
 		if (player.AnimInfo.currentFrame == 0
@@ -1199,6 +1203,12 @@ void CheckNewPath(Player &player, bool pmWillBeCalled)
 				return;
 			}
 
+			if (IsFreeMovement()) {
+				// Free movement follows the whole path itself and keeps walkpath relative to the hero's tile.
+				FreeMoveStartWalk(player);
+				return;
+			}
+
 			switch (player.walkpath[0]) {
 			case WALK_N:
 				StartWalk(player, Direction::North, pmWillBeCalled);
@@ -1782,6 +1792,13 @@ void Player::Stop()
 {
 	ClrPlrPath(*this);
 	destAction = ACTION_NONE;
+}
+
+Displacement Player::getRenderingOffset(const ClxSprite sprite) const
+{
+	Displacement offset = { -CalculateSpriteTileCenterX(sprite.width()), 0 };
+	offset += GetPlayerDrawOffset(*this);
+	return offset;
 }
 
 bool Player::isWalking() const

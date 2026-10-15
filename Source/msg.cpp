@@ -4,6 +4,7 @@
  * Implementation of function for sending and receiving network messages.
  */
 #include "msg.h"
+#include "free_move.hpp"
 
 #include <climits>
 #include <cmath>
@@ -1212,6 +1213,7 @@ size_t OnWalk(const TCmdLoc &message, Player &player)
 		ClrPlrPath(player);
 		MakePlrPath(player, position, true);
 		player.destAction = ACTION_NONE;
+		FreeMoveOnWalkCommand(player, position);
 	}
 
 	return sizeof(message);
@@ -3013,6 +3015,8 @@ void NetSendCmdLoc(uint8_t playerId, bool bHiPri, _cmd_id bCmd, Point position)
 {
 	if (playerId == MyPlayerId && WasPlayerCmdAlreadyRequested(bCmd, position))
 		return;
+	if (playerId == MyPlayerId && bCmd == CMD_WALKXY)
+		FreeMoveNoteWalkRequest(position);
 
 	TCmdLoc cmd;
 

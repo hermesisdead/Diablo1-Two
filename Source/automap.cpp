@@ -4,6 +4,7 @@
  * Implementation of the in-game map overlay.
  */
 #include "automap.h"
+#include "free_move.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -1347,9 +1348,7 @@ void DrawAutomapPlr(const Surface &out, const Displacement &myPlayerOffset, cons
 	const int px = tile.x - (2 * AutomapOffset.deltaX) - ViewPosition.x;
 	const int py = tile.y - (2 * AutomapOffset.deltaY) - ViewPosition.y;
 
-	Displacement playerOffset = {};
-	if (player.isWalking())
-		playerOffset = GetOffsetForWalking(player.AnimInfo, player._pdir);
+	const Displacement playerOffset = GetPlayerDrawOffset(player);
 
 	const int scale = (GetAutomapType() == AutomapType::Minimap) ? MinimapScale : AutoMapScale;
 
@@ -1768,9 +1767,7 @@ void DrawAutomap(const Surface &out)
 	Automap += AutomapOffset;
 
 	const Player &myPlayer = *MyPlayer;
-	Displacement myPlayerOffset = {};
-	if (myPlayer.isWalking())
-		myPlayerOffset = GetOffsetForWalking(myPlayer.AnimInfo, myPlayer._pdir, true);
+	const Displacement myPlayerOffset = GetPlayerDrawOffset(myPlayer, true);
 
 	const int scale = (GetAutomapType() == AutomapType::Minimap) ? MinimapScale : AutoMapScale;
 	const int d = (scale * 64) / 100;
