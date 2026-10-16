@@ -53,6 +53,15 @@ bool ColorOverlayBegin(const Surface &region);
  */
 void ColorOverlayMulLight(int x, int y, float r, float g, float b);
 
+/**
+ * @brief Floor decals (blood on the ground): painted only where the floor is still visible at the
+ * end of the frame, so characters and walls standing on them stay in front. In the classic view
+ * call ColorOverlayFloorSnapshot right after the floor was drawn; without a snapshot (3D view,
+ * which depth-tests instead) decals are painted wherever they are drawn.
+ */
+void ColorOverlayFloorSnapshot(const Surface &floor, int scale, int offsetX);
+void ColorOverlayDecal(int x, int y, OverlayColor color, float alpha);
+
 /** @brief A whole-region wash: before everything else (darkening) or after (flashes). */
 void ColorOverlayWash(OverlayColor color, float alpha, bool last);
 

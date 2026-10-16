@@ -55,6 +55,7 @@
 #include "nthread.h"
 #include "engine/render/color_overlay.hpp"
 #include "engine/render/dungeon_mood.hpp"
+#include "engine/render/gore_fx.hpp"
 #include "engine/render/spell_fx.hpp"
 #include "levels/forest.hpp"
 #include "action_mode.hpp"
@@ -1301,6 +1302,12 @@ void DrawGame(const Surface &fullOut, Point position, Displacement offset)
 	    dLight, MicroTileLen);
 
 	DrawFloor(out, lightmap, position, Point {} + offset, rows, columns);
+	{
+		// Remember the bare floor so blood on the ground stays under what stands on it.
+		const bool zoomed = *GetOptions().Graphics.zoom;
+		const int zoomOffsetX = zoomed && CanPanelsCoverView() && IsLeftPanelOpen() ? SidePanelSize.width : 0;
+		ColorOverlayFloorSnapshot(out, zoomed ? 2 : 1, zoomOffsetX);
+	}
 	DrawTileContent(out, lightmap, position, Point {} + offset, rows, columns);
 	DrawOOB(out, lightmap, position, Point {} + offset, rows, columns);
 
@@ -1344,6 +1351,7 @@ void DrawView(const Surface &out, Point startPosition)
 		DrawOrbitView(orbitOut);
 		DrawColoredLight(orbitOut);
 		DrawDungeonMood(orbitOut); // stays on while the map (Tab) is open
+		DrawGore(orbitOut);
 		DrawSpellEffects(orbitOut);
 		ColorOverlayFinish();
 		DrawForestHud(out.subregionY(0, gnViewportHeight));
@@ -1358,6 +1366,7 @@ void DrawView(const Surface &out, Point startPosition)
 	DrawGame(out, startPosition, offset);
 	DrawColoredLight(viewOut);
 	DrawDungeonMood(viewOut); // stays on while the map (Tab) is open
+	DrawGore(viewOut);
 	DrawSpellEffects(viewOut);
 	ColorOverlayFinish();
 	DrawForestHud(out.subregionY(0, gnViewportHeight));

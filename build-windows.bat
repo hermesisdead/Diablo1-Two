@@ -180,6 +180,9 @@ echo     of a dither pattern, and torches, fire and spells cast coloured light.
 echo     Settings ^> Graphics: Smooth Effects / Coloured Lighting.
 echo   - Spell effects: spells trail embers, sparks or motes, glow, light up the
 echo     floor around them and burst where they hit ^(Settings ^> Graphics^).
+echo   - Gore: blood sprays, bursts and stains the floor; a monster that drops
+echo     a legendary item explodes and a golden beam marks the item.
+echo   - Unique and strongly resistant magic body armour glows on the hero.
 echo   - F8 opens the weather panel: current weather, time until it changes,
 echo     an intensity slider and on/off switches. Tab is only the map now ^(the
 echo     weather stays on while it is open^). Spell hotkeys are F5-F7.

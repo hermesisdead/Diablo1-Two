@@ -578,6 +578,12 @@ struct GraphicsOptions : OptionCategoryBase {
 	OptionEntryBoolean coloredLighting;
 	/** @brief Particles, glow and light for spells (needs Smooth Effects). */
 	OptionEntryBoolean spellEffects;
+	/** @brief Magic and unique body armour glows on the hero (needs Smooth Effects). */
+	OptionEntryBoolean armorGlows;
+	/** @brief Blood sprays, bursts and stains (needs Smooth Effects). */
+	OptionEntryBoolean gore;
+	/** @brief A golden beam over legendary items on the ground (needs Smooth Effects). */
+	OptionEntryBoolean legendaryBeams;
 	/** @brief Per-level colour variation in dungeons. */
 	OptionEntryBoolean dungeonColorVariation;
 	/** @brief Use alternate nest palette. */

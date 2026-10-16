@@ -403,7 +403,7 @@ void SpawnParticle(Particle &p, bool anywhere)
 		p.kind = currentMood == DungeonMood::Ash && Random01() < 0.07f ? 1 : 0; // a few still glowing
 		break;
 	case DungeonMood::Wind: {
-		p.kind = Random01() < 0.55f ? 0 : 1; // 0: leaf, 1: dust streak
+		p.kind = Random01() < 0.7f ? 0 : 1; // 0: leaf, 1: dust streak
 		if (anywhere) {
 			RandomScreenPoint(p.x, p.y, 13.0f, -17.0f, 17.0f);
 		} else {
@@ -872,7 +872,7 @@ void DrawDot(const Projector &pr, const OrbitScreenPoint &sp, int size, uint8_t 
 }
 
 /** A blended line between two projected points (rain streaks, leaves, dust). */
-void DrawLine(const Projector &pr, const OrbitScreenPoint &a, const OrbitScreenPoint &b, uint8_t color, bool solidHead)
+void DrawLine(const Projector &pr, const OrbitScreenPoint &a, const OrbitScreenPoint &b, uint8_t color, bool solidHead, float strength = 1.0f)
 {
 	const int dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y;
 	const int steps = std::max({ std::abs(dx), std::abs(dy), 1 });
@@ -886,7 +886,7 @@ void DrawLine(const Projector &pr, const OrbitScreenPoint &a, const OrbitScreenP
 			// Streaks fade from the head to the tail.
 			const float t = static_cast<float>(i) / static_cast<float>(steps);
 			const float alpha = solidHead ? 0.9f - 0.35f * t : 0.6f * (1.0f - t) + 0.08f;
-			Blend(pr.out, p, color, alpha);
+			Blend(pr.out, p, color, alpha * strength);
 			continue;
 		}
 		if (i == 0 && solidHead)
@@ -914,6 +914,52 @@ void Wash(const Surface &out, uint8_t color, float fraction, bool last = false)
 		for (int x = 0; x < out.w(); x++) {
 			if (bayerRow[x & 3] < threshold)
 				row[x] = lookup[row[x]];
+		}
+	}
+}
+
+/**
+ * A tumbling autumn leaf (full-colour overlay): a pointed oval that spins in the air and turns over,
+ * showing its lighter face, then its edge, then its darker back.
+ */
+void DrawLeaf(const Projector &pr, const OrbitScreenPoint &sp, const Particle &p)
+{
+	const int variety = static_cast<int>(p.rate * 100.0f) % 3;
+	const OverlayColor base = OverlayPaletteColor(colors.leaves[variety]);
+	const float flip = std::cos(p.phase * 3.1f + p.rate * 7.0f); // 1 face, 0 edge-on, -1 back
+	const float spin = p.phase * 1.6f + p.rate * 11.0f;
+	const float halfLength = std::max(2.6f, sp.pixelsPerTile * 0.085f);
+	const float halfWidth = halfLength * 0.55f * std::max(0.12f, std::fabs(flip));
+	const float ca = std::cos(spin), sa = std::sin(spin);
+	// The face catches the light, the back is darker.
+	const float shade = flip >= 0 ? 1.15f : 0.7f;
+	auto tone = [](uint8_t c, float k) { return static_cast<uint8_t>(std::clamp(c * k, 0.0f, 255.0f)); };
+	const OverlayColor face { tone(base.r, shade), tone(base.g, shade), tone(base.b, shade) };
+	const OverlayColor vein { tone(base.r, shade * 0.6f), tone(base.g, shade * 0.55f), tone(base.b, shade * 0.5f) };
+	const int r = static_cast<int>(std::ceil(halfLength)) + 2;
+	for (int dy = -r; dy <= r; dy++) {
+		for (int dx = -r; dx <= r; dx++) {
+			const Point px { sp.pos.x + dx, sp.pos.y + dy };
+			// Leaf-local coordinates: u along the midrib, v across it.
+			const float u = dx * ca + dy * sa;
+			const float v = -dx * sa + dy * ca;
+			if (std::fabs(u) > halfLength + 1.5f)
+				continue;
+			const bool stem = u > halfLength - 0.5f && u < halfLength + 1.6f && std::fabs(v) < 0.6f;
+			// Pointed at both ends, widest a little before the middle.
+			const float t = std::clamp((u + halfLength) / (2.0f * halfLength), 0.0f, 1.0f);
+			const float width = halfWidth * std::pow(std::sin(3.14159f * t), 0.8f) * (1.0f + 0.15f * (0.5f - t));
+			const float coverage = std::clamp(width - std::fabs(v) + 0.5f, 0.0f, 1.0f);
+			if (coverage <= 0 && !stem)
+				continue;
+			if (!pr.Visible(px, sp.depth))
+				continue;
+			if (coverage <= 0) {
+				ColorOverlayOver(px.x, px.y, vein, std::min(1.0f, 0.8f * intensity)); // the stem
+				continue;
+			}
+			const bool midrib = std::fabs(v) < 0.45f && std::fabs(flip) > 0.35f;
+			ColorOverlayOver(px.x, px.y, midrib ? vein : face, std::min(1.0f, 0.95f * coverage * intensity));
 		}
 	}
 }
@@ -1155,7 +1201,9 @@ void DrawParticles(const Projector &pr)
 		case DungeonMood::Wind: {
 			if (LightFactor(p.x, p.y) < 0.15f)
 				continue;
-			if (p.kind == 0) {
+			if (p.kind == 0 && overlayOn) {
+				DrawLeaf(pr, *sp, p);
+			} else if (p.kind == 0) {
 				// A leaf: a short stroke that turns over as it tumbles.
 				const float angle = p.phase * 4.0f;
 				const float r = 0.13f;
@@ -1164,9 +1212,9 @@ void DrawParticles(const Projector &pr)
 				if (a && b)
 					DrawLine(pr, *a, *b, colors.leaves[static_cast<int>(p.rate * 100.0f) % 3], true);
 			} else {
-				const std::optional<OrbitScreenPoint> tail = pr.Project(p.x - p.vx * 0.09f, p.y - p.vy * 0.09f, p.z);
+				const std::optional<OrbitScreenPoint> tail = pr.Project(p.x - p.vx * (overlayOn ? 0.05f : 0.09f), p.y - p.vy * (overlayOn ? 0.05f : 0.09f), p.z);
 				if (tail)
-					DrawLine(pr, *sp, *tail, colors.windDust, false);
+					DrawLine(pr, *sp, *tail, colors.windDust, false, overlayOn ? 0.45f : 1.0f);
 			}
 			break;
 		}

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <optional>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -16,6 +17,10 @@
 #endif
 
 #include "diablo.h"
+#include "free_move.hpp"
+#include "items.h"
+#include "player.h"
+#include "tables/itemdat.h"
 #include "engine/render/color_overlay.hpp"
 #include "engine/render/world_projector.hpp"
 #include "levels/gendung.h"
@@ -36,6 +41,11 @@ enum class Style : uint8_t {
 	Blood,
 	Acid,
 	Portal,
+	// Armour auras only.
+	Shadow,
+	Silver,
+	Amber,
+	Rainbow,
 };
 
 struct Palette3 {
@@ -53,6 +63,28 @@ const Palette3 &PaletteOf(Style style)
 	static const Palette3 blood { { 255, 190, 170 }, { 230, 40, 30 }, { 110, 0, 0 }, { 230, 40, 30 }, { 1.55f, 0.85f, 0.80f } };
 	static const Palette3 acid { { 220, 255, 170 }, { 110, 220, 50 }, { 40, 110, 20 }, { 110, 230, 60 }, { 1.05f, 1.50f, 0.85f } };
 	static const Palette3 portal { { 230, 245, 255 }, { 110, 170, 255 }, { 40, 70, 210 }, { 100, 160, 255 }, { 0.95f, 1.20f, 1.65f } };
+	static const Palette3 shadow { { 60, 30, 80 }, { 30, 10, 45 }, { 10, 0, 15 }, { 40, 15, 60 }, { 0.75f, 0.70f, 0.85f } };
+	static const Palette3 silver { { 255, 255, 255 }, { 210, 225, 240 }, { 120, 140, 170 }, { 200, 215, 235 }, { 1.30f, 1.32f, 1.38f } };
+	static const Palette3 amber { { 255, 235, 180 }, { 230, 170, 60 }, { 140, 80, 20 }, { 230, 170, 70 }, { 1.35f, 1.20f, 0.85f } };
+	static Palette3 rainbow;
+	switch (style) {
+	case Style::Shadow: return shadow;
+	case Style::Silver: return silver;
+	case Style::Amber: return amber;
+	case Style::Rainbow: {
+		// Hue turns slowly through the colours.
+		const float h = static_cast<float>(SDL_GetTicks() % 6000) / 6000.0f * 6.0f;
+		auto hue = [h](float offset) {
+			const float x = std::fmod(h + offset, 6.0f);
+			auto ch = [x](float c) { const float d = std::fabs(std::fmod(x - c + 9.0f, 6.0f) - 3.0f); return static_cast<uint8_t>(std::clamp(2.0f - d, 0.0f, 1.0f) * 200.0f + 55.0f); };
+			return OverlayColor { ch(0), ch(2), ch(4) };
+		};
+		const OverlayColor a = hue(0), b = hue(1.5f);
+		rainbow = { { 255, 255, 255 }, a, b, a, { 0.8f + a.r / 255.0f * 0.6f, 0.8f + a.g / 255.0f * 0.6f, 0.8f + a.b / 255.0f * 0.6f } };
+		return rainbow;
+	}
+	default: break;
+	}
 	switch (style) {
 	case Style::Fire: return fire;
 	case Style::Lightning: return lightning;
@@ -367,6 +399,25 @@ void GlowDisc(const WorldProjector &pr, Point c, float depth, float radius, Over
 	}
 }
 
+/** A soft dark disc (shadowy wisps): covers instead of adding light. */
+void ShadowDisc(const WorldProjector &pr, Point c, float depth, float radius, OverlayColor color, float alpha)
+{
+	const int r = static_cast<int>(std::ceil(radius));
+	if (r <= 0 || alpha <= 0.005f)
+		return;
+	const float inv = 1.0f / radius;
+	for (int dy = -r; dy <= r; dy++) {
+		for (int dx = -r; dx <= r; dx++) {
+			const float d = std::sqrt(static_cast<float>(dx * dx + dy * dy)) * inv;
+			if (d >= 1.0f)
+				continue;
+			const Point p { c.x + dx, c.y + dy };
+			if (pr.Visible(p, depth))
+				ColorOverlayOver(p.x, p.y, color, alpha * (1.0f - d) * (1.0f - d));
+		}
+	}
+}
+
 /** Light cast on the scene: brightens and tints what is around a point. */
 void LightPool(const WorldProjector &pr, Point c, float radius, const float (&tint)[3], float strength)
 {
@@ -415,7 +466,182 @@ void DrawSparks(const WorldProjector &pr)
 				}
 			}
 		}
-		GlowDisc(pr, sp->pos, sp->depth, px * 1.8f + 1.0f, color, s.bright * fade);
+		if (s.style == Style::Shadow)
+			ShadowDisc(pr, sp->pos, sp->depth, px * 2.2f + 1.0f, color, 0.5f * s.bright * fade);
+		else
+			GlowDisc(pr, sp->pos, sp->depth, px * 1.8f + 1.0f, color, s.bright * fade);
+	}
+}
+
+// ---------------------------------------------------------------------------------------------
+// Armour auras
+
+struct AuraLook {
+	Style style;
+	float strength; // 0..1
+};
+
+/** The aura a hero's body armour gives, if any. */
+std::optional<AuraLook> AuraOf(const Player &player)
+{
+	const Item &armor = player.InvBody[INVLOC_CHEST];
+	if (armor.isEmpty())
+		return std::nullopt;
+	if (armor._iMagical == ITEM_QUALITY_UNIQUE && armor._iUid >= 0 && static_cast<size_t>(armor._iUid) < UniqueItems.size()) {
+		const std::string_view name = UniqueItems[armor._iUid].UIName;
+		if (name == "Demonspike Coat") return AuraLook { Style::Fire, 1.0f };
+		if (name == "Sparking Mail") return AuraLook { Style::Lightning, 1.0f };
+		if (name == "Naj's Light Plate") return AuraLook { Style::Holy, 0.9f };
+		if (name == "The Rainbow Cloak") return AuraLook { Style::Rainbow, 0.9f };
+		if (name == "Wisdom's Wrap") return AuraLook { Style::Arcane, 0.8f };
+		if (name == "Nightscape") return AuraLook { Style::Shadow, 1.0f };
+		if (name == "Torn Flesh of Souls") return AuraLook { Style::Blood, 0.9f };
+		if (name == "Scavenger Carapace") return AuraLook { Style::Acid, 0.7f };
+		if (name == "Leather of Aut") return AuraLook { Style::Amber, 0.7f };
+		if (name == "The Gladiator's Bane") return AuraLook { Style::Blood, 0.5f };
+		return AuraLook { Style::Amber, 0.6f }; // other uniques: a golden sheen
+	}
+	if (armor._iMagical != ITEM_QUALITY_MAGIC && armor._iMagical != ITEM_QUALITY_RARE)
+		return std::nullopt;
+	// Magic and rare armour glows in the colour of its strongest resistance.
+	const int fire = armor._iPLFR, light = armor._iPLLR, magic = armor._iPLMR;
+	const int low = std::min({ fire, light, magic });
+	if (low >= 15)
+		return AuraLook { Style::Silver, std::clamp(low / 50.0f, 0.4f, 1.0f) };
+	const int high = std::max({ fire, light, magic });
+	if (high < 15)
+		return std::nullopt;
+	const float strength = std::clamp(high / 60.0f, 0.35f, 1.0f);
+	if (high == fire) return AuraLook { Style::Fire, strength };
+	if (high == light) return AuraLook { Style::Lightning, strength };
+	return AuraLook { Style::Arcane, strength };
+}
+
+struct AuraState {
+	float emit = 0;
+};
+std::array<AuraState, MAX_PLRS> auraStates;
+
+void HeroWorldPosition(const Player &player, float &x, float &y)
+{
+	const Displacement off = GetPlayerDrawOffset(player);
+	x = player.position.tile.x + 0.5f + off.deltaX / 64.0f + off.deltaY / 32.0f;
+	y = player.position.tile.y + 0.5f + off.deltaY / 32.0f - off.deltaX / 64.0f;
+}
+
+void EmitAuraMote(Style style, float x, float y, float strength)
+{
+	if (sparks.size() >= MaxSparks)
+		return;
+	Spark s {};
+	s.style = style;
+	const float a = RandRange(0.0f, 6.2832f);
+	const float r = RandRange(0.05f, 0.22f);
+	s.x = x + std::cos(a) * r;
+	s.y = y + std::sin(a) * r;
+	s.z = RandRange(0.1f, 1.1f);
+	s.drag = 0.4f;
+	s.bright = 0.7f * strength + 0.3f;
+	switch (style) {
+	case Style::Lightning:
+		s.vx = RandRange(-1.5f, 1.5f);
+		s.vy = RandRange(-1.5f, 1.5f);
+		s.vz = RandRange(-0.5f, 1.5f);
+		s.gravity = 1.0f;
+		s.maxLife = RandRange(0.08f, 0.2f);
+		s.size = 0.03f;
+		s.streak = true;
+		break;
+	case Style::Shadow:
+		s.vx = RandRange(-0.15f, 0.15f);
+		s.vy = RandRange(-0.15f, 0.15f);
+		s.vz = RandRange(0.25f, 0.55f);
+		s.gravity = 0;
+		s.maxLife = RandRange(0.8f, 1.4f);
+		s.size = RandRange(0.06f, 0.1f);
+		break;
+	default:
+		s.vx = RandRange(-0.12f, 0.12f);
+		s.vy = RandRange(-0.12f, 0.12f);
+		s.vz = RandRange(0.3f, 0.8f);
+		s.gravity = style == Style::Fire ? -0.4f : -0.1f;
+		s.maxLife = RandRange(0.6f, 1.2f);
+		s.size = RandRange(0.035f, 0.06f);
+		break;
+	}
+	s.life = s.maxLife;
+	sparks.push_back(s);
+}
+
+void DrawArmorAuras(const WorldProjector &pr, float dt, uint32_t now)
+{
+#ifdef _DEBUG
+	// Test hook: DEVILUTIONX_DEV_ARMOR = a unique armour's name, or fire/light/magic/all with a value.
+	if (const char *dev = std::getenv("DEVILUTIONX_DEV_ARMOR"); dev != nullptr && MyPlayer != nullptr) {
+		Item &chest = MyPlayer->InvBody[INVLOC_CHEST];
+		const std::string_view want = dev;
+		chest._itype = ItemType::HeavyArmor;
+		chest._iMagical = ITEM_QUALITY_MAGIC;
+		chest._iPLFR = chest._iPLLR = chest._iPLMR = 0;
+		if (want == "fire") chest._iPLFR = 40;
+		else if (want == "light") chest._iPLLR = 40;
+		else if (want == "magic") chest._iPLMR = 40;
+		else if (want == "all") chest._iPLFR = chest._iPLLR = chest._iPLMR = 30;
+		else {
+			for (size_t u = 0; u < UniqueItems.size(); u++) {
+				if (UniqueItems[u].UIName == want) {
+					chest._iMagical = ITEM_QUALITY_UNIQUE;
+					chest._iUid = static_cast<int>(u);
+				}
+			}
+		}
+	}
+#endif
+	for (size_t i = 0; i < Players.size() && i < auraStates.size(); i++) {
+		Player &player = Players[i];
+		if (!player.plractive || !player.isOnActiveLevel() || player._pHitPoints <= 0)
+			continue;
+		const std::optional<AuraLook> look = AuraOf(player);
+		if (!look)
+			continue;
+		float x, y;
+		HeroWorldPosition(player, x, y);
+		const Palette3 &pal = PaletteOf(look->style);
+		const float pulse = 0.8f + 0.2f * std::sin(static_cast<float>(now) * 0.004f + static_cast<float>(i));
+		const float k = look->strength * pulse;
+		// Motes rising off the body.
+		AuraState &state = auraStates[i];
+		state.emit += (look->style == Style::Lightning ? 16.0f : 13.0f) * look->strength * dt;
+		while (state.emit >= 1.0f) {
+			state.emit -= 1.0f;
+			EmitAuraMote(look->style, x, y, look->strength);
+		}
+		const std::optional<OrbitScreenPoint> body = pr.Project(x, y, 0.75f);
+		const std::optional<OrbitScreenPoint> feet = pr.Project(x, y, 0.0f);
+		if (!body || !feet)
+			continue;
+		const float tile = body->pixelsPerTile;
+		if (look->style == Style::Shadow) {
+			// A dark haze that swallows the light around the hero.
+			LightPool(pr, feet->pos, tile * 1.6f, pal.light, 0.8f * k);
+			continue;
+		}
+		LightPool(pr, feet->pos, tile * 1.7f, pal.light, 0.75f * k);
+		// A soft upright glow over the body.
+		const float rx = tile * 0.42f, ry = tile * 0.85f;
+		const int ix = static_cast<int>(std::ceil(rx)), iy = static_cast<int>(std::ceil(ry));
+		for (int dy = -iy; dy <= iy; dy++) {
+			for (int dx = -ix; dx <= ix; dx++) {
+				const float fx = dx / rx, fy = dy / ry;
+				const float d = std::sqrt(fx * fx + fy * fy);
+				if (d >= 1.0f)
+					continue;
+				const Point p { body->pos.x + dx, body->pos.y + dy };
+				if (!pr.Visible(p, body->depth - 0.6f))
+					continue;
+				ColorOverlayAdd(p.x, p.y, pal.glow, 0.34f * k * (1.0f - d));
+			}
+		}
 	}
 }
 
@@ -479,6 +705,8 @@ void DrawSpellEffects(const Surface &out)
 		LightPool(pr, ground->pos, ground->pixelsPerTile * f.radius, pal.light, 0.9f * k * k);
 		GlowDisc(pr, core->pos, core->depth, core->pixelsPerTile * (0.35f + 0.4f * (1.0f - k)), pal.glow, 0.45f * k * k);
 	}
+	if (*GetOptions().Graphics.armorGlows)
+		DrawArmorAuras(pr, dt, now);
 	DrawSparks(pr);
 }
 

@@ -42,6 +42,13 @@ struct Layer {
 	int pMinX = 0, pMinY = 0, pMaxX = -1, pMaxY = -1; // touched area (inclusive)
 
 	std::vector<uint8_t> snapshot; // the world's 8-bit pixels when it was finished
+
+	// Floor decals and the floor as it was before anything stood on it.
+	std::vector<uint32_t> decals; // premultiplied like particles
+	int dMinX = 0, dMinY = 0, dMaxX = -1, dMaxY = -1;
+	std::vector<uint8_t> floor;
+	int floorW = 0, floorH = 0, floorScale = 1, floorOffX = 0;
+	bool floorValid = false;
 };
 
 Layer L;
@@ -172,7 +179,10 @@ bool ColorOverlayBegin(const Surface &region)
 		L.fog.assign(size, 0);
 		L.light.assign(size, 0x808080u);
 		L.particles.assign(size, 0);
+		L.decals.assign(size, 0);
 		L.snapshot.assign(size, 0);
+		L.dMinX = L.dMinY = 0;
+		L.dMaxX = L.dMaxY = -1;
 		L.pMinX = L.pMinY = 0;
 		L.pMaxX = L.pMaxY = -1;
 	} else {
@@ -186,7 +196,14 @@ bool ColorOverlayBegin(const Surface &region)
 		}
 		L.pMinX = L.pMinY = 0;
 		L.pMaxX = L.pMaxY = -1;
+		if (L.dMaxX >= L.dMinX) {
+			for (int y = L.dMinY; y <= L.dMaxY; y++)
+				std::fill_n(&L.decals[static_cast<size_t>(y) * rect.w + L.dMinX], L.dMaxX - L.dMinX + 1, 0u);
+		}
+		L.dMinX = L.dMinY = 0;
+		L.dMaxX = L.dMaxY = -1;
 	}
+	L.floorValid = false;
 	L.rect = rect;
 	L.pre = { { 0, 0, 0 }, 0 };
 	L.post = { { 0, 0, 0 }, 0 };
@@ -233,6 +250,45 @@ void ColorOverlayMulLight(int x, int y, float r, float g, float b)
 		return;
 	L.lightUsed = true;
 	cur = packed;
+}
+
+void ColorOverlayFloorSnapshot(const Surface &floor, int scale, int offsetX)
+{
+	if (!L.recording || floor.surface != PalSurface)
+		return;
+	L.floorW = floor.w();
+	L.floorH = floor.h();
+	L.floorScale = std::max(1, scale);
+	L.floorOffX = offsetX;
+	L.floor.resize(static_cast<size_t>(L.floorW) * L.floorH);
+	for (int y = 0; y < L.floorH; y++)
+		std::memcpy(&L.floor[static_cast<size_t>(y) * L.floorW], floor.at(0, y), L.floorW);
+	L.floorValid = true;
+}
+
+void ColorOverlayDecal(int x, int y, OverlayColor color, float alpha)
+{
+	if (!L.recording || !InLayer(x, y))
+		return;
+	const uint32_t a = ToByte(alpha);
+	if (a == 0)
+		return;
+	if (L.dMaxX < L.dMinX) {
+		L.dMinX = L.dMaxX = x;
+		L.dMinY = L.dMaxY = y;
+	} else {
+		L.dMinX = std::min(L.dMinX, x);
+		L.dMaxX = std::max(L.dMaxX, x);
+		L.dMinY = std::min(L.dMinY, y);
+		L.dMaxY = std::max(L.dMaxY, y);
+	}
+	uint32_t &p = L.decals[static_cast<size_t>(y) * L.rect.w + x];
+	const uint32_t inv = 255 - a;
+	const uint32_t r = Mul(color.r, a) + Mul(p & 0xFF, inv);
+	const uint32_t g = Mul(color.g, a) + Mul((p >> 8) & 0xFF, inv);
+	const uint32_t b = Mul(color.b, a) + Mul((p >> 16) & 0xFF, inv);
+	const uint32_t na = a + Mul(p >> 24, inv);
+	p = Pack(std::min(r, 255u), std::min(g, 255u), std::min(b, 255u), std::min(na, 255u));
 }
 
 void ColorOverlaySetFogColor(OverlayColor color)
@@ -309,7 +365,7 @@ void ColorOverlayComposite(SDL_Surface *src, const SDL_Rect *srcRect, SDL_Surfac
 	PixelLayout layout;
 	if (!GetLayout(dst, layout))
 		return;
-	const bool anything = L.pre.alpha != 0 || L.post.alpha != 0 || L.fogUsed || L.lightUsed || L.pMaxX >= L.pMinX;
+	const bool anything = L.pre.alpha != 0 || L.post.alpha != 0 || L.fogUsed || L.lightUsed || L.pMaxX >= L.pMinX || L.dMaxX >= L.dMinX;
 	if (!anything)
 		return;
 
@@ -340,6 +396,13 @@ void ColorOverlayComposite(SDL_Surface *src, const SDL_Rect *srcRect, SDL_Surfac
 		const uint8_t *fog = &L.fog[static_cast<size_t>(ly) * L.rect.w];
 		const uint32_t *part = &L.particles[static_cast<size_t>(ly) * L.rect.w];
 		const uint32_t *lit = &L.light[static_cast<size_t>(ly) * L.rect.w];
+		const uint32_t *decal = &L.decals[static_cast<size_t>(ly) * L.rect.w];
+		const bool rowHasDecals = ly >= L.dMinY && ly <= L.dMaxY;
+		const uint8_t *floorRow = nullptr;
+		if (rowHasDecals && L.floorValid) {
+			const int fy = ly / L.floorScale;
+			floorRow = fy < L.floorH ? &L.floor[static_cast<size_t>(fy) * L.floorW] : nullptr;
+		}
 		auto *out = reinterpret_cast<uint32_t *>(static_cast<uint8_t *>(dst->pixels) + static_cast<size_t>(dy) * dst->pitch);
 		const bool rowHasParticles = ly >= L.pMinY && ly <= L.pMaxY;
 		for (int x = x0; x < x1; x++) {
@@ -347,7 +410,8 @@ void ColorOverlayComposite(SDL_Surface *src, const SDL_Rect *srcRect, SDL_Surfac
 			const uint32_t f = L.fogUsed ? fog[lx] : 0;
 			const uint32_t p = rowHasParticles ? part[lx] : 0;
 			const uint32_t m = L.lightUsed ? lit[lx] : 0x808080u;
-			if (!wholeArea && f == 0 && p == 0 && m == 0x808080u)
+			uint32_t dc = rowHasDecals ? decal[lx] : 0;
+			if (!wholeArea && f == 0 && p == 0 && m == 0x808080u && dc == 0)
 				continue;
 			if (pal[x] != snap[lx])
 				continue; // the interface drew here after the world
@@ -356,6 +420,18 @@ void ColorOverlayComposite(SDL_Surface *src, const SDL_Rect *srcRect, SDL_Surfac
 				continue;
 			uint32_t px = out[dx];
 			uint32_t r = (px >> rs) & 0xFF, g = (px >> gs) & 0xFF, b = (px >> bs) & 0xFF;
+			if (dc != 0 && L.floorValid) {
+				// Only on floor nothing stands on: the pixel is still what the floor pass drew.
+				const int fx = (lx - L.floorOffX) / L.floorScale;
+				if (floorRow == nullptr || lx < L.floorOffX || fx >= L.floorW || floorRow[fx] != pal[x])
+					dc = 0;
+			}
+			if (dc != 0) {
+				const uint32_t inv = 255 - (dc >> 24);
+				r = std::min(255u, (dc & 0xFF) + Mul(r, inv));
+				g = std::min(255u, ((dc >> 8) & 0xFF) + Mul(g, inv));
+				b = std::min(255u, ((dc >> 16) & 0xFF) + Mul(b, inv));
+			}
 			if (m != 0x808080u) {
 				r = std::min(255u, (r * (m & 0xFF) + 64) >> 7);
 				g = std::min(255u, (g * ((m >> 8) & 0xFF) + 64) >> 7);
