@@ -5,6 +5,8 @@
  */
 #include "pfile.h"
 
+#include "custom_maps/map_editor.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -699,6 +701,8 @@ bool pfile_ui_set_hero_infos(bool (*uiAddHeroInfo)(_uiheroinfo *))
 	memset(hero_names, 0, sizeof(hero_names));
 
 	for (uint32_t i = 0; i < MAX_CHARACTERS; i++) {
+		if (i == MapEditorHeroSlot)
+			continue; // the map editor's own hero
 		std::optional<SaveReader> archive = OpenSaveArchive(i);
 		if (archive) {
 			PlayerPack pkplr;

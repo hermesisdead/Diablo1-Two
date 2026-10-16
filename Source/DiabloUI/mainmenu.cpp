@@ -12,6 +12,7 @@
 #endif
 
 #include "DiabloUI/diabloui.h"
+#include "custom_maps/menu_console.hpp"
 #include "DiabloUI/ui_flags.hpp"
 #include "DiabloUI/ui_item.h"
 #include "engine/assets.hpp"
@@ -114,13 +115,28 @@ bool UiMainMenuDialog(const char *name, _mainmenu_selections *pdwResult, int att
 
 		mainmenu_restart_repintro(); // for automatic starts
 
+		UiExtraRender = DrawMenuConsole;
 		while (MainMenuResult == MAINMENU_NONE) {
 			UiClearScreen();
-			UiPollAndRender();
+#ifdef _DEBUG
+			MenuConsoleDevScript();
+#endif
+			UiPollAndRender([](SDL_Event &event) {
+				if (MenuConsoleHandleEvent(event)) {
+					mainmenu_restart_repintro(); // typing keeps the intro from starting
+					return true;
+				}
+				return false;
+			});
+			if (MenuConsoleWantsMapEditor()) {
+				MenuConsoleClearRequest();
+				MainMenuResult = MAINMENU_MAP_EDITOR;
+			}
 			if (SDL_GetTicks() >= dwAttractTicks && (HaveIntro() || gbIsHellfire)) {
 				MainMenuResult = MAINMENU_ATTRACT_MODE;
 			}
 		}
+		UiExtraRender = nullptr;
 
 		MainmenuFree();
 	}

@@ -41,6 +41,8 @@ enum _mainmenu_selections : uint8_t {
 	MAINMENU_SHOW_CREDITS,
 	MAINMENU_EXIT_DIABLO,
 	MAINMENU_ATTRACT_MODE,
+	/** The console asked for the map editor (see custom_maps/menu_console.hpp). */
+	MAINMENU_MAP_EDITOR,
 };
 
 enum _selhero_selections : uint8_t {
@@ -119,6 +121,8 @@ void UiInitList_clear();
 
 void UiClearScreen();
 void UiPollAndRender(std::optional<tl::function_ref<bool(SDL_Event &)>> eventHandler = std::nullopt);
+/** @brief Drawn over the menu each frame, after its items (the main-menu console). */
+extern void (*UiExtraRender)();
 void UiRenderItem(const UiItemBase &item);
 void UiRenderItems(const std::vector<UiItemBase *> &items);
 void UiRenderItems(const std::vector<std::unique_ptr<UiItemBase>> &items);

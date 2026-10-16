@@ -1,5 +1,7 @@
 #include "panels/skill_tree.hpp"
 
+#include "custom_maps/map_editor.hpp"
+
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -168,7 +170,7 @@ void DrawTooltip(const Surface &out, const Player &player, int skillIndex)
 
 bool IsSkillButtonVisible()
 {
-	if (!SkillTreeAvailable() || GetUnspentSkillPoints(*MyPlayer) == 0)
+	if (!SkillTreeAvailable() || GetUnspentSkillPoints(*MyPlayer) == 0 || IsMapEditing())
 		return false;
 	if (SpellSelectFlag || (SpellbookFlag && SkillTreeOpen) || ControlMode == ControlTypes::VirtualGamepad)
 		return false;

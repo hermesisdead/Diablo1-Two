@@ -32,6 +32,7 @@
 #include "panels/skill_tree.hpp"
 #include "panels/weather_panel.hpp"
 #include "custom_maps/custom_map.hpp"
+#include "custom_maps/map_editor.hpp"
 #include "levels/desert.hpp"
 #include "control/control.hpp"
 #include "cursor.h"
@@ -794,6 +795,8 @@ void GameEventHandler(const SDL_Event &event, uint16_t modState)
 	if (ctrlEvents.size() > 0 && ctrlEvents[0].button != ControllerButton_NONE) {
 		return;
 	}
+	if (MapEditorHandleEvent(event))
+		return;
 
 #ifdef _DEBUG
 	if (ConsoleHandleEvent(event)) {
@@ -1805,6 +1808,7 @@ void GameLogic()
 	}
 	FreeMoveBeginTick();
 	UpdateCustomMapPortals();
+	MapEditorTick();
 	if (gbProcessPlayers) {
 		gGameLogicStep = GameLogicStep::ProcessPlayers;
 		ProcessPlayers();
@@ -1817,7 +1821,8 @@ void GameLogic()
 #ifdef _DEBUG
 		if (!DebugInvisible)
 #endif
-			ProcessMonsters();
+			if (!IsMapEditing()) // monsters stand still while the map is edited
+				ProcessMonsters();
 		gGameLogicStep = GameLogicStep::ProcessObjects;
 		ProcessObjects();
 		gGameLogicStep = GameLogicStep::ProcessMissiles;
@@ -3152,6 +3157,12 @@ int DiabloMain(int argc, char **argv)
 		if (Players.empty())
 			Players.resize(MAX_PLRS);
 		const bool devAutoLoad = std::getenv("DEVILUTIONX_DEV_AUTOLOAD") != nullptr;
+		if (const char *editMap = std::getenv("DEVILUTIONX_DEV_EDITOR"); editMap != nullptr) {
+			QueueMapEditor(editMap, DTYPE_CATHEDRAL, std::getenv("DEVILUTIONX_DEV_EDITORPLAY") != nullptr);
+			StartQueuedMapEditor();
+			DiabloDeinit();
+			return 0;
+		}
 		if (!devAutoLoad)
 			pfile_ui_save_create(&info);
 		StartGame(!devAutoLoad, true);

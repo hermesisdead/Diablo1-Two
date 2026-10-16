@@ -85,6 +85,8 @@ set(libdevilutionx_SRCS
   engine/render/color_overlay.cpp
   engine/render/dungeon_mood.cpp
   custom_maps/custom_map.cpp
+  custom_maps/map_editor.cpp
+  custom_maps/menu_console.cpp
   engine/render/gore_fx.cpp
   engine/render/spell_fx.cpp
   action_mode.cpp

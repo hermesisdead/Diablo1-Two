@@ -839,6 +839,8 @@ void UiClearScreen()
 	}
 }
 
+void (*UiExtraRender)() = nullptr;
+
 void UiPollAndRender(std::optional<tl::function_ref<bool(SDL_Event &)>> eventHandler)
 {
 	SDL_Event event;
@@ -854,6 +856,8 @@ void UiPollAndRender(std::optional<tl::function_ref<bool(SDL_Event &)>> eventHan
 	}
 	HandleMenuAction(GetMenuHeldUpDownAction());
 	UiRenderListItems();
+	if (UiExtraRender != nullptr)
+		UiExtraRender();
 	DrawMouse();
 	UiFadeIn();
 

@@ -1446,6 +1446,35 @@ void Pass3()
 
 } // namespace
 
+void BuildCathedralFromFloorPlan(const uint8_t *floorPlan, uint16_t *tiles)
+{
+	DungeonMask.reset();
+	for (int y = 0; y < DMAXY; y++) {
+		for (int x = 0; x < DMAXX; x++) {
+			if (floorPlan[y * DMAXX + x] != 0)
+				DungeonMask.set(x, y);
+		}
+	}
+	InitDungeonFlags();
+	MakeDmt();
+	FixTilesPatterns();
+	FixDirtTiles();
+	FixCornerTiles();
+	// The same variety on every rebuild, so tiles do not shuffle while painting.
+	SetRndSeed(0x5EED);
+	Substitution();
+	ApplyShadowsPatterns();
+	for (int y = 0; y < DMAXY; y++) {
+		for (int x = 0; x < DMAXX; x++)
+			tiles[y * DMAXX + x] = dungeon[x][y]; // rock is stored as Dirt: 0 means "floor" in .dun files
+	}
+}
+
+void RefreshCathedralPieces()
+{
+	Pass3();
+}
+
 void PlaceMiniSetRandom(const Miniset &miniset, int rndper)
 {
 	const WorldTileCoord sw = miniset.size.width;

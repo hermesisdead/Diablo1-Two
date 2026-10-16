@@ -55,6 +55,7 @@
 #include "nthread.h"
 #include "engine/render/color_overlay.hpp"
 #include "engine/render/dungeon_mood.hpp"
+#include "custom_maps/map_editor.hpp"
 #include "engine/render/gore_fx.hpp"
 #include "engine/render/spell_fx.hpp"
 #include "levels/forest.hpp"
@@ -870,7 +871,8 @@ void DrawDungeon(const Surface &out, const Lightmap &lightmap, Point tilePositio
 				tempTargetBufferPosition += { -TILE_WIDTH, 0 };
 				tempTilePosition += Opposite(player->_pdir);
 			}
-			DrawPlayer(out, *player, tempTilePosition, tempTargetBufferPosition, lightTableIndex);
+			if (player != MyPlayer || !IsMapEditing()) // no hero while the map is edited
+				DrawPlayer(out, *player, tempTilePosition, tempTargetBufferPosition, lightTableIndex);
 		}
 	}
 
@@ -1924,6 +1926,7 @@ void DrawAndBlit()
 	nthread_UpdateProgressToNextGameTick();
 
 	this_sdl_thread::yield();
+	MapEditorBeforeDraw();
 	DrawView(out, ViewPosition);
 	DrawActionWorldOverlay(out);
 	if (IsActionHudShown()) {
@@ -1970,6 +1973,7 @@ void DrawAndBlit()
 		DrawPartyMemberInfoPanel(out);
 
 	DrawWeatherPanel(out);
+	DrawMapEditor(out);
 
 	DrawCursor(out);
 

@@ -57,6 +57,11 @@ struct CustomMap {
 	std::vector<MapPortal> portals;
 	std::string weather; // mood name, empty for the level's usual roll
 
+	// Editor layers (40 x 40, [y * 40 + x]): the painted floor plan the walls are built from, and
+	// pieces placed by hand on top of it (0 = none). Saved next to the map, ignored by the game.
+	std::vector<uint8_t> plan;
+	std::vector<uint16_t> overrides;
+
 	void Resize(int w, int h);
 	[[nodiscard]] const MapEntryPoint *FindEntry(std::string_view entryName) const;
 };

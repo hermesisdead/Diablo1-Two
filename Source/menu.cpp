@@ -15,6 +15,7 @@
 #endif
 
 #include "DiabloUI/diabloui.h"
+#include "custom_maps/map_editor.hpp"
 #include "DiabloUI/selok.h"
 #include "DiabloUI/settingsmenu.h"
 #include "engine/assets.hpp"
@@ -111,6 +112,12 @@ bool DummyGetHeroInfo(_uiheroinfo * /*pInfo*/)
 
 bool mainmenu_select_hero_dialog(GameData *gameData)
 {
+	if (IsMapEditorSession()) {
+		// The map editor brings its own hero (already created in its hidden save slot).
+		gSaveNumber = MapEditorHeroSlot;
+		gbLoadGame = false;
+		return true;
+	}
 #ifdef _DEBUG
 	if (std::getenv("DEVILUTIONX_DEV_AUTOSTART") != nullptr) {
 		// Debug-only: the hero is already created by the autostart hook in diablo.cpp.
@@ -208,6 +215,12 @@ void mainmenu_loop()
 			break;
 		case MAINMENU_SETTINGS:
 			UiSettingsMenu();
+			break;
+		case MAINMENU_MAP_EDITOR:
+			if (HasQueuedMapEditor()) {
+				StartQueuedMapEditor();
+				RefreshMusic();
+			}
 			break;
 		}
 	} while (!done);
