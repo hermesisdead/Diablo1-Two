@@ -2,11 +2,14 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 
 #include "engine/load_file.hpp"
 #include "engine/random.hpp"
 #include "engine/world_tile.hpp"
 #include "game_mode.hpp"
+#include "custom_maps/custom_town.hpp"
+#include "custom_maps/map_editor.hpp"
 #include "levels/desert.hpp"
 #include "levels/drlg_l1.h"
 #include "levels/town_shuffle.hpp"
@@ -381,10 +384,24 @@ void CleanTownFountain()
 	FillTile(fountain.x, fountain.y, 71);
 }
 
+void RefreshCustomTownLevel()
+{
+	PaintCustomTownTiles();
+	std::memset(dSpecial, 0, sizeof(dSpecial));
+	InitTownPieces();
+}
+
 void CreateTown(lvl_entry entry)
 {
 	if (InDesertRegion()) {
 		CreateDesertTown(entry);
+		return;
+	}
+	if (InCustomTown()) {
+		// A town made in the map editor.
+		CreateCustomTownLevel(entry);
+		InitTownPieces();
+		FinishTownLinks();
 		return;
 	}
 
@@ -415,6 +432,8 @@ void CreateTown(lvl_entry entry)
 
 	// Single player towns are rearranged per save; multiplayer keeps the classic layout so all clients agree.
 	TownLayoutSeed = (!gbIsMultiplayer && MyPlayer != nullptr) ? MyPlayer->townSeed : 0;
+	if (IsEditingTristramLayer())
+		TownLayoutSeed = 0; // the editor places things on the classic layout
 #ifdef _DEBUG
 	if (const char *forced = std::getenv("DEVILUTIONX_DEV_TOWNSEED"); forced != nullptr)
 		TownLayoutSeed = static_cast<uint32_t>(std::strtoul(forced, nullptr, 10));
@@ -441,6 +460,7 @@ void CreateTown(lvl_entry entry)
 		ViewPosition = TristramCaravanArrival;
 		ClearCaravanArrival();
 	}
+	FinishTownLinks(); // portals and doors added in the map editor
 #ifdef _DEBUG
 	LogVerbose("CreateTown entry {} layout seed {} multiplayer {}", static_cast<int>(entry), TownLayoutSeed, gbIsMultiplayer);
 	if (const char *view = std::getenv("DEVILUTIONX_DEV_VIEWPOS"); view != nullptr && entry == ENTRY_MAIN) {

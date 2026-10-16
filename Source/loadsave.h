@@ -42,6 +42,9 @@ void SaveHotkeys(SaveWriter &saveWriter, const Player &player);
 /** @brief Diablo II style skill tree ("classskills" save entry); missing entry = old hero, levels become points. */
 void LoadClassSkills(Player &player);
 void SaveClassSkills(SaveWriter &saveWriter, const Player &player);
+/** @brief The hero's current custom town (map editor towns), kept in its own save entry. */
+void LoadCustomTownState();
+void SaveCustomTownState(SaveWriter &saveWriter);
 void SaveHeroItems(SaveWriter &saveWriter, Player &player);
 void SaveGameData(SaveWriter &saveWriter);
 void SaveGame();

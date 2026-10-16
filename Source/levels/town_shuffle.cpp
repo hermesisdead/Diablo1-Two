@@ -434,6 +434,23 @@ Displacement TownBuildingShift(TownBuilding building)
 	return BuildingShifts[static_cast<size_t>(building)];
 }
 
+std::optional<TownBuilding> NearestTownBuilding(Point classic, int maxDistance)
+{
+	std::optional<TownBuilding> best;
+	int bestDistance = maxDistance + 1;
+	for (size_t i = 0; i < BuildingCount; i++) {
+		const Rect &r = BuildingRects[i];
+		const int dx = std::max({ r.x0 - classic.x, 0, classic.x - r.x1 });
+		const int dy = std::max({ r.y0 - classic.y, 0, classic.y - r.y1 });
+		const int distance = std::max(dx, dy);
+		if (distance < bestDistance) {
+			bestDistance = distance;
+			best = static_cast<TownBuilding>(i);
+		}
+	}
+	return best;
+}
+
 bool ShuffleTown(uint32_t seed)
 {
 	ResetTownLayout();

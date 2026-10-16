@@ -36,6 +36,9 @@ void StartQueuedMapEditor();
 /** @brief The map is being edited (not play-tested): no hero, monsters still. */
 [[nodiscard]] bool IsMapEditing();
 
+/** @brief The editor is placing portals, doors and arrival points in Tristram itself. */
+[[nodiscard]] bool IsEditingTristramLayer();
+
 /** @brief Save slot reserved for the editor's hero (hidden from the hero list). */
 constexpr unsigned MapEditorHeroSlot = 98;
 

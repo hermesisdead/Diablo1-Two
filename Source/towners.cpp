@@ -12,6 +12,7 @@
 #include "engine/load_file.hpp"
 #include "engine/random.hpp"
 #include "engine/render/clx_render.hpp"
+#include "custom_maps/custom_town.hpp"
 #include "levels/desert.hpp"
 #include "game_mode.hpp"
 #include "inv.h"
@@ -813,13 +814,16 @@ void InitTowners()
 
 	// Load towner data from TSV files
 	const bool desert = InDesertRegion();
+	const bool customTown = InCustomTown();
 	LoadTownerData(desert);
+	if (customTown)
+		ApplyCustomTownTowners(TownersDataEntries); // the people the map editor placed
 	TownerAnimOrderStorage.clear();
 
 	// Move towners along with the building they stand at (identity for the classic layout).
 	for (TownerDataEntry &entry : TownersDataEntries) {
-		if (desert)
-			break; // the camp's people stand where its own table puts them
+		if (desert || customTown)
+			break; // the camp's (or custom town's) people stand where its own table puts them
 		switch (entry.type) {
 		case TOWN_SMITH:
 			entry.position += TownBuildingShift(TownBuilding::Smithy);

@@ -6,9 +6,12 @@
  */
 #pragma once
 
+#include <optional>
+
 #include <cstdint>
 
 #include "engine/displacement.hpp"
+#include "engine/point.hpp"
 
 namespace devilution {
 
@@ -45,5 +48,8 @@ void ResetTownLayout();
 
 /** @brief How far a building (and everything standing at it) moved from its classic position. */
 Displacement TownBuildingShift(TownBuilding building);
+
+/** @brief The building whose classic plot contains or is nearest to a classic-layout tile. */
+std::optional<TownBuilding> NearestTownBuilding(Point classic, int maxDistance);
 
 } // namespace devilution

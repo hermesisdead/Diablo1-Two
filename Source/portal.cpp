@@ -5,6 +5,8 @@
  */
 #include "portal.h"
 
+#include "custom_maps/custom_town.hpp"
+
 #include "lighting.h"
 #include "missiles.h"
 #include "multi.h"
@@ -28,6 +30,14 @@ Point PortalTownPosition[MAXPORTAL] = {
 	{ 61, 40 },
 	{ 63, 40 },
 };
+
+/** Where a player's town portal stands in the current town (towns made in the map editor choose their own spot). */
+Point TownPortalPosition(size_t playerId)
+{
+	if (InCustomTown())
+		return CustomTownPortalTile(playerId);
+	return PortalTownPosition[playerId];
+}
 
 } // namespace
 
@@ -67,7 +77,7 @@ void SyncPortals()
 			continue;
 		const Player &player = Players[i];
 		if (leveltype == DTYPE_TOWN)
-			AddPortalMissile(player, PortalTownPosition[i], true);
+			AddPortalMissile(player, TownPortalPosition(static_cast<size_t>(i)), true);
 		else {
 			int lvl = currlevel;
 			if (setlevel)
@@ -80,7 +90,7 @@ void SyncPortals()
 
 void AddPortalInTown(const Player &player)
 {
-	AddPortalMissile(player, PortalTownPosition[player.getId()], false);
+	AddPortalMissile(player, TownPortalPosition(player.getId()), false);
 }
 
 void ActivatePortal(const Player &player, Point position, int lvl, dungeon_type dungeonType, bool isSetLevel)
@@ -163,7 +173,7 @@ void GetPortalLevel()
 void GetPortalLvlPos()
 {
 	if (leveltype == DTYPE_TOWN) {
-		ViewPosition = PortalTownPosition[portalindex] + Displacement { 1, 1 };
+		ViewPosition = TownPortalPosition(portalindex) + Displacement { 1, 1 };
 	} else {
 		ViewPosition = Portals[portalindex].position;
 

@@ -541,6 +541,7 @@ void pfile_write_hero(SaveWriter &saveWriter, bool writeGameData)
 	if (!gbVanilla) {
 		SaveHotkeys(saveWriter, myPlayer);
 		SaveClassSkills(saveWriter, myPlayer);
+		SaveCustomTownState(saveWriter);
 		SaveHeroItems(saveWriter, myPlayer);
 	}
 }

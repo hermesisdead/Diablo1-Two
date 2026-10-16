@@ -39,6 +39,13 @@ struct MapEntryPoint {
 	Point tile; // world tile
 };
 
+/** @brief A townsperson placed in a town map (type as in towners.tsv, e.g. TOWN_SMITH). */
+struct MapNpc {
+	std::string type;
+	Point tile;      // world tile
+	int direction = 0; // Direction
+};
+
 struct MapPortal {
 	Point tile; // world tile
 	bool door = false; // a doorway rather than a magic portal
@@ -55,6 +62,7 @@ struct CustomMap {
 	std::vector<uint16_t> objects;  // (2 * width) * (2 * height) .dun object ids, 0 = none
 	std::vector<MapEntryPoint> entries;
 	std::vector<MapPortal> portals;
+	std::vector<MapNpc> npcs; // town maps only
 	std::string weather; // mood name, empty for the level's usual roll
 
 	// Editor layers (40 x 40, [y * 40 + x]): the painted floor plan the walls are built from, and
@@ -74,6 +82,14 @@ std::string CustomMapsDirectory();
 [[nodiscard]] std::string CustomMapDunPath(std::string_view name);
 std::expected<CustomMap, std::string> ReadCustomMap(std::string_view name);
 std::expected<void, std::string> WriteCustomMap(const CustomMap &map);
+
+// --- Tristram's own layer ----------------------------------------------------------------------
+
+/** @brief Name the editor uses for Tristram (`editor tristram`); not a map folder. */
+inline constexpr std::string_view TristramLayerName = "tristram";
+/** @brief Portals, doors and arrival points added to Tristram (mods/custommaps/tristram.ini). */
+[[nodiscard]] CustomMap ReadTristramLayer();
+std::expected<void, std::string> WriteTristramLayer(const CustomMap &layer);
 
 [[nodiscard]] std::string_view MapStyleName(dungeon_type style);
 [[nodiscard]] std::optional<dungeon_type> ParseMapStyle(std::string_view name);

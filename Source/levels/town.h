@@ -55,4 +55,7 @@ void CleanTownFountain();
  */
 void CreateTown(lvl_entry entry);
 
+/** @brief Map editor: repaints a custom town after its tiles changed. */
+void RefreshCustomTownLevel();
+
 } // namespace devilution

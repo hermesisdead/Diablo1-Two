@@ -1,5 +1,7 @@
 #include "levels/desert.hpp"
 
+#include "custom_maps/custom_town.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -191,6 +193,7 @@ void TravelByCaravan(bool toDesert)
 	if (!IsDesertAvailable() || MyPlayer == nullptr)
 		return;
 	Player &player = *MyPlayer;
+	SetCurrentCustomTown({}); // the caravan runs between Tristram and Sand Tristram
 	SetInDesertRegion(toDesert);
 	ArrivedByCaravan = true;
 	StartNewLvl(player, WM_DIABRETOWN, 0);

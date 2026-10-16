@@ -1,4 +1,5 @@
 #include "custom_maps/custom_map.hpp"
+#include "custom_maps/custom_town.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -145,6 +146,8 @@ std::string BuildMeta(const CustomMap &map)
 		out += StrCat("entry=", e.name, ",", e.tile.x, ",", e.tile.y, "\n");
 	for (const MapPortal &p : map.portals)
 		out += StrCat("portal=", p.tile.x, ",", p.tile.y, ",", p.door ? 1 : 0, ",", LinkKindName(p.to.kind), ",", p.to.map, ",", p.to.entry, ",", p.to.level, "\n");
+	for (const MapNpc &n : map.npcs)
+		out += StrCat("npc=", n.type, ",", n.tile.x, ",", n.tile.y, ",", n.direction, "\n");
 	return out;
 }
 
@@ -179,6 +182,8 @@ void ParseMeta(std::string_view text, CustomMap &map)
 			portal.to.entry = std::string(f[5]);
 			portal.to.level = ToInt(f[6], 1);
 			map.portals.push_back(std::move(portal));
+		} else if (key == "npc" && f.size() >= 4) {
+			map.npcs.push_back({ std::string(f[0]), { ToInt(f[1]), ToInt(f[2]) }, std::clamp(ToInt(f[3]), 0, 7) });
 		}
 	}
 }
@@ -225,8 +230,8 @@ std::string CustomMapsDirectory()
 
 bool IsValidMapName(std::string_view name)
 {
-	if (name.empty() || name.size() > 32)
-		return false;
+	if (name.empty() || name.size() > 32 || name == TristramLayerName)
+		return false; // "tristram" is the editor's name for Tristram itself
 	return std::all_of(name.begin(), name.end(), [](char c) {
 		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
 	});
@@ -323,6 +328,37 @@ std::expected<void, std::string> WriteCustomMap(const CustomMap &map)
 	return WriteWholeFile(folder + "map.ini", BuildMeta(map));
 }
 
+std::string TristramLayerPath()
+{
+	return StrCat(paths::BasePath(), "mods" DIRECTORY_SEPARATOR_STR "custommaps" DIRECTORY_SEPARATOR_STR "tristram.ini");
+}
+
+CustomMap ReadTristramLayer()
+{
+	CustomMap layer;
+	layer.name = std::string(TristramLayerName);
+	layer.style = DTYPE_TOWN;
+	layer.Resize(40, 40);
+	if (std::expected<std::string, std::string> meta = ReadWholeFile(TristramLayerPath()); meta.has_value())
+		ParseMeta(*meta, layer);
+	layer.name = std::string(TristramLayerName);
+	layer.style = DTYPE_TOWN;
+	return layer;
+}
+
+std::expected<void, std::string> WriteTristramLayer(const CustomMap &layer)
+{
+	const std::string dir = StrCat(paths::BasePath(), "mods" DIRECTORY_SEPARATOR_STR "custommaps" DIRECTORY_SEPARATOR_STR);
+	RecursivelyCreateDir(dir.c_str());
+	std::string meta = "# Tristram's own layer (map editor): portals, doors and arrival points added to the town.\n"
+	                   "# Positions are world tiles in the classic layout; each one follows its nearest building.\n";
+	for (const MapEntryPoint &e : layer.entries)
+		meta += StrCat("entry=", e.name, ",", e.tile.x, ",", e.tile.y, "\n");
+	for (const MapPortal &p : layer.portals)
+		meta += StrCat("portal=", p.tile.x, ",", p.tile.y, ",", p.door ? 1 : 0, ",", LinkKindName(p.to.kind), ",", p.to.map, ",", p.to.entry, ",", p.to.level, "\n");
+	return WriteWholeFile(TristramLayerPath(), meta);
+}
+
 std::string_view MapStyleName(dungeon_type style)
 {
 	switch (style) {
@@ -383,7 +419,7 @@ std::expected<void, std::string> TravelToCustomMap(std::string_view name, std::s
 	if (!map.has_value())
 		return std::unexpected(map.error());
 	if (map->style == DTYPE_TOWN)
-		return std::unexpected("Town maps replace Tristram and are not travelled to directly yet.");
+		return TravelToCustomTown(name, entry);
 	SetActiveCustomMap(std::move(*map), entry);
 	setlvltype = Active->style;
 	StartNewLvl(*MyPlayer, WM_DIABSETLVL, SL_CUSTOM);
@@ -399,7 +435,7 @@ void FollowMapLink(const MapLink &link)
 			LogError("Portal: {}", r.error());
 		break;
 	case MapLinkKind::Town:
-		StartNewLvl(player, WM_DIABTWARPUP, 0);
+		TravelToTristram(link.entry);
 		break;
 	case MapLinkKind::Dungeon:
 		StartNewLvl(player, WM_DIABNEXTLVL, std::clamp(link.level, 1, 16));

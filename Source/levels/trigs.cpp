@@ -14,6 +14,7 @@
 #include "cursor.h"
 #include "diablo_msg.hpp"
 #include "game_mode.hpp"
+#include "custom_maps/custom_town.hpp"
 #include "levels/desert.hpp"
 #include "levels/forest.hpp"
 #include "levels/town_shuffle.hpp"
@@ -116,6 +117,10 @@ void InitTownTriggers()
 		return;
 	}
 	numtrigs = 0;
+	if (InCustomTown()) {
+		trigflag = false;
+		return; // its ways out are the map's own portals and doors
+	}
 
 	// Cathedral
 	trigs[numtrigs].position = Point { 25, 29 } + TownBuildingShift(TownBuilding::Cathedral);
@@ -360,6 +365,10 @@ bool ForceTownTrig()
 {
 	if (InDesertRegion())
 		return ForceDesertTownTrig();
+	if (ForceTownLinkTrig())
+		return true; // a portal or door added in the map editor
+	if (InCustomTown())
+		return false;
 	for (const uint16_t tileId : TownDownList) {
 		if (dPiece[cursPosition.x][cursPosition.y] == tileId) {
 			InfoString = _("Down to dungeon");

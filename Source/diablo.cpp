@@ -32,6 +32,7 @@
 #include "panels/skill_tree.hpp"
 #include "panels/weather_panel.hpp"
 #include "custom_maps/custom_map.hpp"
+#include "custom_maps/custom_town.hpp"
 #include "custom_maps/map_editor.hpp"
 #include "levels/desert.hpp"
 #include "control/control.hpp"
@@ -1808,6 +1809,7 @@ void GameLogic()
 	}
 	FreeMoveBeginTick();
 	UpdateCustomMapPortals();
+	UpdateTownLinks();
 	MapEditorTick();
 	if (gbProcessPlayers) {
 		gGameLogicStep = GameLogicStep::ProcessPlayers;
@@ -3158,7 +3160,9 @@ int DiabloMain(int argc, char **argv)
 			Players.resize(MAX_PLRS);
 		const bool devAutoLoad = std::getenv("DEVILUTIONX_DEV_AUTOLOAD") != nullptr;
 		if (const char *editMap = std::getenv("DEVILUTIONX_DEV_EDITOR"); editMap != nullptr) {
-			QueueMapEditor(editMap, DTYPE_CATHEDRAL, std::getenv("DEVILUTIONX_DEV_EDITORPLAY") != nullptr);
+			const std::string_view editArg = editMap;
+			const size_t colon = editArg.find(':');
+			QueueMapEditor(editArg.substr(0, colon), colon != std::string_view::npos && editArg.substr(colon + 1) == "town" ? DTYPE_TOWN : DTYPE_CATHEDRAL, std::getenv("DEVILUTIONX_DEV_EDITORPLAY") != nullptr);
 			StartQueuedMapEditor();
 			DiabloDeinit();
 			return 0;

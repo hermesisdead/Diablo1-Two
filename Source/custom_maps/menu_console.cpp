@@ -37,7 +37,8 @@ void Help()
 {
 	Print("Commands:");
 	Print("  maps\tlist your custom maps");
-	Print("  editor <name> [style]\topen or create a map (style: cathedral)");
+	Print("  editor <name> [style]\topen or create a map (style: cathedral or town)");
+	Print("  editor tristram\tadd portals, doors and arrival points to Tristram");
 	Print("  play <name>\tplay a map with the editor's hero");
 	Print("  close\tclose this console (or press `)");
 	Print(StrCat("Maps are saved in ", CustomMapsDirectory()));
@@ -69,20 +70,23 @@ void Run(std::string_view line)
 			Print(StrCat("Usage: ", cmd, " <name>", cmd == "editor" ? " [style]" : ""));
 			return;
 		}
-		if (!IsValidMapName(args[1])) {
+		const bool tristram = args[1] == TristramLayerName;
+		if (tristram && cmd == "play") {
+			Print("Start a normal game to see Tristram; your portals and doors are there.");
+			return;
+		}
+		if (!tristram && !IsValidMapName(args[1])) {
 			Print("Map names use letters, digits, - and _ (up to 32).");
 			return;
 		}
 		dungeon_type style = DTYPE_CATHEDRAL;
 		if (args.size() >= 3) {
 			const std::optional<dungeon_type> parsed = ParseMapStyle(args[2]);
-			if (!parsed) {
-				Print("Unknown style. Available now: cathedral");
+			if (!parsed || (*parsed != DTYPE_CATHEDRAL && *parsed != DTYPE_TOWN)) {
+				Print("Unknown style. Available now: cathedral, town");
 				return;
 			}
-			if (*parsed != DTYPE_CATHEDRAL) {
-				Print(StrCat(MapStyleName(*parsed), " maps are coming in the next editor update; using cathedral."));
-			}
+			style = *parsed;
 		}
 		if (cmd == "play" && !CustomMapExists(args[1])) {
 			Print(StrCat("No map called ", args[1], ". Type maps to see yours."));

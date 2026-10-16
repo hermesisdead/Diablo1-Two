@@ -2570,6 +2570,7 @@ void InitPlayer(Player &player, bool firstTime)
 		if (&player == MyPlayer) {
 			LoadHotkeys();
 			LoadClassSkills(player);
+			LoadCustomTownState();
 		}
 		player._pSBkSpell = SpellID::Invalid;
 		player.queuedSpell.spellId = player._pRSpell;

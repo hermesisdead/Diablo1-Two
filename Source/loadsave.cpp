@@ -18,6 +18,8 @@
 #include "automap.h"
 #include "class_skills.hpp"
 #include "codec.h"
+#include "custom_maps/custom_map.hpp"
+#include "custom_maps/custom_town.hpp"
 #include "levels/desert.hpp"
 #include "control/control.hpp"
 #include "cursor.h"
@@ -1060,6 +1062,10 @@ void GetLevelNames(std::string_view prefix, char *out)
 		// Sand Tristram keeps its own ground items, apart from Tristram's.
 		suf = 's';
 		num = DesertTownSaveSlot;
+	} else if (currlevel == 0 && InCustomTown()) {
+		// So does every town made in the map editor.
+		suf = 's';
+		num = CustomTownSaveSlot();
 	} else {
 		suf = 'l';
 		num = currlevel;
@@ -2437,6 +2443,27 @@ void SaveClassSkills(SaveWriter &saveWriter, const Player &player)
 	file.WriteLE<uint8_t>(static_cast<uint8_t>(count));
 	for (size_t i = 0; i < count; i++)
 		file.WriteLE<uint8_t>(static_cast<uint8_t>(GetClassSkillLevel(player, static_cast<int>(i))));
+}
+
+void LoadCustomTownState()
+{
+	LoadHelper file(OpenSaveArchive(gSaveNumber), "customtown");
+	std::string name;
+	if (file.IsValid(1)) {
+		const uint8_t length = file.NextLE<uint8_t>();
+		for (uint8_t i = 0; i < length && file.IsValid(1); i++)
+			name.push_back(static_cast<char>(file.NextLE<uint8_t>()));
+	}
+	SetCurrentCustomTown(IsValidMapName(name) ? name : std::string {});
+}
+
+void SaveCustomTownState(SaveWriter &saveWriter)
+{
+	const std::string &name = CurrentCustomTown();
+	SaveHelper file(saveWriter, "customtown", 1 + name.size());
+	file.WriteLE<uint8_t>(static_cast<uint8_t>(name.size()));
+	for (const char c : name)
+		file.WriteLE<uint8_t>(static_cast<uint8_t>(c));
 }
 
 void SaveHotkeys(SaveWriter &saveWriter, const Player &player)
