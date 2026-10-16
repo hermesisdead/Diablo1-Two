@@ -51,6 +51,9 @@ std::optional<OrbitScreenPoint> OrbitProjectEx(float worldX, float worldY, float
 /** @brief True if something at this depth would be in front of the rendered scene at the pixel. */
 bool OrbitSceneVisible(Point screen, float depth);
 
+/** @brief World position (tiles, height) of the scene surface drawn at a screen pixel, if any. */
+bool OrbitScreenToWorld(Point screen, float &worldX, float &worldY, float &height);
+
 /** @brief Smoothed render position of a monster (tile units, centre of tile = +0.5). */
 bool OrbitMonsterRenderPosition(int monsterId, float &x, float &y);
 

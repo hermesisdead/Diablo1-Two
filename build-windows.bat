@@ -175,6 +175,9 @@ echo   - Weather everywhere ^(rain, storms, snow, wind, fireflies, ash...^) with
 echo     ambient sound; adjust it with the Ambience slider in the in-game Options.
 echo   - Free movement: the hero and monsters move at any angle, not along the
 echo     tile grid. Press F to switch between free movement and the grid.
+echo   - Smooth effects: fog, rain, snow and glows blend in full colour instead
+echo     of a dither pattern, and torches, fire and spells cast coloured light.
+echo     Settings ^> Graphics: Smooth Effects / Coloured Lighting.
 echo   - F4 toggles action mode ^(close camera, WASD, dodge, lock-on^).
 echo     In action mode the mana potion moved from F to G.
 echo   Options for all of these are under Settings ^> Gameplay / Graphics.

@@ -25,6 +25,9 @@
 #include "levels/dun_tile_data.hpp"
 #include "levels/gendung.h"
 #include "levels/tile_properties.hpp"
+#include "lighting.h"
+#include "missiles.h"
+#include "objects.h"
 #include "options.h"
 #include "player.h"
 #include "utils/log.hpp"
@@ -1299,7 +1302,216 @@ void DrawDrips(const Projector &pr)
 	}
 }
 
+// ---------------------------------------------------------------------------------------------
+// Coloured light
+
+struct TintSource {
+	float x, y;
+	float radius;
+	float r, g, b; // light colour as a multiplier (1 = neutral)
+};
+
+constexpr float Warm[3] = { 1.38f, 1.04f, 0.68f };
+constexpr float Fire[3] = { 1.48f, 1.0f, 0.58f };
+constexpr float Cold[3] = { 0.80f, 0.96f, 1.48f };
+constexpr float Arcane[3] = { 1.15f, 0.86f, 1.40f };
+constexpr float Acid[3] = { 0.84f, 1.38f, 0.74f };
+constexpr float PortalBlue[3] = { 0.72f, 0.94f, 1.50f };
+
+void AddSource(std::vector<TintSource> &out, float x, float y, float radius, const float (&c)[3])
+{
+	out.push_back({ x, y, radius, c[0], c[1], c[2] });
+}
+
+void CollectTintSources(std::vector<TintSource> &sources)
+{
+	for (int i = 0; i < ActiveObjectCount; i++) {
+		const Object &object = Objects[ActiveObjects[i]];
+		float radius = 0;
+		switch (object._otype) {
+		case OBJ_TORCHL:
+		case OBJ_TORCHR:
+		case OBJ_TORCHL2:
+		case OBJ_TORCHR2:
+			radius = 8;
+			break;
+		case OBJ_L1LIGHT:
+		case OBJ_SKFIRE:
+		case OBJ_CANDLE1:
+		case OBJ_CANDLE2:
+		case OBJ_BOOKCANDLE:
+		case OBJ_BCROSS:
+		case OBJ_TBCROSS:
+			radius = 5;
+			break;
+		case OBJ_STORYCANDLE:
+		case OBJ_L5CANDLE:
+			radius = 3;
+			break;
+		default:
+			break;
+		}
+		// _oVar1: 1 = light on, 0 = off (out of view), -1 = baked into the level's light map.
+		if (radius > 0 && object._oVar1 != 0)
+			AddSource(sources, object.position.x + 0.5f, object.position.y + 0.5f, radius, Warm);
+	}
+	for (const Missile &missile : Missiles) {
+		if (missile._mlid == NO_LIGHT || missile._mlid < 0 || missile._mlid >= MAXLIGHTS)
+			continue;
+		const Light &light = Lights[missile._mlid];
+		if (light.isInvalid || light.radius == 0)
+			continue;
+		const float x = light.position.tile.x + 0.5f, y = light.position.tile.y + 0.5f;
+		if (IsAnyOf(missile._mitype, MissileID::TownPortal, MissileID::RedPortal)) {
+			AddSource(sources, x, y, std::min<float>(light.radius, 6), missile._mitype == MissileID::RedPortal ? Fire : PortalBlue);
+			continue;
+		}
+		switch (GetMissileData(missile._mitype).damageType()) {
+		case DamageType::Fire: AddSource(sources, x, y, light.radius, Fire); break;
+		case DamageType::Lightning: AddSource(sources, x, y, light.radius, Cold); break;
+		case DamageType::Magic: AddSource(sources, x, y, light.radius, Arcane); break;
+		case DamageType::Acid: AddSource(sources, x, y, light.radius, Acid); break;
+		default: break;
+		}
+	}
+}
+
+/** Light colour multipliers on a window of tiles around the hero. */
+struct TintField {
+	static constexpr int Half = 22;
+	static constexpr int Size = Half * 2 + 1;
+	int x0 = 0, y0 = 0;
+	std::array<float, Size * Size * 3> m {};
+
+	bool Sample(float wx, float wy, float &r, float &g, float &b) const
+	{
+		const float fx = wx - 0.5f - x0, fy = wy - 0.5f - y0;
+		const int ix = static_cast<int>(std::floor(fx)), iy = static_cast<int>(std::floor(fy));
+		if (ix < 0 || iy < 0 || ix >= Size - 1 || iy >= Size - 1) {
+			r = g = b = 1.0f;
+			return false;
+		}
+		const float tx = fx - ix, ty = fy - iy;
+		const float w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty), w01 = (1 - tx) * ty, w11 = tx * ty;
+		const size_t i00 = (static_cast<size_t>(iy) * Size + ix) * 3, i10 = i00 + 3, i01 = i00 + Size * 3, i11 = i01 + 3;
+		r = 1 + m[i00] * w00 + m[i10] * w10 + m[i01] * w01 + m[i11] * w11;
+		g = 1 + m[i00 + 1] * w00 + m[i10 + 1] * w10 + m[i01 + 1] * w01 + m[i11 + 1] * w11;
+		b = 1 + m[i00 + 2] * w00 + m[i10 + 2] * w10 + m[i01 + 2] * w01 + m[i11 + 2] * w11;
+		return true;
+	}
+};
+
+bool BuildTintField(TintField &field)
+{
+	static std::vector<TintSource> sources;
+	sources.clear();
+	CollectTintSources(sources);
+	if (sources.empty())
+		return false;
+	float px, py;
+	PlayerWorld(px, py);
+	field.x0 = static_cast<int>(px) - TintField::Half;
+	field.y0 = static_cast<int>(py) - TintField::Half;
+	field.m.fill(0.0f);
+	bool any = false;
+	for (const TintSource &s : sources) {
+		const float reach = s.radius + 1.0f;
+		const int ax = static_cast<int>(std::floor(s.x - reach)), bx = static_cast<int>(std::ceil(s.x + reach));
+		const int ay = static_cast<int>(std::floor(s.y - reach)), by = static_cast<int>(std::ceil(s.y + reach));
+		for (int ty = ay; ty <= by; ty++) {
+			for (int tx = ax; tx <= bx; tx++) {
+				const int lx = tx - field.x0, ly = ty - field.y0;
+				if (lx < 0 || ly < 0 || lx >= TintField::Size || ly >= TintField::Size)
+					continue;
+				if (!InDungeonBounds({ tx, ty }) || !IsVisibleTile(tx, ty))
+					continue;
+				const float dx = tx + 0.5f - s.x, dy = ty + 0.5f - s.y;
+				const float d = std::sqrt(dx * dx + dy * dy) / reach;
+				if (d >= 1.0f)
+					continue;
+				const float w = std::pow(1.0f - d, 1.3f);
+				float *cell = &field.m[(static_cast<size_t>(ly) * TintField::Size + lx) * 3];
+				cell[0] += w * (s.r - 1);
+				cell[1] += w * (s.g - 1);
+				cell[2] += w * (s.b - 1);
+				any = true;
+			}
+		}
+	}
+	for (float &v : field.m)
+		v = std::clamp(v, -0.45f, 0.65f);
+	return any;
+}
+
 } // namespace
+
+void DrawColoredLight(const Surface &out)
+{
+	if (!ColorOverlayRecording() || !*GetOptions().Graphics.coloredLighting || MyPlayer == nullptr || leveltype == DTYPE_TOWN)
+		return;
+	static TintField field;
+	const bool built = BuildTintField(field);
+	if (!built)
+		return;
+	const Projector pr(out);
+	// Sample on a coarse grid of screen points, then interpolate per pixel.
+	constexpr int Grid = 8;
+	const int gw = out.w() / Grid + 2, gh = out.h() / Grid + 2;
+	static std::vector<float> grid;
+	grid.assign(static_cast<size_t>(gw) * gh * 3, 1.0f);
+	bool any = false;
+	for (int gy = 0; gy < gh; gy++) {
+		for (int gx = 0; gx < gw; gx++) {
+			const int sx = std::min(gx * Grid, out.w() - 1), sy = std::min(gy * Grid, out.h() - 1);
+			float wx, wy;
+			if (pr.orbit) {
+				float h;
+				if (!OrbitScreenToWorld({ sx, sy }, wx, wy, h))
+					continue;
+			} else {
+				pr.Unproject(static_cast<float>(gx * Grid), static_cast<float>(gy * Grid), wx, wy);
+			}
+			float *g = &grid[(static_cast<size_t>(gy) * gw + gx) * 3];
+			field.Sample(wx, wy, g[0], g[1], g[2]);
+			any = any || g[0] != 1.0f || g[1] != 1.0f || g[2] != 1.0f;
+		}
+	}
+	if (!any)
+		return;
+	constexpr float Inv = 1.0f / Grid;
+	int firstX = 0, lastX = out.w();
+#ifdef _DEBUG
+	// Split-screen comparison for captures: tint only the right half (or the left half with "L").
+	if (const char *split = std::getenv("DEVILUTIONX_DEV_LIGHTSPLIT"); split != nullptr) {
+		if (split[0] == 'L')
+			lastX = out.w() / 2;
+		else
+			firstX = out.w() / 2;
+	}
+#endif
+	for (int y = 0; y < out.h(); y++) {
+		const int gy = y / Grid;
+		const float ty = (y - gy * Grid) * Inv;
+		for (int x = firstX; x < lastX; x++) {
+			const int gx = x / Grid;
+			const float tx = (x - gx * Grid) * Inv;
+			const float *a = &grid[(static_cast<size_t>(gy) * gw + gx) * 3];
+			const float *b = a + 3;
+			const float *c = a + gw * 3;
+			const float *d = c + 3;
+			float m[3];
+			bool neutral = true;
+			for (int k = 0; k < 3; k++) {
+				const float top = a[k] + (b[k] - a[k]) * tx;
+				const float bottom = c[k] + (d[k] - c[k]) * tx;
+				m[k] = top + (bottom - top) * ty;
+				neutral = neutral && std::abs(m[k] - 1.0f) < 0.004f;
+			}
+			if (!neutral)
+				ColorOverlayMulLight(x, y, m[0], m[1], m[2]);
+		}
+	}
+}
 
 DungeonMood GetDungeonMood()
 {
@@ -1356,7 +1568,7 @@ void DrawDungeonMood(const Surface &out)
 		UpdateDrips(dt);
 
 	const Projector pr(out);
-	overlayOn = ColorOverlayBegin(out);
+	overlayOn = ColorOverlayRecording();
 	// Rain clouds darken the day.
 	if (currentMood == DungeonMood::Storm)
 		Wash(out, colors.black, 0.30f * fade);
@@ -1378,8 +1590,6 @@ void DrawDungeonMood(const Surface &out)
 		DrawDrips(pr);
 	if (flashTime >= 0)
 		Wash(out, colors.white, FlashBrightness(flashTime) * 0.7f, /*last=*/true);
-	if (overlayOn)
-		ColorOverlayFinish();
 	overlayOn = false;
 }
 

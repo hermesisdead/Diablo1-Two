@@ -31,6 +31,7 @@
 #include "engine/light_tables.hpp"
 #include "engine/palette.h"
 #include "engine/render/clx_render.hpp"
+#include "engine/render/color_overlay.hpp"
 #include "engine/render/dun_render.hpp"
 #include "engine/render/light_render.hpp"
 #include "engine/render/scrollrt.h"
@@ -351,8 +352,16 @@ struct Frame {
 	std::vector<uint8_t> color;
 	std::vector<float> depth;
 	int w = 0, h = 0;
+	// Smooth shading (full-colour overlay on): the fraction of a light level each pixel sits
+	// below its palette shade, and a see-through layer (faded walls, sky gradient).
+	std::vector<uint8_t> dim;   // brightness multiplier, 255 = 1
+	std::vector<uint8_t> veil;  // palette colour laid over the pixel
+	std::vector<uint8_t> veilA; // its coverage
+	std::vector<float> veilDepth;
 };
 Frame Fb;
+/** Light and fades go to the full-colour overlay instead of being dithered. */
+bool SmoothShading = false;
 
 constexpr uint8_t Bayer4[4][4] = { { 0, 8, 2, 10 }, { 12, 4, 14, 6 }, { 3, 11, 1, 9 }, { 15, 7, 13, 5 } };
 
@@ -375,6 +384,19 @@ inline uint8_t Shade(uint8_t color, float light, int px, int py)
 {
 	const float d = light + (Bayer4[py & 3][px & 3] - 7.5f) / 16.0f;
 	const int level = std::clamp(static_cast<int>(d + 0.5f), 0, 15);
+	return LightTables[level][color];
+}
+
+/** Shade for frame buffer pixel idx: dithered, or (smooth shading) the brighter level plus a dim. */
+inline uint8_t ShadeAt(uint8_t color, float light, int px, int py, size_t idx)
+{
+	if (!SmoothShading)
+		return Shade(color, light, px, py);
+	const float l = std::clamp(light, 0.0f, 15.0f);
+	const int level = std::min(static_cast<int>(l), 15);
+	const float t = l - static_cast<float>(level);
+	// Light levels darken roughly in even steps of 1/16 of full brightness.
+	Fb.dim[idx] = level >= 15 ? 255 : static_cast<uint8_t>(255.0f * (16.0f - level - t) / (16.0f - level) + 0.5f);
 	return LightTables[level][color];
 }
 
@@ -433,12 +455,14 @@ void RasterTriangle(const ScreenVert &a, const ScreenVert &b, const ScreenVert &
 				continue;
 			}
 			entered = true;
-			if (fade && Bayer4[y & 3][x & 3] < 9)
+			if (fade && !SmoothShading && Bayer4[y & 3][x & 3] < 9)
 				continue;
 			const float iz = w0 * a.iz + w1 * b.iz + w2 * c.iz;
 			const float z = 1.0f / iz;
 			const size_t idx = static_cast<size_t>(y) * Fb.w + x;
 			if (z >= Fb.depth[idx])
+				continue;
+			if (fade && SmoothShading && z >= Fb.veilDepth[idx])
 				continue;
 			const float u = (w0 * a.uz + w1 * b.uz + w2 * c.uz) * z;
 			const float v = (w0 * a.vz + w1 * b.vz + w2 * c.vz) * z;
@@ -448,7 +472,14 @@ void RasterTriangle(const ScreenVert &a, const ScreenVert &b, const ScreenVert &
 			if (texel == 0xFFFF)
 				continue;
 			const float light = (w0 * a.lz + w1 * b.lz + w2 * c.lz) * z;
-			Fb.color[idx] = Shade(static_cast<uint8_t>(texel), light, x, y);
+			if (fade && SmoothShading) {
+				// A wall between the camera and the hero: see-through instead of dithered away.
+				Fb.veil[idx] = LightTables[std::clamp(static_cast<int>(light + 0.5f), 0, 15)][static_cast<uint8_t>(texel)];
+				Fb.veilA[idx] = 112;
+				Fb.veilDepth[idx] = z;
+				continue;
+			}
+			Fb.color[idx] = ShadeAt(static_cast<uint8_t>(texel), light, x, y, idx);
 			Fb.depth[idx] = z;
 		}
 	}
@@ -570,7 +601,13 @@ void DrawBillboard(const Camera &cam, const Billboard &bb)
 			const uint8_t c = scratch[Point { srcX, std::min(sh - 1, dy * sh / ph) }];
 			if (c == 0)
 				continue;
-			Fb.color[idx] = bb.lit ? Shade(c, light, px, py) : c;
+			if (bb.lit) {
+				Fb.color[idx] = ShadeAt(c, light, px, py, idx);
+			} else {
+				Fb.color[idx] = c;
+				if (SmoothShading)
+					Fb.dim[idx] = 255;
+			}
 		}
 	}
 }
@@ -797,6 +834,24 @@ bool OrbitSceneVisible(Point screen, float depth)
 	return depth < Fb.depth[static_cast<size_t>(y) * Fb.w + x];
 }
 
+bool OrbitScreenToWorld(Point screen, float &worldX, float &worldY, float &height)
+{
+	const int x = screen.x / LastScale, y = screen.y / LastScale;
+	if (x < 0 || y < 0 || x >= Fb.w || y >= Fb.h)
+		return false;
+	const float z = Fb.depth[static_cast<size_t>(y) * Fb.w + x];
+	if (!(z > NearPlane) || z > 1000.0f)
+		return false; // nothing drawn there (sky / void)
+	const Camera &cam = LastCamera;
+	const float cx = (x + 0.5f - cam.cx) * z / cam.focal;
+	const float cy = -(y + 0.5f - cam.cy) * z / cam.focal;
+	const V3 p = cam.pos + cam.right * cx + cam.up * cy + cam.fwd * z;
+	worldX = p.x;
+	worldY = p.y;
+	height = p.z;
+	return true;
+}
+
 bool OrbitMonsterRenderPosition(int monsterId, float &x, float &y)
 {
 	if (monsterId < 0 || monsterId >= static_cast<int>(MaxMonsters) || !MonsterSmooth[monsterId].valid)
@@ -828,6 +883,13 @@ void DrawOrbitView(const Surface &out)
 	Fb.h = std::max(48, out.h() / scale);
 	Fb.color.assign(static_cast<size_t>(Fb.w) * Fb.h, 0);
 	Fb.depth.assign(static_cast<size_t>(Fb.w) * Fb.h, 1e9f);
+	SmoothShading = ColorOverlayRecording();
+	if (SmoothShading) {
+		Fb.dim.assign(static_cast<size_t>(Fb.w) * Fb.h, 255);
+		Fb.veil.assign(static_cast<size_t>(Fb.w) * Fb.h, 0);
+		Fb.veilA.assign(static_cast<size_t>(Fb.w) * Fb.h, 0);
+		Fb.veilDepth.assign(static_cast<size_t>(Fb.w) * Fb.h, 1e9f);
+	}
 
 #ifdef _DEBUG
 	if (const char *dbgYaw = std::getenv("DEVILUTIONX_DEV_ORBITYAW"); dbgYaw != nullptr)
@@ -874,6 +936,15 @@ void DrawOrbitView(const Surface &out)
 		if (dz > -1e-4f) {
 			if (town) {
 				for (int x = 0; x < Fb.w; x++) {
+					if (SmoothShading) {
+						// Smooth gradient from the haze at the horizon to the sky above.
+						const size_t idx = static_cast<size_t>(y) * Fb.w + x;
+						row[x] = skyLow;
+						Fb.veil[idx] = skyTop;
+						Fb.veilA[idx] = static_cast<uint8_t>(std::clamp((dz * 3.0f - 0.2f) / 0.3f, 0.0f, 1.0f) * 255.0f);
+						Fb.veilDepth[idx] = 0;
+						continue;
+					}
 					const float k = std::clamp(dz * 3.0f + (Bayer4[y & 3][x & 3] - 7.5f) / 30.0f, 0.0f, 1.0f);
 					row[x] = k > 0.35f ? skyTop : skyLow;
 				}
@@ -907,7 +978,7 @@ void DrawOrbitView(const Surface &out)
 			const int tu = std::clamp(static_cast<int>((wx - cxl) * TexW), 0, TexW - 1);
 			const int tv = std::clamp(static_cast<int>((wy - cyl) * TexW), 0, TexW - 1);
 			const float light = lightStart + (lightEnd - lightStart) * ((x % LightSpan) / static_cast<float>(LightSpan));
-			row[x] = Shade(tex->floor[tv * TexW + tu], light, x, y);
+			row[x] = ShadeAt(tex->floor[tv * TexW + tu], light, x, y, static_cast<size_t>(y) * Fb.w + x);
 			depthRow[x] = t;
 		}
 	}
@@ -952,6 +1023,22 @@ void DrawOrbitView(const Surface &out)
 		uint8_t *dst = &out[Point { 0, y }];
 		for (int x = 0; x < out.w(); x++)
 			dst[x] = src[xmap[x]];
+	}
+	if (SmoothShading) {
+		// Hand the in-between light levels and see-through layers to the full-colour overlay.
+		for (int y = 0; y < out.h(); y++) {
+			const size_t rowIdx = static_cast<size_t>(std::min(Fb.h - 1, y / scale)) * Fb.w;
+			for (int x = 0; x < out.w(); x++) {
+				const size_t idx = rowIdx + xmap[x];
+				const uint8_t d = Fb.dim[idx];
+				if (d < 255) {
+					const float m = d / 255.0f;
+					ColorOverlayMulLight(x, y, m, m, m);
+				}
+				if (Fb.veilA[idx] != 0 && Fb.veilDepth[idx] < Fb.depth[idx])
+					ColorOverlayOver(x, y, OverlayPaletteColor(Fb.veil[idx]), Fb.veilA[idx] / 255.0f);
+			}
+		}
 	}
 #ifdef _DEBUG
 	perfTotal += static_cast<double>(SDL_GetPerformanceCounter() - perfStart) * 1000.0 / static_cast<double>(SDL_GetPerformanceFrequency());

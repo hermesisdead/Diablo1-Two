@@ -570,6 +570,8 @@ struct GraphicsOptions : OptionCategoryBase {
 	OptionEntryBoolean dungeonMoods;
 	/** @brief Weather and mood effects with real transparency instead of a dither pattern. */
 	OptionEntryBoolean smoothEffects;
+	/** @brief Torches, fire and spells cast coloured light (needs Smooth Effects). */
+	OptionEntryBoolean coloredLighting;
 	/** @brief Per-level colour variation in dungeons. */
 	OptionEntryBoolean dungeonColorVariation;
 	/** @brief Use alternate nest palette. */

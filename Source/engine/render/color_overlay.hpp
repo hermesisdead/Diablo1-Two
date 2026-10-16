@@ -47,6 +47,12 @@ void ColorOverlayEndFrame();
 bool ColorOverlayBegin(const Surface &region);
 [[nodiscard]] bool ColorOverlayRecording();
 
+/**
+ * @brief Light: multiplies the scene per pixel (1 = unchanged, up to 2); several calls on a pixel
+ * multiply together. Applied first, before washes, fog and particles. Coordinates are region-local.
+ */
+void ColorOverlayMulLight(int x, int y, float r, float g, float b);
+
 /** @brief A whole-region wash: before everything else (darkening) or after (flashes). */
 void ColorOverlayWash(OverlayColor color, float alpha, bool last);
 

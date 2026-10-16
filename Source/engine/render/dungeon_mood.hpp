@@ -45,4 +45,10 @@ enum class DungeonMood : uint8_t {
  */
 void DrawDungeonMood(const Surface &out);
 
+/**
+ * @brief Tints the light around torches, candles, fire, spells and portals (full-colour overlay).
+ * Call between ColorOverlayBegin and the mood, with the same surface.
+ */
+void DrawColoredLight(const Surface &out);
+
 } // namespace devilution

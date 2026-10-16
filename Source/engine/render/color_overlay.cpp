@@ -30,6 +30,9 @@ struct Layer {
 	Wash pre { { 0, 0, 0 }, 0 };
 	Wash post { { 0, 0, 0 }, 0 };
 
+	bool lightUsed = false;
+	std::vector<uint32_t> light; // per-pixel multiplier per channel, 128 = 1.0
+
 	OverlayColor fogColor { 0, 0, 0 };
 	bool fogUsed = false;
 	std::vector<uint8_t> fog; // coverage 0..255
@@ -167,6 +170,7 @@ bool ColorOverlayBegin(const Surface &region)
 	const size_t size = static_cast<size_t>(rect.w) * static_cast<size_t>(rect.h);
 	if (rect.w != L.rect.w || rect.h != L.rect.h || L.particles.size() != size) {
 		L.fog.assign(size, 0);
+		L.light.assign(size, 0x808080u);
 		L.particles.assign(size, 0);
 		L.snapshot.assign(size, 0);
 		L.pMinX = L.pMinY = 0;
@@ -174,6 +178,8 @@ bool ColorOverlayBegin(const Surface &region)
 	} else {
 		if (L.fogUsed)
 			std::fill(L.fog.begin(), L.fog.end(), 0);
+		if (L.lightUsed)
+			std::fill(L.light.begin(), L.light.end(), 0x808080u);
 		if (L.pMaxX >= L.pMinX) {
 			for (int y = L.pMinY; y <= L.pMaxY; y++)
 				std::fill_n(&L.particles[static_cast<size_t>(y) * rect.w + L.pMinX], L.pMaxX - L.pMinX + 1, 0u);
@@ -185,6 +191,7 @@ bool ColorOverlayBegin(const Surface &region)
 	L.pre = { { 0, 0, 0 }, 0 };
 	L.post = { { 0, 0, 0 }, 0 };
 	L.fogUsed = false;
+	L.lightUsed = false;
 	L.recording = true;
 	return true;
 }
@@ -213,6 +220,19 @@ void ColorOverlayWash(OverlayColor color, float alpha, bool last)
 		return static_cast<uint8_t>(std::clamp((c2 * a2 + c1 * a1 * (1 - a2)) / out, 0.0f, 255.0f));
 	};
 	w = { { mix(w.color.r, color.r), mix(w.color.g, color.g), mix(w.color.b, color.b) }, ToByte(out) };
+}
+
+void ColorOverlayMulLight(int x, int y, float r, float g, float b)
+{
+	if (!L.recording || !InLayer(x, y))
+		return;
+	uint32_t &cur = L.light[static_cast<size_t>(y) * L.rect.w + x];
+	auto q = [](uint32_t old, float v) { return static_cast<uint32_t>(std::clamp(static_cast<float>(old) * v + 0.5f, 0.0f, 255.0f)); };
+	const uint32_t packed = q(cur & 0xFF, r) | (q((cur >> 8) & 0xFF, g) << 8) | (q((cur >> 16) & 0xFF, b) << 16);
+	if (packed == cur)
+		return;
+	L.lightUsed = true;
+	cur = packed;
 }
 
 void ColorOverlaySetFogColor(OverlayColor color)
@@ -289,7 +309,7 @@ void ColorOverlayComposite(SDL_Surface *src, const SDL_Rect *srcRect, SDL_Surfac
 	PixelLayout layout;
 	if (!GetLayout(dst, layout))
 		return;
-	const bool anything = L.pre.alpha != 0 || L.post.alpha != 0 || L.fogUsed || L.pMaxX >= L.pMinX;
+	const bool anything = L.pre.alpha != 0 || L.post.alpha != 0 || L.fogUsed || L.lightUsed || L.pMaxX >= L.pMinX;
 	if (!anything)
 		return;
 
@@ -319,13 +339,15 @@ void ColorOverlayComposite(SDL_Surface *src, const SDL_Rect *srcRect, SDL_Surfac
 		const uint8_t *snap = &L.snapshot[static_cast<size_t>(ly) * L.rect.w];
 		const uint8_t *fog = &L.fog[static_cast<size_t>(ly) * L.rect.w];
 		const uint32_t *part = &L.particles[static_cast<size_t>(ly) * L.rect.w];
+		const uint32_t *lit = &L.light[static_cast<size_t>(ly) * L.rect.w];
 		auto *out = reinterpret_cast<uint32_t *>(static_cast<uint8_t *>(dst->pixels) + static_cast<size_t>(dy) * dst->pitch);
 		const bool rowHasParticles = ly >= L.pMinY && ly <= L.pMaxY;
 		for (int x = x0; x < x1; x++) {
 			const int lx = x - L.rect.x;
 			const uint32_t f = L.fogUsed ? fog[lx] : 0;
 			const uint32_t p = rowHasParticles ? part[lx] : 0;
-			if (!wholeArea && f == 0 && p == 0)
+			const uint32_t m = L.lightUsed ? lit[lx] : 0x808080u;
+			if (!wholeArea && f == 0 && p == 0 && m == 0x808080u)
 				continue;
 			if (pal[x] != snap[lx])
 				continue; // the interface drew here after the world
@@ -334,6 +356,11 @@ void ColorOverlayComposite(SDL_Surface *src, const SDL_Rect *srcRect, SDL_Surfac
 				continue;
 			uint32_t px = out[dx];
 			uint32_t r = (px >> rs) & 0xFF, g = (px >> gs) & 0xFF, b = (px >> bs) & 0xFF;
+			if (m != 0x808080u) {
+				r = std::min(255u, (r * (m & 0xFF) + 64) >> 7);
+				g = std::min(255u, (g * ((m >> 8) & 0xFF) + 64) >> 7);
+				b = std::min(255u, (b * ((m >> 16) & 0xFF) + 64) >> 7);
+			}
 			if (preA != 0) {
 				r = preR + Mul(r, 255 - preA);
 				g = preG + Mul(g, 255 - preA);

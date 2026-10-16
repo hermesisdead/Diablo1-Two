@@ -1337,9 +1337,13 @@ void DrawView(const Surface &out, Point startPosition)
 #endif
 	if (IsOrbitViewActive()) {
 		const Surface orbitOut = IsActionHudEnabled() ? out : out.subregionY(0, gnViewportHeight);
+		// Full-colour layer (smooth light, coloured light, weather) over the 3D view.
+		ColorOverlayBegin(orbitOut);
 		DrawOrbitView(orbitOut);
+		DrawColoredLight(orbitOut);
 		if (!AutomapActive)
 			DrawDungeonMood(orbitOut);
+		ColorOverlayFinish();
 		DrawForestHud(out.subregionY(0, gnViewportHeight));
 		if (AutomapActive)
 			DrawAutomap(out.subregionY(0, gnViewportHeight));
@@ -1347,9 +1351,13 @@ void DrawView(const Surface &out, Point startPosition)
 	}
 	Displacement offset = {};
 	CalcFirstTilePosition(startPosition, offset);
+	const Surface viewOut = out.subregionY(0, gnViewportHeight);
+	ColorOverlayBegin(viewOut);
 	DrawGame(out, startPosition, offset);
+	DrawColoredLight(viewOut);
 	if (!AutomapActive)
-		DrawDungeonMood(out.subregionY(0, gnViewportHeight));
+		DrawDungeonMood(viewOut);
+	ColorOverlayFinish();
 	DrawForestHud(out.subregionY(0, gnViewportHeight));
 	if (AutomapActive) {
 		DrawAutomap(out.subregionY(0, gnViewportHeight));
