@@ -178,6 +178,8 @@ echo     tile grid. Press F to switch between free movement and the grid.
 echo   - Smooth effects: fog, rain, snow and glows blend in full colour instead
 echo     of a dither pattern, and torches, fire and spells cast coloured light.
 echo     Settings ^> Graphics: Smooth Effects / Coloured Lighting.
+echo   - Spell effects: spells trail embers, sparks or motes, glow, light up the
+echo     floor around them and burst where they hit ^(Settings ^> Graphics^).
 echo   - F8 opens the weather panel: current weather, time until it changes,
 echo     an intensity slider and on/off switches. Tab is only the map now ^(the
 echo     weather stays on while it is open^). Spell hotkeys are F5-F7.

@@ -84,6 +84,7 @@ set(libdevilutionx_SRCS
   engine/render/scrollrt.cpp
   engine/render/color_overlay.cpp
   engine/render/dungeon_mood.cpp
+  engine/render/spell_fx.cpp
   action_mode.cpp
   free_move.cpp
   engine/render/orbit_view.cpp

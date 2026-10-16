@@ -1452,6 +1452,13 @@ void FreeMoveDebugTick()
 				if (ok)
 					Stats.arrivals++;
 			}
+		} else if (mode == "cast") {
+			// Cast the readied spell (DEVILUTIONX_DEV_FREECAST) at a point that circles the hero.
+			if (player._pmode == PM_STAND && Stats.ticks % 12 == 0) {
+				const float angle = static_cast<float>(Stats.ticks) * 0.11F;
+				const Point target = player.position.tile + Displacement { static_cast<int>(std::lround(std::cos(angle) * 5.0F)), static_cast<int>(std::lround(std::sin(angle) * 5.0F)) };
+				NetSendCmdLocParam3(true, CMD_SPELLXY, target, static_cast<int8_t>(player._pRSpell), static_cast<uint8_t>(SpellType::Spell), 0);
+			}
 		} else if (mode == "fight") {
 			// Stand still and swing at anything adjacent.
 			if (player._pmode == PM_STAND) {

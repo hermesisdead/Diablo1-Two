@@ -805,6 +805,7 @@ GraphicsOptions::GraphicsOptions()
     , weatherEffects("Weather Effects", OptionEntryFlags::None, N_("Weather Effects"), N_("Shows weather and dungeon mood effects. Also in the weather panel (F8)."), true)
     , weatherIntensity("Weather Intensity", OptionEntryFlags::Invisible, "Weather Intensity", "Weather effect strength in percent (F8 weather panel).", 100)
     , coloredLighting("Coloured Lighting", OptionEntryFlags::None, N_("Coloured Lighting"), N_("Torches and candles glow warm, fire spells orange, lightning cold blue, portals blue. Needs Smooth Effects."), true)
+    , spellEffects("Spell Effects", OptionEntryFlags::None, N_("Spell Effects"), N_("Spells trail embers, sparks or motes, glow and light up their surroundings, and burst where they hit. Needs Smooth Effects."), true)
     , dungeonColorVariation("Dungeon Color Variation", OptionEntryFlags::CantChangeInGame, N_("Dungeon Color Variation"), N_("Every dungeon level gets its own color mood."), true)
     , alternateNestArt("Alternate nest art", OptionEntryFlags::OnlyHellfire | OptionEntryFlags::CantChangeInGame, N_("Alternate nest art"), N_("The game will use an alternative palette for Hellfire’s nest tileset."), false)
 #if SDL_VERSION_ATLEAST(2, 0, 0)
@@ -843,6 +844,7 @@ std::vector<OptionEntryBase *> GraphicsOptions::GetEntries()
 		&weatherEffects,
 		&weatherIntensity,
 		&coloredLighting,
+		&spellEffects,
 		&dungeonColorVariation,
 		&alternateNestArt,
 #if SDL_VERSION_ATLEAST(2, 0, 0)

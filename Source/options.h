@@ -576,6 +576,8 @@ struct GraphicsOptions : OptionCategoryBase {
 	OptionEntryInt<int> weatherIntensity;
 	/** @brief Torches, fire and spells cast coloured light (needs Smooth Effects). */
 	OptionEntryBoolean coloredLighting;
+	/** @brief Particles, glow and light for spells (needs Smooth Effects). */
+	OptionEntryBoolean spellEffects;
 	/** @brief Per-level colour variation in dungeons. */
 	OptionEntryBoolean dungeonColorVariation;
 	/** @brief Use alternate nest palette. */

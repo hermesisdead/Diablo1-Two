@@ -55,6 +55,7 @@
 #include "nthread.h"
 #include "engine/render/color_overlay.hpp"
 #include "engine/render/dungeon_mood.hpp"
+#include "engine/render/spell_fx.hpp"
 #include "levels/forest.hpp"
 #include "action_mode.hpp"
 #include "engine/render/orbit_view.hpp"
@@ -1343,6 +1344,7 @@ void DrawView(const Surface &out, Point startPosition)
 		DrawOrbitView(orbitOut);
 		DrawColoredLight(orbitOut);
 		DrawDungeonMood(orbitOut); // stays on while the map (Tab) is open
+		DrawSpellEffects(orbitOut);
 		ColorOverlayFinish();
 		DrawForestHud(out.subregionY(0, gnViewportHeight));
 		if (AutomapActive)
@@ -1356,6 +1358,7 @@ void DrawView(const Surface &out, Point startPosition)
 	DrawGame(out, startPosition, offset);
 	DrawColoredLight(viewOut);
 	DrawDungeonMood(viewOut); // stays on while the map (Tab) is open
+	DrawSpellEffects(viewOut);
 	ColorOverlayFinish();
 	DrawForestHud(out.subregionY(0, gnViewportHeight));
 	if (AutomapActive) {
