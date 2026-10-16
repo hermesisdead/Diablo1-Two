@@ -68,6 +68,7 @@
 #include "multi.h"
 #include "objects.h"
 #include "options.h"
+#include "panels/weather_panel.hpp"
 #include "panels/spell_icons.hpp"
 #include "player.h"
 #include "qol/stash.h"
@@ -647,7 +648,7 @@ bool IsActionModeFree()
 		return false;
 	return NoPanelsOpenForActionMode() && !IsPlayerInStore() && !ChatFlag && !gmenu_is_active() && !DropGoldFlag
 	    && !IsWithdrawGoldOpen && !DoomFlag && !PadMenuNavigatorActive && !PadHotspellMenuActive && !MyPlayerIsDead
-	    && !qtextflag;
+	    && !qtextflag && !WeatherPanelOpen;
 }
 
 bool IsActionHudEnabled()

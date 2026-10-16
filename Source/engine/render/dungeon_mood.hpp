@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 
 #include "engine/surface.hpp"
 
@@ -44,6 +45,21 @@ enum class DungeonMood : uint8_t {
  * @param out The surface the world was drawn to (for the 3D view, the one given to DrawOrbitView).
  */
 void DrawDungeonMood(const Surface &out);
+
+/** @brief What the weather is doing now (for the F8 weather panel). */
+struct WeatherStatus {
+	DungeonMood mood;
+	bool active;       // weather runs on this level (enabled for this level type, in game)
+	bool outdoor;      // outdoor weather turns over time; dungeon moods last the whole visit
+	float strength;    // how heavy this roll is, 0.6..1
+	float secondsLeft; // until it starts to turn (outdoor only)
+	bool changing;     // fading from one weather to the next
+};
+[[nodiscard]] WeatherStatus GetWeatherStatus();
+/** @brief Display name of a mood, translated. */
+[[nodiscard]] std::string_view DungeonMoodTitle(DungeonMood mood);
+/** @brief Outdoors: start turning to the next weather now. */
+void ChangeWeatherNow();
 
 /**
  * @brief Tints the light around torches, candles, fire, spells and portals (full-colour overlay).

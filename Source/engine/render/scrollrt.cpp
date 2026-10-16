@@ -64,6 +64,7 @@
 #include "panels/partypanel.hpp"
 #include "panels/quest_log.hpp"
 #include "panels/skill_tree.hpp"
+#include "panels/weather_panel.hpp"
 #include "panels/spell_list.hpp"
 #include "plrmsg.h"
 #include "qol/chatlog.h"
@@ -1341,8 +1342,7 @@ void DrawView(const Surface &out, Point startPosition)
 		ColorOverlayBegin(orbitOut);
 		DrawOrbitView(orbitOut);
 		DrawColoredLight(orbitOut);
-		if (!AutomapActive)
-			DrawDungeonMood(orbitOut);
+		DrawDungeonMood(orbitOut); // stays on while the map (Tab) is open
 		ColorOverlayFinish();
 		DrawForestHud(out.subregionY(0, gnViewportHeight));
 		if (AutomapActive)
@@ -1355,8 +1355,7 @@ void DrawView(const Surface &out, Point startPosition)
 	ColorOverlayBegin(viewOut);
 	DrawGame(out, startPosition, offset);
 	DrawColoredLight(viewOut);
-	if (!AutomapActive)
-		DrawDungeonMood(viewOut);
+	DrawDungeonMood(viewOut); // stays on while the map (Tab) is open
 	ColorOverlayFinish();
 	DrawForestHud(out.subregionY(0, gnViewportHeight));
 	if (AutomapActive) {
@@ -1957,6 +1956,8 @@ void DrawAndBlit()
 
 	if ((*GetOptions().Gameplay.showMultiplayerPartyInfo != PartyPortraits::Disabled) && PartySidePanelOpen)
 		DrawPartyMemberInfoPanel(out);
+
+	DrawWeatherPanel(out);
 
 	DrawCursor(out);
 

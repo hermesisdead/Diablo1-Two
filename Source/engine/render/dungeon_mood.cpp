@@ -30,6 +30,7 @@
 #include "objects.h"
 #include "options.h"
 #include "player.h"
+#include "utils/language.h"
 #include "utils/log.hpp"
 #include "utils/palette_blending.hpp"
 
@@ -119,6 +120,8 @@ std::vector<Splash> rainSplashes;
 uint64_t rngState = 1;
 /** Effects go to the full-colour overlay this frame (real transparency instead of dithering). */
 bool overlayOn = false;
+/** Weather intensity this frame (F8 panel): scales fog, washes and particle opacity. */
+float intensity = 1.0f;
 uint32_t lastTicks = 0;
 float clockSeconds = 0;
 
@@ -831,7 +834,7 @@ struct Projector {
 void Blend(const Surface &out, Point p, uint8_t color, float alpha = 0.5f)
 {
 	if (overlayOn) {
-		ColorOverlayOver(p.x, p.y, OverlayPaletteColor(color), alpha);
+		ColorOverlayOver(p.x, p.y, OverlayPaletteColor(color), std::min(alpha * intensity, 1.0f));
 		return;
 	}
 	uint8_t *pix = out.at(p.x, p.y);
@@ -841,7 +844,7 @@ void Blend(const Surface &out, Point p, uint8_t color, float alpha = 0.5f)
 void Put(const Surface &out, Point p, uint8_t color, float alpha = 0.95f)
 {
 	if (overlayOn) {
-		ColorOverlayOver(p.x, p.y, OverlayPaletteColor(color), alpha);
+		ColorOverlayOver(p.x, p.y, OverlayPaletteColor(color), std::min(alpha * intensity, 1.0f));
 		return;
 	}
 	*out.at(p.x, p.y) = color;
@@ -851,7 +854,7 @@ void Put(const Surface &out, Point p, uint8_t color, float alpha = 0.95f)
 void Glow(const Surface &out, Point p, uint8_t color, float amount)
 {
 	if (overlayOn) {
-		ColorOverlayAdd(p.x, p.y, OverlayPaletteColor(color), amount);
+		ColorOverlayAdd(p.x, p.y, OverlayPaletteColor(color), std::min(amount * intensity, 1.0f));
 		return;
 	}
 	if (amount > 0.3f)
@@ -1115,7 +1118,8 @@ void DrawFogOrbit(const Projector &pr, uint8_t color, float density)
 void DrawParticles(const Projector &pr)
 {
 	// While the weather turns over, only part of the particles show.
-	const size_t shown = static_cast<size_t>(static_cast<float>(particles.size()) * fade);
+	// Below full intensity, fewer particles too.
+	const size_t shown = static_cast<size_t>(static_cast<float>(particles.size()) * fade * std::clamp(intensity, 0.0f, 1.0f));
 	for (size_t i = 0; i < shown; i++) {
 		const Particle &p = particles[i];
 		const std::optional<OrbitScreenPoint> sp = pr.Project(p.x, p.y, p.z);
@@ -1513,6 +1517,46 @@ void DrawColoredLight(const Surface &out)
 	}
 }
 
+WeatherStatus GetWeatherStatus()
+{
+	EnsureMood();
+	WeatherStatus status {};
+	status.mood = currentMood;
+	status.active = moodKey != -1;
+	status.outdoor = outdoor;
+	status.strength = strength;
+	status.secondsLeft = std::max(0.0f, changeTimer);
+	status.changing = outdoor && (fadingOut || fade < 1.0f);
+	return status;
+}
+
+std::string_view DungeonMoodTitle(DungeonMood mood)
+{
+	switch (mood) {
+	case DungeonMood::Clear: return _("Clear");
+	case DungeonMood::Mist: return _("Mist");
+	case DungeonMood::Dust: return _("Dust");
+	case DungeonMood::Frost: return _("Frost");
+	case DungeonMood::Embers: return _("Embers");
+	case DungeonMood::Drips: return _("Dripping water");
+	case DungeonMood::Rain: return _("Rain");
+	case DungeonMood::Storm: return _("Thunderstorm");
+	case DungeonMood::Snow: return _("Snow");
+	case DungeonMood::Wind: return _("Wind");
+	case DungeonMood::Fireflies: return _("Fireflies");
+	case DungeonMood::Ash: return _("Ash");
+	case DungeonMood::Spores: return _("Spores");
+	case DungeonMood::BloodMist: return _("Blood mist");
+	default: return _("Clear");
+	}
+}
+
+void ChangeWeatherNow()
+{
+	if (outdoor && moodKey != -1 && !fadingOut)
+		changeTimer = 0;
+}
+
 DungeonMood GetDungeonMood()
 {
 	EnsureMood();
@@ -1556,11 +1600,17 @@ void DrawDungeonMood(const Surface &out)
 		return;
 	}
 	UpdateWeather(dt);
+	if (!*GetOptions().Graphics.weatherEffects) {
+		// Switched off in the weather panel: the weather keeps its course, unseen and unheard.
+		UpdateAmbience(AmbienceTrack::None, 0.0f);
+		return;
+	}
+	intensity = std::clamp(static_cast<float>(*GetOptions().Graphics.weatherIntensity) / 100.0f, 0.0f, 2.0f);
 	float trackLevel = 1.0f;
 	const AmbienceTrack track = TrackFor(currentMood, trackLevel);
 	UpdateAmbience(track, trackLevel * (0.65f + 0.35f * strength) * (outdoor ? fade : 1.0f));
 
-	if (currentMood == DungeonMood::Clear || out.w() <= 0 || out.h() <= 0)
+	if (currentMood == DungeonMood::Clear || out.w() <= 0 || out.h() <= 0 || intensity <= 0.0f)
 		return;
 	clockSeconds += dt;
 	UpdateParticles(dt);
@@ -1571,12 +1621,12 @@ void DrawDungeonMood(const Surface &out)
 	overlayOn = ColorOverlayRecording();
 	// Rain clouds darken the day.
 	if (currentMood == DungeonMood::Storm)
-		Wash(out, colors.black, 0.30f * fade);
+		Wash(out, colors.black, 0.30f * fade * intensity);
 	else if (currentMood == DungeonMood::Rain)
-		Wash(out, colors.black, 0.12f * fade);
+		Wash(out, colors.black, 0.12f * fade * intensity);
 
 	const MoodLook look = LookOf(currentMood);
-	const float density = look.fogDensity * (0.7f + 0.3f * strength) * fade;
+	const float density = look.fogDensity * (0.7f + 0.3f * strength) * fade * intensity;
 	if (density > 0.01f) {
 		if (pr.orbit)
 			DrawFogOrbit(pr, look.fogColor, density);
@@ -1589,7 +1639,7 @@ void DrawDungeonMood(const Surface &out)
 	if (currentMood == DungeonMood::Drips)
 		DrawDrips(pr);
 	if (flashTime >= 0)
-		Wash(out, colors.white, FlashBrightness(flashTime) * 0.7f, /*last=*/true);
+		Wash(out, colors.white, FlashBrightness(flashTime) * 0.7f * std::min(intensity, 1.3f), /*last=*/true);
 	overlayOn = false;
 }
 

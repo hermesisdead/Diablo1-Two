@@ -178,6 +178,9 @@ echo     tile grid. Press F to switch between free movement and the grid.
 echo   - Smooth effects: fog, rain, snow and glows blend in full colour instead
 echo     of a dither pattern, and torches, fire and spells cast coloured light.
 echo     Settings ^> Graphics: Smooth Effects / Coloured Lighting.
+echo   - F8 opens the weather panel: current weather, time until it changes,
+echo     an intensity slider and on/off switches. Tab is only the map now ^(the
+echo     weather stays on while it is open^). Spell hotkeys are F5-F7.
 echo   - F4 toggles action mode ^(close camera, WASD, dodge, lock-on^).
 echo     In action mode the mana potion moved from F to G.
 echo   Options for all of these are under Settings ^> Gameplay / Graphics.

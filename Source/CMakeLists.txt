@@ -138,6 +138,7 @@ set(libdevilutionx_SRCS
   panels/partypanel.cpp
   panels/quest_log.cpp
   panels/skill_tree.cpp
+  panels/weather_panel.cpp
   panels/spell_book.cpp
   panels/spell_icons.cpp
   panels/spell_list.cpp

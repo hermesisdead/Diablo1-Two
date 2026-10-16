@@ -30,6 +30,7 @@
 #include "free_move.hpp"
 #include "class_skills.hpp"
 #include "panels/skill_tree.hpp"
+#include "panels/weather_panel.hpp"
 #include "levels/desert.hpp"
 #include "control/control.hpp"
 #include "cursor.h"
@@ -386,6 +387,9 @@ void LeftMouseDown(uint16_t modState)
 	const bool isShiftHeld = (modState & SDL_KMOD_SHIFT) != 0;
 	const bool isCtrlHeld = (modState & SDL_KMOD_CTRL) != 0;
 
+	if (WeatherPanelMouseDown(MousePosition))
+		return;
+
 	if (ActionModeHandleLeftMouse(isShiftHeld))
 		return;
 
@@ -443,6 +447,7 @@ void LeftMouseDown(uint16_t modState)
 void LeftMouseUp(uint16_t modState)
 {
 	gmenu_left_mouse(false);
+	WeatherPanelMouseUp();
 	CheckMuteButtonUp();
 	if (MainPanelButtonDown)
 		CheckMainPanelButtonUp();
@@ -2144,7 +2149,8 @@ void InitKeymapActions()
 		    "QuickSpell{}",
 		    N_("Quick spell {}"),
 		    N_("Hotkey for skill or spell."),
-		    i < 4 ? static_cast<uint32_t>(SDLK_F5) + i : static_cast<uint32_t>(SDLK_UNKNOWN),
+		    // F5-F7 (F8 opens the weather panel; the fourth hotkey can be bound in Settings).
+		    i < 3 ? static_cast<uint32_t>(SDLK_F5) + i : static_cast<uint32_t>(SDLK_UNKNOWN),
 		    [i]() {
 			    if (SpellSelectFlag) {
 				    SetSpeedSpell(i);
@@ -2384,6 +2390,14 @@ void InitKeymapActions()
 	    IncreaseBrightness,
 	    nullptr,
 	    CanPlayerTakeAction);
+	options.Keymapper.AddAction(
+	    "WeatherPanel",
+	    N_("Weather panel"),
+	    N_("Shows the current weather and sets its intensity, or turns it off."),
+	    SDLK_F8,
+	    [] { ToggleWeatherPanel(); },
+	    nullptr,
+	    IsGameRunning);
 	options.Keymapper.AddAction(
 	    "ToggleFreeMovement",
 	    N_("Free movement"),

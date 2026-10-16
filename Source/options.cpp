@@ -802,6 +802,8 @@ GraphicsOptions::GraphicsOptions()
     , townWeather("Town Weather", OptionEntryFlags::None, N_("Town Weather"), N_("Changing weather in Tristram and the Darkwood: rain, thunderstorms, snow, wind, fog and fireflies, each with its own ambient sound."), true)
     , dungeonMoods("Dungeon Moods", OptionEntryFlags::None, N_("Dungeon Moods"), N_("Every visit to a dungeon level rolls its own atmosphere and ambient sound: fog, dust, frost, embers, dripping water, ash, spores or blood mist."), true)
     , smoothEffects("Smooth Effects", OptionEntryFlags::None, N_("Smooth Effects"), N_("Fog, rain, glows and other weather effects are blended in full colour with real transparency instead of a dither pattern."), true)
+    , weatherEffects("Weather Effects", OptionEntryFlags::None, N_("Weather Effects"), N_("Shows weather and dungeon mood effects. Also in the weather panel (F8)."), true)
+    , weatherIntensity("Weather Intensity", OptionEntryFlags::Invisible, "Weather Intensity", "Weather effect strength in percent (F8 weather panel).", 100)
     , coloredLighting("Coloured Lighting", OptionEntryFlags::None, N_("Coloured Lighting"), N_("Torches and candles glow warm, fire spells orange, lightning cold blue, portals blue. Needs Smooth Effects."), true)
     , dungeonColorVariation("Dungeon Color Variation", OptionEntryFlags::CantChangeInGame, N_("Dungeon Color Variation"), N_("Every dungeon level gets its own color mood."), true)
     , alternateNestArt("Alternate nest art", OptionEntryFlags::OnlyHellfire | OptionEntryFlags::CantChangeInGame, N_("Alternate nest art"), N_("The game will use an alternative palette for Hellfire’s nest tileset."), false)
@@ -838,6 +840,8 @@ std::vector<OptionEntryBase *> GraphicsOptions::GetEntries()
 		&townWeather,
 		&dungeonMoods,
 		&smoothEffects,
+		&weatherEffects,
+		&weatherIntensity,
 		&coloredLighting,
 		&dungeonColorVariation,
 		&alternateNestArt,
