@@ -21,6 +21,7 @@
 #include "levels/drlg_l3.h"
 #include "levels/drlg_l4.h"
 #include "levels/gendung.h"
+#include "levels/town.h"
 #include "levels/trigs.h"
 #include "missiles.h"
 #include "player.h"
@@ -130,6 +131,8 @@ MapLinkKind ParseLinkKind(std::string_view s)
 	return MapLinkKind::None;
 }
 
+std::expected<void, std::string> LoadWildsLevel();
+
 int ToInt(std::string_view s, int fallback = 0)
 {
 	const ParseIntResult<int> v = ParseInt<int>(s);
@@ -148,6 +151,10 @@ std::string BuildMeta(const CustomMap &map)
 		out += StrCat("portal=", p.tile.x, ",", p.tile.y, ",", p.door ? 1 : 0, ",", LinkKindName(p.to.kind), ",", p.to.map, ",", p.to.entry, ",", p.to.level, "\n");
 	for (const MapNpc &n : map.npcs)
 		out += StrCat("npc=", n.type, ",", n.tile.x, ",", n.tile.y, ",", n.direction, "\n");
+	for (const MapSpawner &s : map.spawners)
+		out += StrCat("spawner=", s.tile.x, ",", s.tile.y, ",", s.monster, ",", s.count, "\n");
+	for (const MapBoss &b : map.bosses)
+		out += StrCat("boss=", b.tile.x, ",", b.tile.y, ",", b.name, ",", b.minions, "\n");
 	return out;
 }
 
@@ -184,12 +191,17 @@ void ParseMeta(std::string_view text, CustomMap &map)
 			map.portals.push_back(std::move(portal));
 		} else if (key == "npc" && f.size() >= 4) {
 			map.npcs.push_back({ std::string(f[0]), { ToInt(f[1]), ToInt(f[2]) }, std::clamp(ToInt(f[3]), 0, 7) });
+		} else if (key == "spawner" && f.size() >= 4) {
+			map.spawners.push_back({ { ToInt(f[0]), ToInt(f[1]) }, std::string(f[2]), std::clamp(ToInt(f[3], 4), 1, 20) });
+		} else if (key == "boss" && f.size() >= 3) {
+			map.bosses.push_back({ { ToInt(f[0]), ToInt(f[1]) }, std::string(f[2]), std::clamp(f.size() >= 4 ? ToInt(f[3], 6) : 6, 0, 12) });
 		}
 	}
 }
 
-/** Floor piece of each style, used to flood the see-through areas behind walls. */
-uint8_t FloorPieceOf(dungeon_type style)
+} // namespace
+
+uint8_t MapStyleFloorPiece(dungeon_type style)
 {
 	switch (style) {
 	case DTYPE_CATACOMBS: return 3;
@@ -199,7 +211,10 @@ uint8_t FloorPieceOf(dungeon_type style)
 	}
 }
 
-} // namespace
+bool IsTownTiledStyle(dungeon_type style)
+{
+	return style == DTYPE_TOWN || style == DTYPE_FOREST;
+}
 
 // --- Map data --------------------------------------------------------------------------------
 
@@ -368,6 +383,7 @@ std::string_view MapStyleName(dungeon_type style)
 	case DTYPE_HELL: return "hell";
 	case DTYPE_CRYPT: return "crypt";
 	case DTYPE_NEST: return "nest";
+	case DTYPE_FOREST: return "wilds";
 	default: return "cathedral";
 	}
 }
@@ -381,10 +397,34 @@ std::optional<dungeon_type> ParseMapStyle(std::string_view name)
 	if (name == "hell") return DTYPE_HELL;
 	if (name == "crypt") return DTYPE_CRYPT;
 	if (name == "nest") return DTYPE_NEST;
+	if (name == "wilds") return DTYPE_FOREST;
 	return std::nullopt;
 }
 
 // --- Playing ---------------------------------------------------------------------------------
+
+namespace {
+
+/** Wilds: town tiles painted like a town, but a fighting area (the land outside a town). */
+std::expected<void, std::string> LoadWildsLevel()
+{
+	InitLevelGlobals();
+	PaintTownStyleTiles(&*Active);
+	InitTownStylePieces();
+	dminPosition = { 14, 14 };
+	dmaxPosition = { 18 + 2 * Active->width, 18 + 2 * Active->height };
+	const Point arrival = ActiveCustomMapArrival();
+	ViewPosition = arrival;
+	DRLG_InitTrans();
+	LoadRndLvlPal(DTYPE_FOREST, 0);
+	numtrigs = 0;
+	trigflag = false;
+	PortalsPlaced = false;
+	LastHeroTile = arrival;
+	return {};
+}
+
+} // namespace
 
 const CustomMap *ActiveCustomMap()
 {
@@ -449,6 +489,8 @@ std::expected<void, std::string> LoadActiveCustomMapLevel()
 {
 	if (!Active)
 		return std::unexpected("No custom map is active.");
+	if (Active->style == DTYPE_FOREST)
+		return LoadWildsLevel();
 	// The level loaders read a .dun file: write the active map (which may hold unsaved edits).
 	const std::string dir = CustomMapsDirectory();
 	RecursivelyCreateDir(dir.c_str());
@@ -474,7 +516,7 @@ std::expected<void, std::string> LoadActiveCustomMapLevel()
 	}
 	// See-through walls: flood the floor areas like the level generators do.
 	DRLG_InitTrans();
-	FloodTransparencyValues(FloorPieceOf(Active->style));
+	FloodTransparencyValues(MapStyleFloorPiece(Active->style));
 	LoadRndLvlPal(Active->style, 0);
 	numtrigs = 0;
 	trigflag = false;

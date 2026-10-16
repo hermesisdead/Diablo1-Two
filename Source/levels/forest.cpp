@@ -445,6 +445,12 @@ void StartWave()
 // ---------------------------------------------------------------------------------------------
 // Availability and tiers
 
+/** The Darkwood itself (wilds made in the map editor share its tiles but not its waves). */
+bool InForest()
+{
+	return leveltype == DTYPE_FOREST && setlevel && setlvlnum == SL_FOREST;
+}
+
 bool IsForestAvailable()
 {
 	return !gbIsMultiplayer;
@@ -762,7 +768,7 @@ void ResetForestWaves()
 
 void UpdateForestWaves()
 {
-	if (leveltype != DTYPE_FOREST || MyPlayer == nullptr)
+	if (!InForest() || MyPlayer == nullptr)
 		return;
 	Player &player = *MyPlayer;
 	if (player._pHitPoints <= 0 || player._pLvlChanging)
@@ -867,14 +873,14 @@ void UpdateForestWaves()
 
 float ForestExperienceMultiplier()
 {
-	if (leveltype != DTYPE_FOREST || Waves.wave <= 0)
+	if (!InForest() || Waves.wave <= 0)
 		return 1.0f;
 	return 1.0f + 0.08f * static_cast<float>(Waves.wave - 1);
 }
 
 void DrawForestHud(const Surface &out)
 {
-	if (leveltype != DTYPE_FOREST)
+	if (!InForest())
 		return;
 	std::string line;
 	if (Waves.wave == 0) {

@@ -56,6 +56,8 @@ void EnterCustomTownForEditor(std::string_view entry);
 void CreateCustomTownLevel(lvl_entry entry);
 /** @brief Repaints the current custom town's tiles into the level (pieces only, nothing moves). */
 void PaintCustomTownTiles();
+/** @brief Paints a town-tiled map (a town or wilds) into the level's pieces, filler around it. */
+void PaintTownStyleTiles(const CustomMap *map);
 /**
  * @brief Called at the end of CreateTown (Tristram and custom towns): sets up the town's links and
  * moves the view to a requested arrival point.

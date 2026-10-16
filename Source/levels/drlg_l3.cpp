@@ -2214,4 +2214,41 @@ std::expected<void, std::string> LoadL3Dungeon(const char *path, Point spawn)
 	return {};
 }
 
+void BuildCavesFromFloorPlan(const uint8_t *floorPlan, uint16_t *tiles)
+{
+	// The generator works on tile corners: a floor piece opens its four corners.
+	InitDungeonFlags();
+	for (int y = 0; y < DMAXY - 1; y++) {
+		for (int x = 0; x < DMAXX - 1; x++) {
+			if (floorPlan[y * DMAXX + x] == 0)
+				continue;
+			dungeon[x][y] = 1;
+			dungeon[x + 1][y] = 1;
+			dungeon[x][y + 1] = 1;
+			dungeon[x + 1][y + 1] = 1;
+		}
+	}
+	// The same variety on every rebuild, so tiles do not shuffle while painting.
+	SetRndSeed(0x5EED);
+	FillDiagonals();
+	FillSingles();
+	FillDiagonals();
+	Edges();
+	MakeMegas();
+	PlaceMiniSetRandom1x1(7, 106, 25);
+	PlaceMiniSetRandom1x1(7, 107, 25);
+	PlaceMiniSetRandom1x1(7, 108, 25);
+	PlaceMiniSetRandom1x1(9, 109, 25);
+	PlaceMiniSetRandom1x1(10, 110, 25);
+	for (int y = 0; y < DMAXY; y++) {
+		for (int x = 0; x < DMAXX; x++)
+			tiles[y * DMAXX + x] = dungeon[x][y];
+	}
+}
+
+void RefreshCavesPieces()
+{
+	Pass3();
+}
+
 } // namespace devilution

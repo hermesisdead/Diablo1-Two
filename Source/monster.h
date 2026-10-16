@@ -510,6 +510,12 @@ void InitGolems();
 std::expected<void, std::string> InitMonsters();
 std::expected<void, std::string> SetMapMonsters(const uint16_t *dunData, Point startPosition);
 Monster *AddMonster(Point position, Direction dir, size_t typeIndex, bool inMap);
+/** @brief Index of a monster type among the level's types (LevelMonsterTypeCount if absent). */
+[[nodiscard]] size_t LevelMonsterTypeIndex(_monster_id type);
+/** @brief Level load: places a monster of a level type at a tile (custom maps). */
+Monster *PlaceMonsterAt(size_t typeIndex, Point position);
+/** @brief Level load: places a unique monster and its minions at a tile (custom maps). nullptr if it does not fit. */
+std::expected<Monster *, std::string> PlaceUniqueMonsterAt(size_t uniqueIndex, Point position, int minions);
 /**
  * @brief Spawns a new monsters (dynamically/not on level load).
  * The command is only executed for the level owner, to prevent desyncs in multiplayer.

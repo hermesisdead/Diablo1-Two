@@ -57,5 +57,7 @@ void CreateTown(lvl_entry entry);
 
 /** @brief Map editor: repaints a custom town after its tiles changed. */
 void RefreshCustomTownLevel();
+/** @brief Sets the see-through arches of town pieces (towns and wilds made in the map editor). */
+void InitTownStylePieces();
 
 } // namespace devilution

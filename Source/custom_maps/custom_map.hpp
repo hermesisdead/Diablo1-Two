@@ -1,9 +1,10 @@
 /**
  * @file custom_maps/custom_map.hpp
  *
- * Hand-made maps (map editor): a tile layout in one of the game's styles, placed monsters and
- * objects, named entry points and portals or doors that lead to other maps, town or a dungeon
- * level. Maps live in mods/custommaps/maps/<name>/ as map.dun (the game's own map format) and
+ * Hand-made maps (map editor): a tile layout in one of the game's styles, monster spawners and
+ * bosses, named entry points and portals or doors that lead to other maps, town or a dungeon
+ * level. Styles: the four dungeon tilesets, towns (safe, with townspeople) and wilds (town
+ * tiles with monsters: the land outside a town). Maps live in mods/custommaps/maps/<name>/ as map.dun (the game's own map format) and
  * map.ini (everything the .dun format cannot hold).
  */
 #pragma once
@@ -46,6 +47,23 @@ struct MapNpc {
 	int direction = 0; // Direction
 };
 
+/** @brief A pack of monsters placed each time the hero enters the map. */
+struct MapSpawner {
+	Point tile;          // world tile
+	std::string monster; // monster id (e.g. MT_RFALLSP), or "auto": a type fitting the hero's level
+	int count = 4;       // monsters in the pack
+};
+
+/** @brief A unique monster (with its minions) placed each time the hero enters the map. */
+struct MapBoss {
+	Point tile;       // world tile
+	std::string name; // unique monster name, e.g. "Bonehead Keenaxe"
+	int minions = 6;
+};
+
+/** @brief Sentinel monster for spawners that pick a type fitting the hero's level. */
+inline constexpr std::string_view AutoMonster = "auto";
+
 struct MapPortal {
 	Point tile; // world tile
 	bool door = false; // a doorway rather than a magic portal
@@ -63,6 +81,8 @@ struct CustomMap {
 	std::vector<MapEntryPoint> entries;
 	std::vector<MapPortal> portals;
 	std::vector<MapNpc> npcs; // town maps only
+	std::vector<MapSpawner> spawners; // not in towns
+	std::vector<MapBoss> bosses;      // not in towns
 	std::string weather; // mood name, empty for the level's usual roll
 
 	// Editor layers (40 x 40, [y * 40 + x]): the painted floor plan the walls are built from, and
@@ -93,6 +113,10 @@ std::expected<void, std::string> WriteTristramLayer(const CustomMap &layer);
 
 [[nodiscard]] std::string_view MapStyleName(dungeon_type style);
 [[nodiscard]] std::optional<dungeon_type> ParseMapStyle(std::string_view name);
+/** @brief Styles built from town tiles (painted megatiles rather than a floor plan). */
+[[nodiscard]] bool IsTownTiledStyle(dungeon_type style);
+/** @brief Floor piece of a dungeon style (see-through walls flood from it). */
+[[nodiscard]] uint8_t MapStyleFloorPiece(dungeon_type style);
 
 // --- Playing custom maps ---------------------------------------------------------------------
 

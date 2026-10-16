@@ -3162,7 +3162,8 @@ int DiabloMain(int argc, char **argv)
 		if (const char *editMap = std::getenv("DEVILUTIONX_DEV_EDITOR"); editMap != nullptr) {
 			const std::string_view editArg = editMap;
 			const size_t colon = editArg.find(':');
-			QueueMapEditor(editArg.substr(0, colon), colon != std::string_view::npos && editArg.substr(colon + 1) == "town" ? DTYPE_TOWN : DTYPE_CATHEDRAL, std::getenv("DEVILUTIONX_DEV_EDITORPLAY") != nullptr);
+			const std::optional<dungeon_type> editStyle = colon != std::string_view::npos ? ParseMapStyle(editArg.substr(colon + 1)) : std::nullopt;
+			QueueMapEditor(editArg.substr(0, colon), editStyle.value_or(DTYPE_CATHEDRAL), std::getenv("DEVILUTIONX_DEV_EDITORPLAY") != nullptr);
 			StartQueuedMapEditor();
 			DiabloDeinit();
 			return 0;

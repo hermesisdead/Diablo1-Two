@@ -1252,4 +1252,37 @@ std::expected<void, std::string> LoadL4Dungeon(const char *path, Point spawn)
 	return {};
 }
 
+void BuildHellFromFloorPlan(const uint8_t *floorPlan, uint16_t *tiles)
+{
+	// The generator works on tile corners: a floor piece opens its four corners.
+	InitDungeonFlags();
+	for (int y = 0; y < DMAXY - 1; y++) {
+		for (int x = 0; x < DMAXX - 1; x++) {
+			if (floorPlan[y * DMAXX + x] == 0)
+				continue;
+			DungeonMask.set(x, y);
+			DungeonMask.set(x + 1, y);
+			DungeonMask.set(x, y + 1);
+			DungeonMask.set(x + 1, y + 1);
+		}
+	}
+	MakeDmt();
+	FixTilesPatterns();
+	GeneralFix();
+	ApplyShadowsPatterns();
+	FixCornerTiles();
+	// The same variety on every rebuild, so tiles do not shuffle while painting.
+	SetRndSeed(0x5EED);
+	Substitution();
+	for (int y = 0; y < DMAXY; y++) {
+		for (int x = 0; x < DMAXX; x++)
+			tiles[y * DMAXX + x] = dungeon[x][y];
+	}
+}
+
+void RefreshHellPieces()
+{
+	Pass3();
+}
+
 } // namespace devilution

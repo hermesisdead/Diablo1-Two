@@ -248,13 +248,17 @@ void EnterCustomTownForEditor(std::string_view entry)
 
 void PaintCustomTownTiles()
 {
+	PaintTownStyleTiles(CurrentCustomTownMap());
+}
+
+void PaintTownStyleTiles(const CustomMap *map)
+{
 	// Everything outside the painted map is the town's empty filler.
 	for (int y = 0; y < MAXDUNY; y++) {
 		for (int x = 0; x < MAXDUNX; x++)
 			dPiece[x][y] = 426;
 	}
 	std::memset(dungeon, 0, sizeof(dungeon));
-	const CustomMap *map = CurrentCustomTownMap();
 	if (map == nullptr)
 		return;
 	for (int y = 0; y < map->height; y++) {

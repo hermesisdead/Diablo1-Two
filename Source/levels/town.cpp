@@ -387,6 +387,11 @@ void CleanTownFountain()
 void RefreshCustomTownLevel()
 {
 	PaintCustomTownTiles();
+	InitTownStylePieces();
+}
+
+void InitTownStylePieces()
+{
 	std::memset(dSpecial, 0, sizeof(dSpecial));
 	InitTownPieces();
 }

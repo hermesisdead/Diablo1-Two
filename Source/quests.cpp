@@ -326,8 +326,13 @@ Point GetMapReturnPosition()
 		if (const std::optional<Point> gate = TownForestGate(); gate)
 			return *gate + Direction::SouthEast; // one step back into town from the woods' edge
 		return GetTowner(TOWN_DRUNK)->position + Direction::SouthEast;
+	case SL_CUSTOM:
+		// Hand-made maps: back where the hero left (a custom town may have no Farnham).
+		return MyPlayer != nullptr ? Point(MyPlayer->position.tile) : ViewPosition;
 	default:
-		return GetTowner(TOWN_DRUNK)->position + Direction::SouthEast;
+		if (const Towner *drunk = GetTowner(TOWN_DRUNK); drunk != nullptr)
+			return drunk->position + Direction::SouthEast;
+		return ViewPosition;
 	}
 }
 

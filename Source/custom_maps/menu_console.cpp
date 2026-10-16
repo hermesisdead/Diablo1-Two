@@ -37,7 +37,9 @@ void Help()
 {
 	Print("Commands:");
 	Print("  maps\tlist your custom maps");
-	Print("  editor <name> [style]\topen or create a map (style: cathedral or town)");
+	Print("  editor <name> [style]\topen or create a map");
+	Print("    styles: cathedral, catacombs, caves, hell, town, wilds");
+	Print("    (wilds: the land outside a town, with monsters)");
 	Print("  editor tristram\tadd portals, doors and arrival points to Tristram");
 	Print("  play <name>\tplay a map with the editor's hero");
 	Print("  close\tclose this console (or press `)");
@@ -63,7 +65,7 @@ void Run(std::string_view line)
 			Print("No maps yet. Make one with: editor <name>");
 		for (const std::string &name : maps) {
 			std::expected<CustomMap, std::string> map = ReadCustomMap(name);
-			Print(map.has_value() ? StrCat("  ", name, "\t", MapStyleName(map->style), ", ", map->entries.size(), " arrival points, ", map->portals.size(), " portals/doors") : StrCat("  ", name, "   (unreadable)"));
+			Print(map.has_value() ? StrCat("  ", name, "\t", MapStyleName(map->style), ", ", map->entries.size(), " arrival points, ", map->portals.size(), " portals/doors", map->spawners.empty() && map->bosses.empty() ? std::string {} : StrCat(", ", map->spawners.size(), " packs, ", map->bosses.size(), " bosses")) : StrCat("  ", name, "   (unreadable)"));
 		}
 	} else if (cmd == "editor" || cmd == "play") {
 		if (args.size() < 2) {
@@ -82,8 +84,8 @@ void Run(std::string_view line)
 		dungeon_type style = DTYPE_CATHEDRAL;
 		if (args.size() >= 3) {
 			const std::optional<dungeon_type> parsed = ParseMapStyle(args[2]);
-			if (!parsed || (*parsed != DTYPE_CATHEDRAL && *parsed != DTYPE_TOWN)) {
-				Print("Unknown style. Available now: cathedral, town");
+			if (!parsed || !IsAnyOf(*parsed, DTYPE_CATHEDRAL, DTYPE_CATACOMBS, DTYPE_CAVES, DTYPE_HELL, DTYPE_TOWN, DTYPE_FOREST)) {
+				Print("Unknown style. Styles: cathedral, catacombs, caves, hell, town, wilds");
 				return;
 			}
 			style = *parsed;

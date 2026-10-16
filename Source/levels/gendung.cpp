@@ -321,6 +321,11 @@ void InitGlobals()
 
 } // namespace
 
+void InitLevelGlobals()
+{
+	InitGlobals();
+}
+
 #ifdef BUILD_TESTING
 std::optional<WorldTileSize> GetSizeForThemeRoom()
 {

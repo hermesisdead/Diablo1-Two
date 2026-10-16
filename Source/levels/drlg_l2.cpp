@@ -2856,4 +2856,51 @@ std::expected<void, std::string> LoadL2Dungeon(const char *path, Point spawn)
 	return {};
 }
 
+void BuildCatacombsFromFloorPlan(const uint8_t *floorPlan, uint16_t *tiles)
+{
+	// Floor plan to the generator's room sketch: floor, a one-tile wall around it, rock beyond.
+	InitDungeonFlags();
+	for (int y = 0; y < DMAXY; y++) {
+		for (int x = 0; x < DMAXX; x++) {
+			if (floorPlan[y * DMAXX + x] != 0)
+				predungeon[x][y] = '.';
+		}
+	}
+	for (int y = 0; y < DMAXY; y++) {
+		for (int x = 0; x < DMAXX; x++) {
+			if (predungeon[x][y] != ' ')
+				continue;
+			for (int dy = -1; dy <= 1 && predungeon[x][y] == ' '; dy++) {
+				for (int dx = -1; dx <= 1; dx++) {
+					const int nx = x + dx, ny = y + dy;
+					if (nx >= 0 && ny >= 0 && nx < DMAXX && ny < DMAXY && predungeon[nx][ny] == '.') {
+						predungeon[x][y] = '#';
+						break;
+					}
+				}
+			}
+		}
+	}
+	memset(dungeon, 12, sizeof(dungeon));
+	for (int j = 0; j < DMAXY; j++) {
+		for (int i = 0; i < DMAXX; i++)
+			DoPatternCheck(i, j);
+	}
+	FixTilesPatterns();
+	FixDirtTiles();
+	// The same variety on every rebuild, so tiles do not shuffle while painting.
+	SetRndSeed(0x5EED);
+	Substitution();
+	ApplyShadowsPatterns();
+	for (int y = 0; y < DMAXY; y++) {
+		for (int x = 0; x < DMAXX; x++)
+			tiles[y * DMAXX + x] = dungeon[x][y];
+	}
+}
+
+void RefreshCatacombsPieces()
+{
+	Pass3();
+}
+
 } // namespace devilution

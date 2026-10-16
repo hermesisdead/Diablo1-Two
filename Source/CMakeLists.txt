@@ -86,6 +86,7 @@ set(libdevilutionx_SRCS
   engine/render/dungeon_mood.cpp
   custom_maps/custom_map.cpp
   custom_maps/custom_town.cpp
+  custom_maps/map_monsters.cpp
   custom_maps/map_editor.cpp
   custom_maps/menu_console.cpp
   engine/render/gore_fx.cpp

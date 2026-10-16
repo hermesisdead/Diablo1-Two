@@ -5,6 +5,7 @@
  */
 #include "action_mode.hpp"
 #include "monster.h"
+#include "custom_maps/map_monsters.hpp"
 
 #include <algorithm>
 #include <array>
@@ -3317,6 +3318,35 @@ bool PosOkMovingMissile(Point position)
 
 } // namespace
 
+size_t LevelMonsterTypeIndex(_monster_id type)
+{
+	return GetMonsterTypeIndex(type);
+}
+
+Monster *PlaceMonsterAt(size_t typeIndex, Point position)
+{
+	if (ActiveMonsterCount >= MaxMonsters || typeIndex >= LevelMonsterTypeCount)
+		return nullptr;
+	const size_t index = ActiveMonsterCount;
+	PlaceMonster(ActiveMonsterCount++, typeIndex, position);
+	return &Monsters[index];
+}
+
+std::expected<Monster *, std::string> PlaceUniqueMonsterAt(size_t uniqueIndex, Point position, int minions)
+{
+	if (uniqueIndex >= UniqueMonstersData.size())
+		return std::unexpected("No such unique monster");
+	const UniqueMonsterData &data = UniqueMonstersData[uniqueIndex];
+	const size_t typeIndex = GetMonsterTypeIndex(data.mtype);
+	if (typeIndex >= LevelMonsterTypeCount || ActiveMonsterCount >= MaxMonsters - minions)
+		return nullptr;
+	PlaceMonster(ActiveMonsterCount, typeIndex, position);
+	Monster &monster = Monsters[ActiveMonsterCount];
+	ActiveMonsterCount++;
+	RETURN_IF_ERROR(PrepareUniqueMonst(monster, static_cast<UniqueMonsterType>(uniqueIndex), typeIndex, minions, data));
+	return &monster;
+}
+
 std::expected<size_t, std::string> AddMonsterType(_monster_id type, placeflag placeflag)
 {
 	const size_t typeIndex = GetMonsterTypeIndex(type);
@@ -3545,6 +3575,9 @@ std::expected<void, std::string> GetLevelMTypes()
 		if (setlvlnum == SL_FOREST) {
 			RETURN_IF_ERROR(AddForestMonsterTypes());
 		}
+		if (setlvlnum == SL_CUSTOM) {
+			RETURN_IF_ERROR(AddCustomMapMonsterTypes());
+		}
 	}
 	return {};
 }
@@ -3711,7 +3744,8 @@ void WeakenNaKrul()
 
 void InitGolems()
 {
-	if (!setlevel || setlvlnum == SL_FOREST || setlvlnum == SL_CUSTOM) {
+	// Custom maps loaded from a .dun file already reserved the golem slots (SetMapMonsters).
+	if (!setlevel || setlvlnum == SL_FOREST || (setlvlnum == SL_CUSTOM && ActiveMonsterCount == 0)) {
 		for (int i = 0; i < ReservedMonsterSlotsForGolems; i++)
 			AddMonster(GolemHoldingCell, Direction::South, 0, false);
 	}
@@ -3771,6 +3805,8 @@ std::expected<void, std::string> InitMonsters()
 			}
 		}
 	}
+	if (setlevel && setlvlnum == SL_CUSTOM)
+		RETURN_IF_ERROR(PlaceCustomMapMonsters());
 	for (int i = 0; i < nt; i++) {
 		for (int s = -2; s < 2; s++) {
 			for (int t = -2; t < 2; t++)

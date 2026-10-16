@@ -33,6 +33,8 @@ std::optional<WorldTileSize> GetSizeForThemeRoom();
 
 dungeon_type GetLevelType(int level);
 void CreateDungeon(uint32_t rseed, lvl_entry entry);
+/** @brief Clears the level's per-tile data and sets the default light and bounds (as the generators do). */
+void InitLevelGlobals();
 
 struct Miniset {
 	WorldTileSize size;
