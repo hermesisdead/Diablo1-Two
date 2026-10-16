@@ -31,6 +31,7 @@
 #include "class_skills.hpp"
 #include "panels/skill_tree.hpp"
 #include "panels/weather_panel.hpp"
+#include "custom_maps/custom_map.hpp"
 #include "levels/desert.hpp"
 #include "control/control.hpp"
 #include "cursor.h"
@@ -965,6 +966,10 @@ void RunGameLoop(interface_mode uMsg)
 				TravelByCaravan(true);
 			if (devCaptureFrames == 20 && std::getenv("DEVILUTIONX_DEV_FOREST") != nullptr && leveltype == DTYPE_TOWN)
 				EnterForest();
+			if (const char *customMap = std::getenv("DEVILUTIONX_DEV_CUSTOMMAP"); customMap != nullptr && devCaptureFrames == 20) {
+				if (std::expected<void, std::string> r = TravelToCustomMap(customMap, ""); !r.has_value())
+					LogError("Custom map: {}", r.error());
+			}
 			if (const char *check = std::getenv("DEVILUTIONX_DEV_ASSETCHECK"); check != nullptr && devCaptureFrames == 5) {
 				for (const std::string_view path : SplitByChar(check, ';')) {
 					const AssetRef ref = FindAsset(path);
@@ -1799,6 +1804,7 @@ void GameLogic()
 		return;
 	}
 	FreeMoveBeginTick();
+	UpdateCustomMapPortals();
 	if (gbProcessPlayers) {
 		gGameLogicStep = GameLogicStep::ProcessPlayers;
 		ProcessPlayers();
@@ -3647,7 +3653,7 @@ std::expected<void, std::string> LoadGameLevelSetLevel(bool firstflag, lvl_entry
 	IncProgress();
 
 	// The Darkwood is fresh on every visit (only a save made inside it restores its state).
-	if (firstflag || lvldir == ENTRY_LOAD || !myPlayer._pSLvlVisited[setlvlnum] || gbIsMultiplayer || setlvlnum == SL_FOREST) {
+	if (firstflag || lvldir == ENTRY_LOAD || !myPlayer._pSLvlVisited[setlvlnum] || gbIsMultiplayer || setlvlnum == SL_FOREST || setlvlnum == SL_CUSTOM) {
 		InitItems();
 		SavePreLighting();
 	} else {

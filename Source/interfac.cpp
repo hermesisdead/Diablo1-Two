@@ -122,6 +122,8 @@ Cutscenes PickCutscene(interface_mode uMsg)
 	case WM_DIABRTNLVL:
 		if (setlvlnum == SL_FOREST)
 			return CutTown;
+		if (setlvlnum == SL_CUSTOM)
+			return uMsg == WM_DIABSETLVL ? GetCutSceneFromLevelType(setlvltype) : CutTown;
 		if (setlvlnum == SL_BONECHAMB)
 			return CutLevel2;
 		if (setlvlnum == SL_VILEBETRAYER)

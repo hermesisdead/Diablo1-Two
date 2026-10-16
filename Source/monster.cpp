@@ -3711,7 +3711,7 @@ void WeakenNaKrul()
 
 void InitGolems()
 {
-	if (!setlevel || setlvlnum == SL_FOREST) {
+	if (!setlevel || setlvlnum == SL_FOREST || setlvlnum == SL_CUSTOM) {
 		for (int i = 0; i < ReservedMonsterSlotsForGolems; i++)
 			AddMonster(GolemHoldingCell, Direction::South, 0, false);
 	}

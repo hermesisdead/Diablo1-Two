@@ -1,5 +1,7 @@
 #include "levels/setmaps.h"
 
+#include "custom_maps/custom_map.hpp"
+
 #include <cstdint>
 #include <expected>
 
@@ -38,6 +40,7 @@ const char *const QuestLevelNames[] = {
 	N_("Hell Arena"),
 	N_("Circle of Life Arena"),
 	N_("The Darkwood"),
+	N_("Custom Area"),
 };
 
 namespace {
@@ -174,6 +177,9 @@ std::expected<void, std::string> LoadSetMap()
 		break;
 	case SL_ARENA_CIRCLE_OF_LIFE:
 		RETURN_IF_ERROR(LoadArenaMap("arena\\circle_of_death.dun", { 30, 26 }, { 29, 26 }));
+		break;
+	case SL_CUSTOM:
+		RETURN_IF_ERROR(LoadActiveCustomMapLevel());
 		break;
 	case SL_NONE:
 #ifdef _DEBUG

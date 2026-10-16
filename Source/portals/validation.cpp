@@ -5,6 +5,7 @@
  */
 
 #include "portals/validation.hpp"
+#include "custom_maps/custom_map.hpp"
 
 #include <cstdint>
 
@@ -30,6 +31,8 @@ dungeon_type GetSetLevelType(_setlevels setLevel)
 {
 	if (setLevel == SL_FOREST)
 		return DTYPE_FOREST;
+	if (setLevel == SL_CUSTOM)
+		return ActiveCustomMap() != nullptr ? ActiveCustomMap()->style : DTYPE_CATHEDRAL;
 	const bool isArenaLevel = setLevel >= SL_FIRST_ARENA && setLevel <= SL_LAST_ARENA;
 	return isArenaLevel ? GetArenaLevelType(setLevel) : GetQuestLevelType(setLevel);
 }

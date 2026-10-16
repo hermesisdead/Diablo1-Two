@@ -60,10 +60,12 @@ enum _setlevels : int8_t {
 
 	/** Endless, level-scaled forest beyond Tristram (single player). */
 	SL_FOREST,
+	/** A hand-made map from the map editor (see custom_maps/custom_map.hpp). */
+	SL_CUSTOM,
 
 	SL_FIRST_ARENA = SL_ARENA_CHURCH,
 	SL_LAST_ARENA = SL_ARENA_CIRCLE_OF_LIFE,
-	SL_LAST = SL_FOREST,
+	SL_LAST = SL_CUSTOM,
 };
 
 inline bool IsArenaLevel(_setlevels setLevel)

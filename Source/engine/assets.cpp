@@ -194,7 +194,8 @@ AssetRef FindAsset(std::string_view filename)
 	std::replace(relativePath.begin(), relativePath.end(), '\\', '/');
 #endif
 
-	if (relativePath[0] == '/') {
+	// Absolute paths (custom maps written by the map editor), also with a Windows drive letter.
+	if (relativePath[0] == '/' || (relativePath.size() > 2 && relativePath[1] == ':' && (relativePath[2] == '\\' || relativePath[2] == '/'))) {
 		result.directHandle = SDL_IOFromFile(relativePath.c_str(), "rb");
 		if (result.directHandle != nullptr) {
 			return result;

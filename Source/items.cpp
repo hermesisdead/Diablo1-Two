@@ -414,6 +414,9 @@ int ItemsGetCurrlevel()
 		case SL_FOREST:
 			// Ground loot and wave rewards follow the hero's forest tier.
 			return std::max<int>(1, MyPlayer != nullptr ? MyPlayer->forestTier : 1);
+		case SL_CUSTOM:
+			// Hand-made areas drop loot for the hero's level.
+			return std::max<int>(1, MyPlayer != nullptr ? MyPlayer->getCharacterLevel() : 1);
 		default:
 			return 1;
 		}
