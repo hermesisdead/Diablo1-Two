@@ -82,6 +82,7 @@ set(libdevilutionx_SRCS
 
   engine/render/automap_render.cpp
   engine/render/scrollrt.cpp
+  engine/render/color_overlay.cpp
   engine/render/dungeon_mood.cpp
   action_mode.cpp
   free_move.cpp

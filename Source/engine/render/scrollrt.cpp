@@ -53,6 +53,7 @@
 #include "minitext.h"
 #include "missiles.h"
 #include "nthread.h"
+#include "engine/render/color_overlay.hpp"
 #include "engine/render/dungeon_mood.hpp"
 #include "levels/forest.hpp"
 #include "action_mode.hpp"
@@ -1899,6 +1900,7 @@ void DrawAndBlit()
 
 	const Surface &out = GlobalBackBuffer();
 	UndrawCursor(out);
+	ColorOverlayBeginFrame();
 
 	nthread_UpdateProgressToNextGameTick();
 
@@ -1969,6 +1971,7 @@ void DrawAndBlit()
 	}
 
 	RenderPresent();
+	ColorOverlayEndFrame();
 }
 
 } // namespace devilution

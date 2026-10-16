@@ -32,6 +32,7 @@
 
 #include "engine/backbuffer_state.hpp"
 #include "engine/dx.h"
+#include "engine/render/color_overlay.hpp"
 #include "engine/palette.h"
 #include "engine/render/scrollrt.h"
 #include "utils/file_util.h"
@@ -93,20 +94,23 @@ void CaptureScreen()
 		SDL_ClearError();
 		return;
 	}
+	RedrawEverything(); // the whole frame must be copied to the output for the composited capture
 	DrawAndBlit();
+
+	// Saved before the red flash: with full-colour effects on screen the composited frame is saved
+	// (the flash overwrites it), otherwise the 8-bit frame.
+	const std::expected<void, std::string> result =
+#if DEVILUTIONX_SCREENSHOT_FORMAT == DEVILUTIONX_SCREENSHOT_FORMAT_PCX
+	    WriteSurfaceToFilePcx(GlobalBackBuffer(), outStream);
+#elif DEVILUTIONX_SCREENSHOT_FORMAT == DEVILUTIONX_SCREENSHOT_FORMAT_PNG
+	    WriteSurfaceToFilePng(ColorOverlayShownSurface() != nullptr ? Surface(ColorOverlayShownSurface()) : GlobalBackBuffer(), outStream);
+#endif
 
 	const std::array<SDL_Color, 256> origSystemPalette = system_palette;
 	RedPalette();
 
 	system_palette = origSystemPalette;
 	SystemPaletteUpdated();
-
-	const std::expected<void, std::string> result =
-#if DEVILUTIONX_SCREENSHOT_FORMAT == DEVILUTIONX_SCREENSHOT_FORMAT_PCX
-	    WriteSurfaceToFilePcx(GlobalBackBuffer(), outStream);
-#elif DEVILUTIONX_SCREENSHOT_FORMAT == DEVILUTIONX_SCREENSHOT_FORMAT_PNG
-	    WriteSurfaceToFilePng(GlobalBackBuffer(), outStream);
-#endif
 
 	if (!result.has_value()) {
 		LogError("Failed to save screenshot at {}: ", fileName, result.error());

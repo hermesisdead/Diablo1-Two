@@ -568,6 +568,8 @@ struct GraphicsOptions : OptionCategoryBase {
 	OptionEntryBoolean townWeather;
 	/** @brief Randomized per-level atmosphere (fog, dust, embers...) in dungeons. */
 	OptionEntryBoolean dungeonMoods;
+	/** @brief Weather and mood effects with real transparency instead of a dither pattern. */
+	OptionEntryBoolean smoothEffects;
 	/** @brief Per-level colour variation in dungeons. */
 	OptionEntryBoolean dungeonColorVariation;
 	/** @brief Use alternate nest palette. */

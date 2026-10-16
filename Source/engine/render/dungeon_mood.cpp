@@ -17,6 +17,7 @@
 
 #include "engine/lighting_defs.hpp"
 #include "engine/palette.h"
+#include "engine/render/color_overlay.hpp"
 #include "engine/render/orbit_view.hpp"
 #include "engine/render/scrollrt.h"
 #include "engine/sound.h"
@@ -113,6 +114,8 @@ std::vector<Drop> drops;
 std::vector<Splash> splashes;
 std::vector<Splash> rainSplashes;
 uint64_t rngState = 1;
+/** Effects go to the full-colour overlay this frame (real transparency instead of dithering). */
+bool overlayOn = false;
 uint32_t lastTicks = 0;
 float clockSeconds = 0;
 
@@ -822,20 +825,76 @@ struct Projector {
 	}
 };
 
-void Blend(const Surface &out, Point p, uint8_t color)
+void Blend(const Surface &out, Point p, uint8_t color, float alpha = 0.5f)
 {
+	if (overlayOn) {
+		ColorOverlayOver(p.x, p.y, OverlayPaletteColor(color), alpha);
+		return;
+	}
 	uint8_t *pix = out.at(p.x, p.y);
 	*pix = paletteTransparencyLookup[*pix][color];
 }
 
-void Put(const Surface &out, Point p, uint8_t color)
+void Put(const Surface &out, Point p, uint8_t color, float alpha = 0.95f)
 {
+	if (overlayOn) {
+		ColorOverlayOver(p.x, p.y, OverlayPaletteColor(color), alpha);
+		return;
+	}
 	*out.at(p.x, p.y) = color;
 }
 
-/** A small glowing dot: solid core, blended halo for larger sizes. */
-void DrawDot(const Projector &pr, const OrbitScreenPoint &sp, int size, uint8_t core, uint8_t halo, bool solid)
+/** Adds light at a pixel (glows); falls back to a blend in palette mode. */
+void Glow(const Surface &out, Point p, uint8_t color, float amount)
 {
+	if (overlayOn) {
+		ColorOverlayAdd(p.x, p.y, OverlayPaletteColor(color), amount);
+		return;
+	}
+	if (amount > 0.3f)
+		Blend(out, p, color);
+}
+
+/**
+ * A soft dot with real transparency: core plus a halo that fades out. Glowing dots (embers,
+ * fireflies) add light around them instead of covering.
+ */
+void DrawSoftDot(const Projector &pr, const OrbitScreenPoint &sp, int size, uint8_t core, uint8_t halo, bool solid, bool glow, float strength)
+{
+	// A round core that fades at its rim, inside a halo that fades to nothing.
+	const float coreRadius = std::max(0.5f, size * 0.38f);
+	const float radius = coreRadius + (glow ? 3.5f : 1.4f);
+	const int r = static_cast<int>(std::ceil(radius));
+	const float peak = (solid ? 0.9f : 0.65f) * strength;
+	for (int dy = -r; dy <= r; dy++) {
+		for (int dx = -r; dx <= r; dx++) {
+			const Point p { sp.pos.x + dx, sp.pos.y + dy };
+			const float d = std::sqrt(static_cast<float>(dx * dx + dy * dy));
+			if (d >= radius || !pr.Visible(p, sp.depth))
+				continue;
+			const float coreShare = std::clamp((coreRadius + 0.7f - d) / 1.2f, 0.0f, 1.0f);
+			const float t = d / radius;
+			const float fall = (1.0f - t) * (1.0f - t);
+			if (glow) {
+				Glow(pr.out, p, halo, 0.85f * fall * strength);
+				if (coreShare > 0)
+					Glow(pr.out, p, core, 0.8f * coreShare * strength);
+			} else {
+				Blend(pr.out, p, halo, 0.3f * fall * strength);
+				if (coreShare > 0)
+					Put(pr.out, p, core, peak * coreShare);
+			}
+		}
+	}
+}
+
+/** A small glowing dot: solid core, blended halo for larger sizes. */
+void DrawDot(const Projector &pr, const OrbitScreenPoint &sp, int size, uint8_t core, uint8_t halo, bool solid, bool glow = false, float strength = 1.0f)
+{
+	if (overlayOn) {
+		DrawSoftDot(pr, sp, size, core, halo, solid, glow, strength);
+		return;
+	}
 	const int r = size / 2;
 	for (int dy = -r; dy <= r; dy++) {
 		for (int dx = -r; dx <= r; dx++) {
@@ -862,6 +921,13 @@ void DrawLine(const Projector &pr, const OrbitScreenPoint &a, const OrbitScreenP
 		const Point p { a.pos.x + dx * i / steps, a.pos.y + dy * i / steps };
 		if (!pr.Visible(p, a.depth))
 			continue;
+		if (overlayOn) {
+			// Streaks fade from the head to the tail.
+			const float t = static_cast<float>(i) / static_cast<float>(steps);
+			const float alpha = solidHead ? 0.9f - 0.35f * t : 0.6f * (1.0f - t) + 0.08f;
+			Blend(pr.out, p, color, alpha);
+			continue;
+		}
 		if (i == 0 && solidHead)
 			Put(pr.out, p, color);
 		else
@@ -870,8 +936,13 @@ void DrawLine(const Projector &pr, const OrbitScreenPoint &a, const OrbitScreenP
 }
 
 /** Blends a share (0..1) of all pixels with a colour using an ordered dither. */
-void Wash(const Surface &out, uint8_t color, float fraction)
+void Wash(const Surface &out, uint8_t color, float fraction, bool last = false)
 {
+	if (overlayOn) {
+		// The dither covered `fraction` of the pixels with a 50% blend.
+		ColorOverlayWash(OverlayPaletteColor(color), std::clamp(fraction, 0.0f, 1.0f) * 0.5f, last);
+		return;
+	}
 	const int threshold = static_cast<int>(std::clamp(fraction, 0.0f, 1.0f) * 16.0f);
 	if (threshold <= 0)
 		return;
@@ -889,8 +960,57 @@ void Wash(const Surface &out, uint8_t color, float fraction)
 // ---------------------------------------------------------------------------------------------
 // Fog
 
+/** How much of the colour one unit of fog thickness lays over the scene in full-colour mode. */
+constexpr float FogAlpha = 0.55f;
+
+/** Full-colour fog: thickness sampled on a coarse grid and smoothly interpolated per pixel. */
+void DrawFogClassicOverlay(const Projector &pr, uint8_t color, float density)
+{
+	const Surface &out = pr.out;
+	ColorOverlaySetFogColor(OverlayPaletteColor(color));
+	constexpr int Grid = 8;
+	const int gw = out.w() / Grid + 2, gh = out.h() / Grid + 2;
+	static std::vector<float> grid;
+	grid.assign(static_cast<size_t>(gw) * gh, 0.0f);
+	bool any = false;
+	for (int gy = 0; gy < gh; gy++) {
+		for (int gx = 0; gx < gw; gx++) {
+			float wx, wy;
+			pr.Unproject(static_cast<float>(gx * Grid), static_cast<float>(gy * Grid), wx, wy);
+			const float light = SmoothLight(wx, wy);
+			if (light <= 0.05f)
+				continue;
+			const float n = FogNoise(wx, wy, clockSeconds) * density * std::pow(light, 1.3f);
+			grid[static_cast<size_t>(gy) * gw + gx] = std::min(0.85f, n * FogAlpha);
+			any = any || n > 0;
+		}
+	}
+	if (!any)
+		return;
+	constexpr float Inv = 1.0f / Grid;
+	for (int y = 0; y < out.h(); y++) {
+		const int gy = y / Grid;
+		const float ty = (y - gy * Grid) * Inv;
+		const float *row0 = &grid[static_cast<size_t>(gy) * gw];
+		const float *row1 = row0 + gw;
+		for (int x = 0; x < out.w(); x++) {
+			const int gx = x / Grid;
+			const float tx = (x - gx * Grid) * Inv;
+			const float top = row0[gx] + (row0[gx + 1] - row0[gx]) * tx;
+			const float bottom = row1[gx] + (row1[gx + 1] - row1[gx]) * tx;
+			const float a = top + (bottom - top) * ty;
+			if (a > 0.004f)
+				ColorOverlaySetFog(x, y, a);
+		}
+	}
+}
+
 void DrawFogClassic(const Projector &pr, uint8_t color, float density)
 {
+	if (overlayOn) {
+		DrawFogClassicOverlay(pr, color, density);
+		return;
+	}
 	const Surface &out = pr.out;
 	const uint8_t *const lookup = paletteTransparencyLookup[color];
 	constexpr int Block = 4;
@@ -925,6 +1045,8 @@ void DrawFogOrbit(const Projector &pr, uint8_t color, float density)
 {
 	const Surface &out = pr.out;
 	const uint8_t *const lookup = paletteTransparencyLookup[color];
+	if (overlayOn)
+		ColorOverlaySetFogColor(OverlayPaletteColor(color));
 	float px, py;
 	PlayerWorld(px, py);
 	constexpr int Radius = 12;
@@ -964,6 +1086,13 @@ void DrawFogOrbit(const Projector &pr, uint8_t color, float density)
 					const float d2 = fx * fx + fy * fy;
 					if (d2 >= 1.0f)
 						continue;
+					if (overlayOn) {
+						// Each puff lays a soft-edged share of fog; overlapping puffs build up.
+						const float a = n * nearHero * (1.0f - d2) * FogAlpha * 1.1f;
+						if (a > 0.004f && OrbitSceneVisible({ x, y }, sp->depth))
+							ColorOverlayAddFog(x, y, a);
+						continue;
+					}
 					// Overlapping puffs: each one contributes a soft-edged share of the dither.
 					const int threshold = static_cast<int>(n * nearHero * (1.0f - d2) * 20.0f);
 					if (bayerRow[x & 3] >= threshold)
@@ -1010,7 +1139,7 @@ void DrawParticles(const Projector &pr)
 				core = colors.bloodMote;
 			else
 				core = PAL16_GRAY + (glow > 0.7f ? 1 : 4);
-			DrawDot(pr, *sp, size, core, core, glow > 0.6f);
+			DrawDot(pr, *sp, size, core, core, glow > 0.6f, false, std::min(1.0f, glow * 1.2f));
 			break;
 		}
 		case DungeonMood::Frost: {
@@ -1018,7 +1147,7 @@ void DrawParticles(const Projector &pr)
 			if (light < 0.2f)
 				continue;
 			const bool sparkle = std::sin(p.phase * 5.0f + p.x) > 0.75f;
-			DrawDot(pr, *sp, sparkle ? size + 1 : size, sparkle ? colors.white : PAL16_BLUE + 1, PAL16_BLUE + 3, sparkle);
+			DrawDot(pr, *sp, sparkle ? size + 1 : size, sparkle ? colors.white : PAL16_BLUE + 1, PAL16_BLUE + 3, sparkle, sparkle, light);
 			break;
 		}
 		case DungeonMood::Embers: {
@@ -1027,7 +1156,7 @@ void DrawParticles(const Projector &pr)
 				continue;
 			const float heat = p.life / p.maxLife;
 			const uint8_t core = heat > 0.6f ? PAL8_YELLOW : (heat > 0.3f ? PAL16_ORANGE + 2 : PAL16_RED + 4);
-			DrawDot(pr, *sp, std::max(size, 2) + 1, core, heat > 0.5f ? PAL16_ORANGE + 2 : PAL16_ORANGE + 6, true);
+			DrawDot(pr, *sp, std::max(size, 2) + 1, core, heat > 0.5f ? PAL16_ORANGE + 2 : PAL16_ORANGE + 6, true, true, 0.5f + 0.5f * heat);
 			break;
 		}
 		case DungeonMood::Rain:
@@ -1054,7 +1183,7 @@ void DrawParticles(const Projector &pr)
 				continue;
 			if (p.kind == 1) {
 				const bool hot = std::sin(p.phase * 3.0f) > 0;
-				DrawDot(pr, *sp, std::max(size, 2), hot ? PAL16_ORANGE + 2 : PAL16_RED + 4, PAL16_ORANGE + 6, true);
+				DrawDot(pr, *sp, std::max(size, 2), hot ? PAL16_ORANGE + 2 : PAL16_RED + 4, PAL16_ORANGE + 6, true, true);
 			} else {
 				const bool dark = (static_cast<int>(p.rate * 10.0f) & 1) != 0;
 				DrawDot(pr, *sp, std::max(size, 2), dark ? colors.ashDark : colors.ash, colors.ashDark, true);
@@ -1088,7 +1217,7 @@ void DrawParticles(const Projector &pr)
 			const float glow = s * s * s * s * lifeFade;
 			if (glow < 0.15f)
 				continue;
-			DrawDot(pr, *sp, glow > 0.6f ? std::max(size, 2) + 2 : std::max(size, 2), colors.fireflyCore, colors.fireflyHalo, glow > 0.4f);
+			DrawDot(pr, *sp, glow > 0.6f ? std::max(size, 2) + 2 : std::max(size, 2), colors.fireflyCore, colors.fireflyHalo, glow > 0.4f, true, glow);
 			break;
 		}
 		case DungeonMood::Spores: {
@@ -1099,7 +1228,7 @@ void DrawParticles(const Projector &pr)
 			const float pulse = (0.5f + 0.5f * std::sin(p.phase * 1.9f)) * lifeFade;
 			if (pulse < 0.2f)
 				continue;
-			DrawDot(pr, *sp, pulse > 0.7f ? std::max(size, 2) + 1 : std::max(size, 2), colors.sporeCore, colors.sporeHalo, pulse * (0.5f + 0.5f * light) > 0.45f);
+			DrawDot(pr, *sp, pulse > 0.7f ? std::max(size, 2) + 1 : std::max(size, 2), colors.sporeCore, colors.sporeHalo, pulse * (0.5f + 0.5f * light) > 0.45f, true, pulse * (0.5f + 0.5f * light));
 			break;
 		}
 		default:
@@ -1227,6 +1356,7 @@ void DrawDungeonMood(const Surface &out)
 		UpdateDrips(dt);
 
 	const Projector pr(out);
+	overlayOn = ColorOverlayBegin(out);
 	// Rain clouds darken the day.
 	if (currentMood == DungeonMood::Storm)
 		Wash(out, colors.black, 0.30f * fade);
@@ -1247,7 +1377,10 @@ void DrawDungeonMood(const Surface &out)
 	if (currentMood == DungeonMood::Drips)
 		DrawDrips(pr);
 	if (flashTime >= 0)
-		Wash(out, colors.white, FlashBrightness(flashTime) * 0.7f);
+		Wash(out, colors.white, FlashBrightness(flashTime) * 0.7f, /*last=*/true);
+	if (overlayOn)
+		ColorOverlayFinish();
+	overlayOn = false;
 }
 
 } // namespace devilution

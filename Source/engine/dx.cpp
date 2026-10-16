@@ -27,6 +27,7 @@
 #include "headless_mode.hpp"
 #include "init.hpp"
 #include "options.h"
+#include "engine/render/color_overlay.hpp"
 #include "utils/display.h"
 #include "utils/log.hpp"
 #include "utils/sdl_wrap.h"
@@ -199,11 +200,19 @@ void Blit(SDL_Surface *src, SDL_Rect *srcRect, SDL_Rect *dstRect)
 		return;
 
 	SDL_Surface *dst = GetOutputSurface();
+#if !defined(USE_SDL1)
+	// SDL clips the rectangles in place, so keep the requested ones for the colour overlay.
+	SDL_Rect requestedSrc, requestedDst;
+	if (srcRect != nullptr) requestedSrc = *srcRect;
+	if (dstRect != nullptr) requestedDst = *dstRect;
+#endif
 #if defined(USE_SDL3)
 	if (!SDL_BlitSurface(src, srcRect, dst, dstRect)) ErrSdl();
+	ColorOverlayComposite(src, srcRect != nullptr ? &requestedSrc : nullptr, dst, dstRect != nullptr ? &requestedDst : nullptr);
 #elif !defined(USE_SDL1)
 	if (SDL_BlitSurface(src, srcRect, dst, dstRect) < 0)
 		ErrSdl();
+	ColorOverlayComposite(src, srcRect != nullptr ? &requestedSrc : nullptr, dst, dstRect != nullptr ? &requestedDst : nullptr);
 #else
 	if (!OutputRequiresScaling()) {
 		if (SDL_BlitSurface(src, srcRect, dst, dstRect) < 0)
