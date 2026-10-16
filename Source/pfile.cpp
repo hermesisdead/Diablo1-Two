@@ -776,6 +776,8 @@ bool pfile_ui_save_create(_uiheroinfo *heroinfo)
 		SaveHotkeys(saveWriter, player);
 		SaveClassSkills(saveWriter, player);
 		SaveHeroItems(saveWriter, player);
+		// The map editor's own hero stays out of the campaign's start town (it opens maps itself).
+		SaveNewHeroCampaign(saveWriter, saveNum != MapEditorHeroSlot);
 	}
 
 	return true;
@@ -807,6 +809,8 @@ void pfile_read_player_from_save(uint32_t saveNum, Player &player)
 	}
 
 	UnPackPlayer(pkplr, player);
+	if (!gbVanilla && saveNum == gSaveNumber)
+		LoadCampaignState(saveNum);
 	LoadHeroItems(player);
 	RemoveAllInvalidItems(player);
 	CalcPlrInv(player, false);

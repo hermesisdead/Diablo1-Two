@@ -1,8 +1,8 @@
 /**
  * @file custom_maps/menu_console.hpp
  *
- * A small command console on the main menu, opened with the ` key: `help`, `maps`,
- * `editor <name> [style]` and `play <name>`.
+ * The Campaign Editor menu on the main menu, opened with the ` key: make or open a campaign,
+ * set its title, description and start town, and make, edit or play its maps.
  */
 #pragma once
 

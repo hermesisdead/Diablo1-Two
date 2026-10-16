@@ -841,8 +841,64 @@ void UiClearScreen()
 
 void (*UiExtraRender)() = nullptr;
 
+#ifdef _DEBUG
+namespace {
+/** Test hook: DEVILUTIONX_DEV_UIKEYS = menu keys, one every 25 frames: R Return, D Down, U Up,
+ * E Escape, S screenshot (BMP to DEVILUTIONX_DEV_UISHOT, numbered). */
+bool DevShotPending = false;
+
+void DevUiShot()
+{
+	static int shots = 0;
+	if (!DevShotPending)
+		return;
+	DevShotPending = false;
+	if (const char *shot = std::getenv("DEVILUTIONX_DEV_UISHOT"); shot != nullptr)
+		SDL_SaveBMP(DiabloUiSurface(), StrCat(shot, ++shots, ".bmp").c_str());
+}
+
+void DevUiKeys()
+{
+	static const char *keys = std::getenv("DEVILUTIONX_DEV_UIKEYS");
+	static size_t pos = 0;
+	static int frames = 0;
+	if (keys == nullptr || keys[pos] == '\0' || ++frames % 25 != 0)
+		return;
+	const char k = keys[pos++];
+	if (k == ',')
+		return;
+	if (k == 'S') {
+		DevShotPending = true; // once this frame is drawn
+		return;
+	}
+	SDL_Scancode sc = SDL_SCANCODE_RETURN;
+	SDL_Keycode key = SDLK_RETURN;
+	if (k == 'D') { sc = SDL_SCANCODE_DOWN; key = SDLK_DOWN; }
+	else if (k == 'U') { sc = SDL_SCANCODE_UP; key = SDLK_UP; }
+	else if (k == 'E') { sc = SDL_SCANCODE_ESCAPE; key = SDLK_ESCAPE; }
+	for (const bool down : { true, false }) {
+		SDL_Event event {};
+		event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+#ifdef USE_SDL3
+		event.key.scancode = sc;
+		event.key.key = key;
+		event.key.down = down;
+#else
+		event.key.keysym.scancode = sc;
+		event.key.keysym.sym = key;
+		event.key.state = down ? SDL_PRESSED : SDL_RELEASED;
+#endif
+		SDLC_PushEvent(&event);
+	}
+}
+} // namespace
+#endif
+
 void UiPollAndRender(std::optional<tl::function_ref<bool(SDL_Event &)>> eventHandler)
 {
+#ifdef _DEBUG
+	DevUiKeys();
+#endif
 	SDL_Event event;
 	while (PollEvent(&event)) {
 		if (eventHandler && (*eventHandler)(event))
@@ -858,6 +914,9 @@ void UiPollAndRender(std::optional<tl::function_ref<bool(SDL_Event &)>> eventHan
 	UiRenderListItems();
 	if (UiExtraRender != nullptr)
 		UiExtraRender();
+#ifdef _DEBUG
+	DevUiShot();
+#endif
 	DrawMouse();
 	UiFadeIn();
 

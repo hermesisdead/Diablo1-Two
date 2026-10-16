@@ -1,5 +1,6 @@
 #include "custom_maps/custom_map.hpp"
 #include "custom_maps/custom_town.hpp"
+#include "custom_maps/campaign.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -240,7 +241,11 @@ const MapEntryPoint *CustomMap::FindEntry(std::string_view entryName) const
 
 std::string CustomMapsDirectory()
 {
-	return StrCat(paths::BasePath(), "mods" DIRECTORY_SEPARATOR_STR "custommaps" DIRECTORY_SEPARATOR_STR "maps" DIRECTORY_SEPARATOR_STR);
+	// Maps belong to a campaign; Diablo: Original has none (an empty folder name nothing is found in).
+	const std::string campaign = ActiveCampaignDirectory();
+	if (campaign.empty())
+		return StrCat(paths::BasePath(), "mods" DIRECTORY_SEPARATOR_STR "custommaps" DIRECTORY_SEPARATOR_STR "original" DIRECTORY_SEPARATOR_STR);
+	return StrCat(campaign, "maps" DIRECTORY_SEPARATOR_STR);
 }
 
 bool IsValidMapName(std::string_view name)
@@ -345,7 +350,8 @@ std::expected<void, std::string> WriteCustomMap(const CustomMap &map)
 
 std::string TristramLayerPath()
 {
-	return StrCat(paths::BasePath(), "mods" DIRECTORY_SEPARATOR_STR "custommaps" DIRECTORY_SEPARATOR_STR "tristram.ini");
+	const std::string campaign = ActiveCampaignDirectory();
+	return campaign.empty() ? std::string {} : campaign + "tristram.ini";
 }
 
 CustomMap ReadTristramLayer()
@@ -354,8 +360,10 @@ CustomMap ReadTristramLayer()
 	layer.name = std::string(TristramLayerName);
 	layer.style = DTYPE_TOWN;
 	layer.Resize(40, 40);
-	if (std::expected<std::string, std::string> meta = ReadWholeFile(TristramLayerPath()); meta.has_value())
-		ParseMeta(*meta, layer);
+	if (const std::string path = TristramLayerPath(); !path.empty()) {
+		if (std::expected<std::string, std::string> meta = ReadWholeFile(path); meta.has_value())
+			ParseMeta(*meta, layer);
+	}
 	layer.name = std::string(TristramLayerName);
 	layer.style = DTYPE_TOWN;
 	return layer;
@@ -363,7 +371,9 @@ CustomMap ReadTristramLayer()
 
 std::expected<void, std::string> WriteTristramLayer(const CustomMap &layer)
 {
-	const std::string dir = StrCat(paths::BasePath(), "mods" DIRECTORY_SEPARATOR_STR "custommaps" DIRECTORY_SEPARATOR_STR);
+	const std::string dir = ActiveCampaignDirectory();
+	if (dir.empty())
+		return std::unexpected("Open a campaign first: Diablo: Original keeps Tristram as it is.");
 	RecursivelyCreateDir(dir.c_str());
 	std::string meta = "# Tristram's own layer (map editor): portals, doors and arrival points added to the town.\n"
 	                   "# Positions are world tiles in the classic layout; each one follows its nearest building.\n";

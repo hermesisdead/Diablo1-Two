@@ -11,6 +11,7 @@
 
 #include "control/control.hpp"
 #include "cursor.h"
+#include "custom_maps/campaign.hpp"
 #include "custom_maps/custom_map.hpp"
 #include "custom_maps/custom_town.hpp"
 #include "custom_maps/map_monsters.hpp"
@@ -1029,6 +1030,7 @@ void ExitEditor()
 	SetTristramLayerForEditor(nullptr);
 	SetCurrentCustomTown({});
 	gamemenu_exit_game(true);
+	ReturnToMainMenu = true; // straight back to the Campaign Editor, not the hero list
 }
 
 /** Fills a town-tiled map with a meadow, woods around its edge. */
@@ -1442,6 +1444,7 @@ void StartQueuedMapEditor()
 	_uiheroinfo info {};
 	info.saveNumber = MapEditorHeroSlot;
 	CopyUtf8(info.name, "Map Editor", sizeof(info.name));
+	SetNewHeroCampaign(ActiveCampaign()); // the editor's hero works in the open campaign
 	info.heroclass = HeroClass::Warrior;
 	if (Players.empty())
 		Players.resize(MAX_PLRS);
@@ -1545,6 +1548,8 @@ void MapEditorTick()
 					S.map.portals.push_back(portal);
 				} else if (w[0] == "save")
 					SaveMap();
+				else if (w[0] == "exit")
+					ExitEditor();
 				else if (w[0] == "test")
 					ToggleTest();
 				else if (w[0] == "cam" && n.size() >= 3)

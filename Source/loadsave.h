@@ -45,6 +45,10 @@ void SaveClassSkills(SaveWriter &saveWriter, const Player &player);
 /** @brief The hero's current custom town (map editor towns), kept in its own save entry. */
 void LoadCustomTownState();
 void SaveCustomTownState(SaveWriter &saveWriter);
+/** @brief Reads a hero's campaign and town (custom maps) from their save. */
+void LoadCampaignState(uint32_t saveNum);
+/** @brief A new hero: the campaign chosen in "Start in..." and, if wanted, its start town. */
+void SaveNewHeroCampaign(SaveWriter &saveWriter, bool startInItsTown);
 void SaveHeroItems(SaveWriter &saveWriter, Player &player);
 void SaveGameData(SaveWriter &saveWriter);
 void SaveGame();

@@ -25,6 +25,7 @@
 #include "DiabloUI/ui_flags.hpp"
 #include "DiabloUI/ui_item.h"
 #include "controls/control_mode.hpp"
+#include "custom_maps/campaign.hpp"
 #include "engine/assets.hpp"
 #include "engine/point.hpp"
 #include "game_mode.hpp"
@@ -269,6 +270,10 @@ bool ShouldPrefillHeroName()
 #if defined(PREFILL_PLAYER_NAME)
 	return true;
 #else
+#ifdef _DEBUG
+	if (std::getenv("DEVILUTIONX_DEV_UIKEYS") != nullptr)
+		return true; // test hook: menus driven by keys get a name
+#endif
 	return ControlMode != ControlTypes::KeyboardAndMouse;
 #endif
 }
@@ -332,6 +337,65 @@ void SelheroClassSelectorEsc()
 	SelheroListEsc();
 }
 
+std::vector<Campaign> StartInCampaigns;
+
+void SelheroCreateHero()
+{
+	if (gfnHeroCreate(&selhero_heroInfo)) {
+		SelheroLoadSelect(1);
+		return;
+	}
+	UiErrorOkDialog(_(/* TRANSLATORS: Error Message */ "Unable to create character."), vecSelHeroDialog);
+	memset(selhero_heroInfo.name, '\0', sizeof(selhero_heroInfo.name));
+	SelheroListSelect(selhero_SaveCount);
+}
+
+void SelheroStartInSelect(size_t value)
+{
+	const int choice = vecSelHeroDlgItems[value]->m_value - 100;
+	SetNewHeroCampaign(choice <= 0 || choice > static_cast<int>(StartInCampaigns.size()) ? std::string {} : StartInCampaigns[choice - 1].id);
+	SelheroCreateHero();
+}
+
+void SelheroStartInEsc()
+{
+	SetNewHeroCampaign({});
+	SelheroListSelect(selhero_SaveCount);
+}
+
+/** "Start in...": Diablo: Original or one of the installed campaigns (single player only). */
+void SelheroStartIn()
+{
+	StartInCampaigns = selhero_isMultiPlayer ? std::vector<Campaign> {} : ListCampaigns();
+	if (StartInCampaigns.empty()) {
+		SetNewHeroCampaign({});
+		SelheroCreateHero();
+		return;
+	}
+	const Point uiPosition = GetUIRectangle().position;
+	vecSelDlgItems.clear();
+	const SDL_Rect rect1 = { (Sint16)(uiPosition.x + 242), (Sint16)(uiPosition.y + 211), 365, 33 };
+	vecSelDlgItems.push_back(std::make_unique<UiArtText>(_("Start in...").data(), rect1, UiFlags::AlignCenter | UiFlags::FontSize30 | UiFlags::ColorUiSilver, 3));
+
+	vecSelHeroDlgItems.clear();
+	vecSelHeroDlgItems.push_back(std::make_unique<UiListItem>(OriginalCampaignTitle, 100));
+	for (size_t i = 0; i < StartInCampaigns.size(); i++)
+		vecSelHeroDlgItems.push_back(std::make_unique<UiListItem>(std::string_view(StartInCampaigns[i].title), static_cast<int>(101 + i)));
+	const int itemH = 26;
+	const int itemY = static_cast<int>(246 + ((176 - std::min<size_t>(vecSelHeroDlgItems.size(), 6) * itemH) / 2));
+	vecSelDlgItems.push_back(std::make_unique<UiList>(vecSelHeroDlgItems, std::min<size_t>(vecSelHeroDlgItems.size(), 6), uiPosition.x + 264, (uiPosition.y + itemY), 320, itemH, UiFlags::AlignCenter | UiFlags::FontSize24 | UiFlags::ColorUiGold));
+
+	const SDL_Rect rectScrollBar = { (Sint16)(uiPosition.x + 585), (Sint16)(uiPosition.y + 244), 25, 178 };
+	vecSelDlgItems.push_back(std::make_unique<UiScrollbar>((*ArtScrollBarBackground)[0], (*ArtScrollBarThumb)[0], *ArtScrollBarArrow, rectScrollBar));
+
+	const SDL_Rect rect2 = { (Sint16)(uiPosition.x + 279), (Sint16)(uiPosition.y + 429), 140, 35 };
+	vecSelDlgItems.push_back(std::make_unique<UiArtTextButton>(_("OK"), &UiFocusNavigationSelect, rect2, UiFlags::AlignCenter | UiFlags::FontSize30 | UiFlags::ColorUiGold));
+	const SDL_Rect rect3 = { (Sint16)(uiPosition.x + 429), (Sint16)(uiPosition.y + 429), 144, 35 };
+	vecSelDlgItems.push_back(std::make_unique<UiArtTextButton>(_("Cancel"), &UiFocusNavigationEsc, rect3, UiFlags::AlignCenter | UiFlags::FontSize30 | UiFlags::ColorUiGold));
+
+	UiInitList(nullptr, SelheroStartInSelect, SelheroStartInEsc, vecSelDlgItems, true);
+}
+
 void SelheroNameSelect(size_t /*value*/)
 {
 	// only check names in multiplayer, we don't care about them in single
@@ -340,11 +404,8 @@ void SelheroNameSelect(size_t /*value*/)
 		UiSelOkDialog(title, _("Invalid name. A name cannot contain spaces, reserved characters, or reserved words.\n").data(), false);
 		AddSelHeroBackground();
 	} else {
-		if (gfnHeroCreate(&selhero_heroInfo)) {
-			SelheroLoadSelect(1);
-			return;
-		}
-		UiErrorOkDialog(_(/* TRANSLATORS: Error Message */ "Unable to create character."), vecSelHeroDialog);
+		SelheroStartIn();
+		return;
 	}
 
 	memset(selhero_heroInfo.name, '\0', sizeof(selhero_heroInfo.name));

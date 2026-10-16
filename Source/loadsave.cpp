@@ -20,6 +20,7 @@
 #include "codec.h"
 #include "custom_maps/custom_map.hpp"
 #include "custom_maps/custom_town.hpp"
+#include "custom_maps/campaign.hpp"
 #include "levels/desert.hpp"
 #include "control/control.hpp"
 #include "cursor.h"
@@ -2445,25 +2446,57 @@ void SaveClassSkills(SaveWriter &saveWriter, const Player &player)
 		file.WriteLE<uint8_t>(static_cast<uint8_t>(GetClassSkillLevel(player, static_cast<int>(i))));
 }
 
-void LoadCustomTownState()
+namespace {
+
+std::string ReadShortString(uint32_t saveNum, const char *entry)
 {
-	LoadHelper file(OpenSaveArchive(gSaveNumber), "customtown");
-	std::string name;
+	LoadHelper file(OpenSaveArchive(saveNum), entry);
+	std::string text;
 	if (file.IsValid(1)) {
 		const uint8_t length = file.NextLE<uint8_t>();
 		for (uint8_t i = 0; i < length && file.IsValid(1); i++)
-			name.push_back(static_cast<char>(file.NextLE<uint8_t>()));
+			text.push_back(static_cast<char>(file.NextLE<uint8_t>()));
 	}
-	SetCurrentCustomTown(IsValidMapName(name) ? name : std::string {});
+	return text;
+}
+
+void WriteShortString(SaveWriter &saveWriter, const char *entry, std::string_view text)
+{
+	text = text.substr(0, 255);
+	SaveHelper file(saveWriter, entry, 1 + text.size());
+	file.WriteLE<uint8_t>(static_cast<uint8_t>(text.size()));
+	for (const char c : text)
+		file.WriteLE<uint8_t>(static_cast<uint8_t>(c));
+}
+
+} // namespace
+
+void LoadCampaignState(uint32_t saveNum)
+{
+	// The hero's campaign first: its maps are where the hero's town is looked up.
+	const std::string campaign = ReadShortString(saveNum, "campaign");
+	SetActiveCampaign(IsValidCampaignId(campaign) ? campaign : std::string {});
+	const std::string town = ReadShortString(saveNum, "customtown");
+	SetCurrentCustomTown(IsValidMapName(town) && CustomMapExists(town) ? town : std::string {});
+	LogVerbose("Hero save {}: campaign \"{}\", town \"{}\"", saveNum, ActiveCampaign(), CurrentCustomTown());
+}
+
+void LoadCustomTownState()
+{
+	LoadCampaignState(gSaveNumber);
 }
 
 void SaveCustomTownState(SaveWriter &saveWriter)
 {
-	const std::string &name = CurrentCustomTown();
-	SaveHelper file(saveWriter, "customtown", 1 + name.size());
-	file.WriteLE<uint8_t>(static_cast<uint8_t>(name.size()));
-	for (const char c : name)
-		file.WriteLE<uint8_t>(static_cast<uint8_t>(c));
+	WriteShortString(saveWriter, "campaign", ActiveCampaign());
+	WriteShortString(saveWriter, "customtown", CurrentCustomTown());
+}
+
+void SaveNewHeroCampaign(SaveWriter &saveWriter, bool startInItsTown)
+{
+	const std::string &campaign = NewHeroCampaign();
+	WriteShortString(saveWriter, "campaign", campaign);
+	WriteShortString(saveWriter, "customtown", startInItsTown && !campaign.empty() ? CampaignStartTown(campaign) : std::string {});
 }
 
 void SaveHotkeys(SaveWriter &saveWriter, const Player &player)
