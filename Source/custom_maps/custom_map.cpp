@@ -26,6 +26,7 @@
 #include "levels/town.h"
 #include "levels/trigs.h"
 #include "missiles.h"
+#include "objects.h"
 #include "player.h"
 #include "utils/endian_read.hpp"
 #include "utils/file_util.h"
@@ -425,6 +426,13 @@ std::expected<void, std::string> LoadWildsLevel()
 	InitLevelGlobals();
 	PaintTownStyleTiles(&*Active);
 	InitTownStylePieces();
+	// Chests (and any other objects) placed in the editor.
+	{
+		const std::string dun = BuildDun(*Active);
+		std::vector<uint16_t> data(dun.size() / 2);
+		std::memcpy(data.data(), dun.data(), data.size() * 2);
+		RETURN_IF_ERROR(SetMapObjects(data.data(), 0, 0));
+	}
 	dminPosition = { 14, 14 };
 	dmaxPosition = { 18 + 2 * Active->width, 18 + 2 * Active->height };
 	const Point arrival = ActiveCustomMapArrival();
@@ -537,6 +545,31 @@ std::expected<void, std::string> LoadActiveCustomMapLevel()
 	PortalsPlaced = false;
 	LastHeroTile = arrival;
 	return {};
+}
+
+std::vector<Point> MapChests(const CustomMap &map)
+{
+	std::vector<Point> chests;
+	const int w = map.width * 2, h = map.height * 2;
+	for (int y = 0; y < h; y++) {
+		for (int x = 0; x < w; x++) {
+			const size_t i = static_cast<size_t>(y) * w + x;
+			if (i < map.objects.size() && map.objects[i] == MapChestObjectId)
+				chests.push_back({ 16 + x, 16 + y });
+		}
+	}
+	return chests;
+}
+
+void SetMapChest(CustomMap &map, Point tile, bool chest)
+{
+	const int w = map.width * 2, h = map.height * 2;
+	const int x = tile.x - 16, y = tile.y - 16;
+	if (x < 0 || y < 0 || x >= w || y >= h)
+		return;
+	const size_t i = static_cast<size_t>(y) * w + x;
+	if (i < map.objects.size())
+		map.objects[i] = chest ? MapChestObjectId : 0;
 }
 
 std::string CampaignMusicDirectory()

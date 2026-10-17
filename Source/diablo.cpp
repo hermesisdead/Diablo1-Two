@@ -32,6 +32,7 @@
 #include "panels/skill_tree.hpp"
 #include "panels/weather_panel.hpp"
 #include "custom_maps/campaign.hpp"
+#include "custom_maps/campaign_quests.hpp"
 #include "custom_maps/custom_map.hpp"
 #include "custom_maps/custom_town.hpp"
 #include "custom_maps/map_editor.hpp"
@@ -798,6 +799,8 @@ void GameEventHandler(const SDL_Event &event, uint16_t modState)
 		return;
 	}
 	if (MapEditorHandleEvent(event))
+		return;
+	if (QuestDialogHandleEvent(event))
 		return;
 
 #ifdef _DEBUG
@@ -1811,6 +1814,9 @@ void GameLogic()
 	FreeMoveBeginTick();
 	UpdateCustomMapPortals();
 	UpdateTownLinks();
+#ifdef _DEBUG
+	CampaignQuestsDevTick();
+#endif
 	MapEditorTick();
 	if (gbProcessPlayers) {
 		gGameLogicStep = GameLogicStep::ProcessPlayers;

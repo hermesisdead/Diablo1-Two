@@ -587,6 +587,12 @@ void SpawnWitch(int lvl);
 void SpawnBoy(int lvl);
 void SpawnHealer(int lvl);
 void MakeGoldStack(Item &goldItem, int value);
+/** @brief Drops a stack of gold near a tile (quest rewards). */
+void DropGoldAt(Point position, int value);
+/** @brief Drops a good random item for a character level near a tile (quest rewards). */
+void DropRewardItem(Point position, int level);
+/** @brief The item level forced for a reward being made, or `level` when none is. */
+int ItemLevelOverrideOr(int level);
 int ItemNoFlippy();
 void CreateSpellBook(Point position, SpellID ispell, bool sendmsg, bool delta);
 void CreateMagicArmor(Point position, ItemType itemType, int icurs, bool sendmsg, bool delta);

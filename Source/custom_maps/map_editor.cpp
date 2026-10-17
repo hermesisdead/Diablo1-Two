@@ -65,6 +65,7 @@ enum class Tool : uint8_t {
 	Npc,
 	Spawner,
 	Boss,
+	Chest,
 	COUNT,
 };
 
@@ -85,6 +86,7 @@ struct Snapshot {
 	std::vector<MapNpc> npcs;
 	std::vector<MapSpawner> spawners;
 	std::vector<MapBoss> bosses;
+	std::vector<uint16_t> objects;
 };
 
 /** Town ground brushes: town megatiles (1-based), one picked at random per tile for variety. */
@@ -195,9 +197,9 @@ void Say(std::string text)
 
 const std::vector<Tool> &ToolsFor(Kind kind)
 {
-	static const std::vector<Tool> dungeon { Tool::Room, Tool::Erase, Tool::Spawner, Tool::Boss, Tool::Entry, Tool::Portal, Tool::Door };
+	static const std::vector<Tool> dungeon { Tool::Room, Tool::Erase, Tool::Spawner, Tool::Boss, Tool::Chest, Tool::Entry, Tool::Portal, Tool::Door };
 	static const std::vector<Tool> town { Tool::Paint, Tool::Stamp, Tool::Copy, Tool::Npc, Tool::Entry, Tool::Portal, Tool::Door };
-	static const std::vector<Tool> wilds { Tool::Paint, Tool::Stamp, Tool::Copy, Tool::Spawner, Tool::Boss, Tool::Entry, Tool::Portal, Tool::Door };
+	static const std::vector<Tool> wilds { Tool::Paint, Tool::Stamp, Tool::Copy, Tool::Spawner, Tool::Boss, Tool::Chest, Tool::Entry, Tool::Portal, Tool::Door };
 	static const std::vector<Tool> tristram { Tool::Entry, Tool::Portal, Tool::Door };
 	switch (kind) {
 	case Kind::Town: return town;
@@ -242,7 +244,7 @@ bool OnEditorLevel()
 
 void PushUndo()
 {
-	S.undo.push_back({ S.map.plan, S.map.overrides, S.map.tiles, S.map.entries, S.map.portals, S.map.npcs, S.map.spawners, S.map.bosses });
+	S.undo.push_back({ S.map.plan, S.map.overrides, S.map.tiles, S.map.entries, S.map.portals, S.map.npcs, S.map.spawners, S.map.bosses, S.map.objects });
 	if (S.undo.size() > 60)
 		S.undo.erase(S.undo.begin());
 	S.dirty = true;
@@ -571,6 +573,7 @@ std::string_view ToolName(Tool tool)
 	case Tool::Npc: return "People";
 	case Tool::Spawner: return "Monsters";
 	case Tool::Boss: return "Boss";
+	case Tool::Chest: return "Chest";
 	default: return "";
 	}
 }
@@ -589,6 +592,7 @@ std::string_view ToolHint(Tool tool)
 	case Tool::Npc: return "Click to place the chosen townsperson (or move them). Right-click removes.";
 	case Tool::Spawner: return "Click to place a pack (click one to change it). Right-click removes. Wheel: scroll list.";
 	case Tool::Boss: return "Click to place the chosen boss with its minions. Right-click removes. Wheel: scroll list.";
+	case Tool::Chest: return "Click to place a chest (quests can hide an item in it). Right-click removes.";
 	default: return "";
 	}
 }
@@ -860,6 +864,8 @@ void DrawWorldOverlay(const Surface &out)
 		Marker(view, pr, s.tile, PAL16_ORANGE + 2, StrCat(SpawnerLabel(s.monster), " x", s.count), UiFlags::ColorGold);
 	for (const MapBoss &b : S.map.bosses)
 		Marker(view, pr, b.tile, PAL16_RED + 4, StrCat("Boss: ", b.name), UiFlags::ColorRed);
+	for (const Point chest : MapChests(S.map))
+		Marker(view, pr, chest, PAL16_YELLOW + 2, StrCat("Chest ", chest.x, ",", chest.y), UiFlags::ColorGold);
 }
 
 void DrawLinkDialog(const Surface &out)
@@ -1003,6 +1009,7 @@ void Undo()
 	S.map.npcs = s.npcs;
 	S.map.spawners = s.spawners;
 	S.map.bosses = s.bosses;
+	S.map.objects = s.objects;
 	S.dirty = true;
 	Rebuild();
 }
@@ -1280,6 +1287,24 @@ void MouseDown(Point p, bool right)
 		}
 		break;
 	}
+	case Tool::Chest: {
+		if (!CanPlaceAt(tile))
+			break;
+		std::optional<Point> near;
+		for (const Point chest : MapChests(S.map)) {
+			if (chest.WalkingDistance(tile) <= 1)
+				near = chest;
+		}
+		PushUndo();
+		if (near) {
+			SetMapChest(S.map, *near, false);
+			Say("Chest removed.");
+		} else if (!right) {
+			SetMapChest(S.map, tile, true);
+			Say("Chest placed. A quest can hide its item here (Campaign Editor, Quests).");
+		}
+		break;
+	}
 	case Tool::Boss: {
 		const int at = BossAt(tile);
 		if (right) {
@@ -1525,6 +1550,9 @@ void MapEditorTick()
 				} else if (w[0] == "boss" && n.size() >= 4) {
 					PushUndo();
 					S.map.bosses.push_back({ { n[1], n[2] }, PlaceableBosses()[std::clamp(n[3], 0, static_cast<int>(PlaceableBosses().size()) - 1)], 6 });
+				} else if (w[0] == "chest" && n.size() >= 3) {
+					PushUndo();
+					SetMapChest(S.map, { n[1], n[2] }, true);
 				} else if (w[0] == "newwilds" && !S.map.portals.empty()) {
 					MakeWildsBeyond(S.map.portals.back());
 				} else if (w[0] == "pick" && n.size() >= 2) {

@@ -401,6 +401,8 @@ int itemLevelAddHf[] = {
 
 int ItemsGetCurrlevel()
 {
+	if (const int forced = ItemLevelOverrideOr(0); forced > 0)
+		return forced; // a quest reward made for the hero's level
 	if (setlevel) {
 		switch (setlvlnum) {
 		case SL_SKELKING:
@@ -5214,6 +5216,35 @@ void SpawnHealer(int lvl)
 	}
 
 	SortVendor(HealerItems, PinnedItemCount);
+}
+
+void DropGoldAt(Point position, int value)
+{
+	if (ActiveItemCount >= MAXITEMS)
+		return;
+	const int ii = AllocateItem();
+	Item &item = Items[ii];
+	GetSuperItemSpace(position, ii);
+	const Point at = item.position;
+	MakeGoldStack(item, std::clamp(value, 1, GOLD_MAX_LIMIT));
+	item.position = at;
+	SetupItem(item);
+}
+
+namespace {
+std::optional<int> ItemLevelOverride;
+} // namespace
+
+void DropRewardItem(Point position, int level)
+{
+	ItemLevelOverride = std::max(1, level);
+	CreateRndItem(position, /*onlygood=*/true, /*sendmsg=*/false, /*delta=*/false);
+	ItemLevelOverride = std::nullopt;
+}
+
+int ItemLevelOverrideOr(int level)
+{
+	return ItemLevelOverride.value_or(level);
 }
 
 void MakeGoldStack(Item &goldItem, int value)

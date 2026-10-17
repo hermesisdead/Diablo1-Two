@@ -11,6 +11,10 @@
 
 #include "DiabloUI/diabloui.h"
 #include "custom_maps/campaign.hpp"
+#include "custom_maps/campaign_quests.hpp"
+#include "custom_maps/custom_town.hpp"
+#include "tables/itemdat.h"
+#include "utils/parse_int.hpp"
 #include "custom_maps/custom_map.hpp"
 #include "custom_maps/map_editor.hpp"
 #include "engine/palette.h"
@@ -32,6 +36,8 @@ enum class Screen : uint8_t {
 	NewCampaign,
 	Campaign,
 	NewMap,
+	Quests,
+	Quest,
 };
 
 struct MapRow {
@@ -78,6 +84,7 @@ constexpr int RowsShown = 9;
 
 void CreateCampaign();
 void CreateMap();
+void OpenQuests();
 
 const std::vector<std::pair<dungeon_type, std::string_view>> &Styles()
 {
@@ -315,8 +322,18 @@ void Field(const Surface &out, Rectangle r, std::string &text, std::string_view 
 	(void)hover;
 	const bool blink = (SDL_GetTicks() / 400) % 2 == 0;
 	std::string shown = text;
-	if (typing && blink)
-		shown += "_";
+	if (typing) {
+		// The end of a long text stays in view while typing.
+		while (shown.size() > 1 && GetLineWidth(shown + "_") > r.size.width - 14)
+			shown.erase(0, 1);
+		if (blink)
+			shown += "_";
+	} else if (GetLineWidth(shown) > r.size.width - 12) {
+		// Long text: its beginning, then "..."
+		while (shown.size() > 1 && GetLineWidth(shown + "...") > r.size.width - 12)
+			shown.pop_back();
+		shown += "...";
+	}
 	if (shown.empty())
 		Text(out, placeholder, r.position + Displacement { 6, (r.size.height - 12) / 2 }, r.size.width - 12, UiFlags::ColorUiSilverDark);
 	else
@@ -436,14 +453,15 @@ void DrawCampaignScreen(const Surface &out, Point o)
 	if (!Maps.empty() && Notice.empty())
 		Text(out, StrCat("Songs (.ogg or .wav, looped): campaigns/", c.id, "/music"), o + Displacement { 40, 378 }, 560, UiFlags::ColorUiSilverDark);
 
-	Button(out, { o + Displacement { 40, 400 }, { 160, 28 } }, "New Map", [](bool) {
+	Button(out, { o + Displacement { 40, 400 }, { 126, 28 } }, "New Map", [](bool) {
 		NewMapName.clear();
 		NewMapStyle = Maps.empty() ? DTYPE_TOWN : DTYPE_FOREST;
 		Current = Screen::NewMap;
 		StartTyping(NewMapName, 32, true);
 	});
-	Button(out, { o + Displacement { 210, 400 }, { 200, 28 } }, "Portals in Tristram", [](bool) { LaunchEditor(TristramLayerName, DTYPE_TOWN, false); });
-	Button(out, { o + Displacement { 420, 400 }, { 180, 28 } }, "Back", [](bool) {
+	Button(out, { o + Displacement { 172, 400 }, { 126, 28 } }, "Quests", [](bool) { OpenQuests(); });
+	Button(out, { o + Displacement { 304, 400 }, { 170, 28 } }, "Portals in Tristram", [](bool) { LaunchEditor(TristramLayerName, DTYPE_TOWN, false); });
+	Button(out, { o + Displacement { 480, 400 }, { 120, 28 } }, "Back", [](bool) {
 		StopTyping(true);
 		EndPreview();
 		RefreshCampaigns();
@@ -489,6 +507,251 @@ void DrawNewMapScreen(const Surface &out, Point o)
 	Text(out, help, o + Displacement { 40, 266 }, 560, UiFlags::ColorUiSilverDark);
 	Button(out, { o + Displacement { 40, 400 }, { 200, 28 } }, "Create and edit", [](bool) { CreateMap(); });
 	Button(out, { o + Displacement { 400, 400 }, { 200, 28 } }, "Back", [](bool) { StopTyping(false); Current = Screen::Campaign; });
+}
+
+// --- Quests ------------------------------------------------------------------------------------
+
+std::vector<CampaignQuest> QuestList;
+int QuestIndex = -1;
+int QuestScroll = 0;
+
+/** What a quest can point at in this campaign. */
+struct QuestChoices {
+	std::vector<std::string> people;  // "<town>:<TOWN_TYPE>"
+	std::vector<std::string> bosses;  // "<map>:<boss>"
+	std::vector<std::string> chests;  // "<map>:<x>,<y>"
+	std::vector<std::string> uniques; // unique item names
+};
+QuestChoices Choices;
+
+void GatherQuestChoices()
+{
+	Choices = {};
+	for (const std::string &name : ListCustomMaps()) {
+		std::expected<CustomMap, std::string> map = ReadCustomMap(name);
+		if (!map.has_value())
+			continue;
+		for (const MapNpc &npc : map->npcs)
+			Choices.people.push_back(StrCat(name, ":", npc.type));
+		for (const MapBoss &boss : map->bosses)
+			Choices.bosses.push_back(StrCat(name, ":", boss.name));
+		for (const Point chest : MapChests(*map))
+			Choices.chests.push_back(StrCat(name, ":", chest.x, ",", chest.y));
+	}
+	for (const PlaceableTowner &t : PlaceableTowners())
+		Choices.people.push_back(StrCat("tristram:", t.type));
+	for (const UniqueItem &item : UniqueItems)
+		Choices.uniques.push_back(item.UIName);
+}
+
+void SaveQuests()
+{
+	if (std::expected<void, std::string> r = WriteCampaignQuests(QuestList); !r.has_value())
+		Notice = r.error();
+}
+
+void OpenQuests()
+{
+	StopTyping(true);
+	QuestList = ReadCampaignQuests();
+	GatherQuestChoices();
+	QuestScroll = 0;
+	Current = Screen::Quests;
+}
+
+/** Next (or previous) entry of a list after `current` ("" counts as the first when allowed). */
+std::string Cycle(const std::vector<std::string> &list, const std::string &current, bool back, bool allowNone = false)
+{
+	std::vector<std::string> all;
+	if (allowNone)
+		all.emplace_back();
+	all.insert(all.end(), list.begin(), list.end());
+	if (all.empty())
+		return current;
+	auto it = std::find(all.begin(), all.end(), current);
+	int i = it == all.end() ? (back ? 0 : -1) : static_cast<int>(it - all.begin());
+	i = (i + (back ? -1 : 1) + static_cast<int>(all.size())) % static_cast<int>(all.size());
+	return all[i];
+}
+
+void DrawQuestsScreen(const Surface &out, Point o)
+{
+	Text(out, StrCat("Quests (", QuestList.size(), ")"), o + Displacement { 40, 66 }, 300, UiFlags::ColorUiGold);
+	Text(out, "Townspeople give these. Place people, bosses and chests in your maps first.", o + Displacement { 40, 84 }, 560, UiFlags::ColorUiSilverDark);
+	int y = 106;
+	if (QuestList.empty())
+		Text(out, "No quests yet. Click New Quest.", o + Displacement { 40, y + 6 }, 400, UiFlags::ColorUiSilver);
+	for (int i = QuestScroll; i < static_cast<int>(QuestList.size()) && i < QuestScroll + 9; i++, y += 31) {
+		const CampaignQuest &q = QuestList[i];
+		FillRect(out, o.x + 40, o.y + y, 400, 29, MenuColours.row);
+		Text(out, q.title.empty() ? std::string("(untitled)") : q.title, o + Displacement { 46, y + 2 }, 390, UiFlags::ColorUiGold);
+		Text(out, StrCat(QuestGoalLabel(q), "  -  ", QuestRewardLabel(q)), o + Displacement { 46, y + 15 }, 390, UiFlags::ColorUiSilverDark);
+		const int index = i;
+		Button(out, { o + Displacement { 446, y }, { 74, 29 } }, "Edit", [index](bool) { QuestIndex = index; Current = Screen::Quest; });
+		Button(out, { o + Displacement { 526, y }, { 74, 29 } }, "Delete", [index](bool right) {
+			if (!right) {
+				Notice = "Right-click Delete to remove the quest.";
+				return;
+			}
+			QuestList.erase(QuestList.begin() + index);
+			SaveQuests();
+		});
+	}
+	Button(out, { o + Displacement { 40, 400 }, { 200, 28 } }, "New Quest", [](bool) {
+		CampaignQuest q;
+		q.id = NewQuestId(QuestList);
+		q.title = "New quest";
+		if (!Choices.people.empty())
+			q.giver = Choices.people.front();
+		q.target = Choices.bosses.empty() ? std::string {} : Choices.bosses.front();
+		QuestList.push_back(std::move(q));
+		SaveQuests();
+		QuestIndex = static_cast<int>(QuestList.size()) - 1;
+		Current = Screen::Quest;
+		StartTyping(QuestList.back().title, 40, false, [] { SaveQuests(); });
+	});
+	Button(out, { o + Displacement { 400, 400 }, { 200, 28 } }, "Back", [](bool) { StopTyping(true); Current = Screen::Campaign; });
+}
+
+std::string TargetLabel(const CampaignQuest &q)
+{
+	if (q.target.empty())
+		return "(choose)";
+	if (q.goal == QuestGoal::Talk)
+		return QuestPersonLabel(q.target);
+	const size_t colon = q.target.find(':');
+	if (colon == std::string::npos)
+		return q.target;
+	return q.goal == QuestGoal::Find ? StrCat("Chest at ", q.target.substr(colon + 1), " in ", q.target.substr(0, colon))
+	                                 : StrCat(q.target.substr(colon + 1), " in ", q.target.substr(0, colon));
+}
+
+void DrawQuestScreen(const Surface &out, Point o)
+{
+	if (QuestIndex < 0 || QuestIndex >= static_cast<int>(QuestList.size())) {
+		Current = Screen::Quests;
+		return;
+	}
+	CampaignQuest &q = QuestList[QuestIndex];
+	const auto save = [] { SaveQuests(); };
+	int y = 62;
+	const auto label = [&](std::string_view text) { Text(out, text, o + Displacement { 40, y + 5 }, 124, UiFlags::ColorUiGold); };
+	const Rectangle wide { o + Displacement { 170, y }, { 430, 22 } };
+	(void)wide;
+
+	label("Title");
+	Field(out, { o + Displacement { 170, y }, { 430, 22 } }, q.title, "Quest title", 40, false, save);
+	y += 26;
+	label("Given by");
+	Button(out, { o + Displacement { 170, y }, { 430, 22 } }, QuestPersonLabel(q.giver), [](bool right) {
+		CampaignQuest &q = QuestList[QuestIndex];
+		q.giver = Cycle(Choices.people, q.giver, right);
+		SaveQuests();
+	});
+	y += 26;
+	label("The task");
+	const struct {
+		QuestGoal goal;
+		std::string_view text;
+	} goals[] = { { QuestGoal::Kill, "Kill a boss" }, { QuestGoal::Find, "Find in a chest" }, { QuestGoal::Talk, "Talk to someone" } };
+	for (int i = 0; i < 3; i++) {
+		const QuestGoal goal = goals[i].goal;
+		Button(out, { o + Displacement { 170 + i * 146, y }, { 138, 22 } }, std::string(goals[i].text), [goal](bool) {
+			CampaignQuest &q = QuestList[QuestIndex];
+			if (q.goal == goal)
+				return;
+			q.goal = goal;
+			const std::vector<std::string> &list = goal == QuestGoal::Kill ? Choices.bosses : (goal == QuestGoal::Find ? Choices.chests : Choices.people);
+			q.target = list.empty() ? std::string {} : list.front();
+			if (goal == QuestGoal::Talk && q.target == q.giver && list.size() > 1)
+				q.target = list[1];
+			if (goal != QuestGoal::Kill && q.item.empty())
+				q.item = goal == QuestGoal::Find ? "Lost Relic" : "Sealed Letter";
+			SaveQuests();
+		}, q.goal == goal);
+	}
+	y += 26;
+	label(q.goal == QuestGoal::Kill ? "Boss" : (q.goal == QuestGoal::Find ? "Chest" : "Talk to"));
+	const std::vector<std::string> &targets = q.goal == QuestGoal::Kill ? Choices.bosses : (q.goal == QuestGoal::Find ? Choices.chests : Choices.people);
+	if (targets.empty()) {
+		Text(out, q.goal == QuestGoal::Kill ? "No bosses in your maps yet (map editor: Boss tool)." : (q.goal == QuestGoal::Find ? "No chests in your maps yet (map editor: Chest tool)." : "No townspeople yet."), o + Displacement { 170, y + 5 }, 430, UiFlags::ColorUiSilverDark);
+	} else {
+		Button(out, { o + Displacement { 170, y }, { 430, 22 } }, TargetLabel(q), [](bool right) {
+			CampaignQuest &q = QuestList[QuestIndex];
+			const std::vector<std::string> &list = q.goal == QuestGoal::Kill ? Choices.bosses : (q.goal == QuestGoal::Find ? Choices.chests : Choices.people);
+			q.target = Cycle(list, q.target, right);
+			SaveQuests();
+		});
+	}
+	y += 26;
+	if (q.goal != QuestGoal::Kill) {
+		label(q.goal == QuestGoal::Find ? "Item in chest" : "Item handed over");
+		Field(out, { o + Displacement { 170, y }, { 430, 22 } }, q.item, "e.g. Ancient Tome", 32, false, save);
+		y += 26;
+	}
+	label("Reward");
+	const std::string_view rewardNames[] = { "Gold", "Experience", "Magic item", "Unique item" };
+	Button(out, { o + Displacement { 170, y }, { 138, 22 } }, std::string(rewardNames[static_cast<int>(q.reward)]), [](bool right) {
+		CampaignQuest &q = QuestList[QuestIndex];
+		q.reward = static_cast<QuestReward>((static_cast<int>(q.reward) + (right ? 3 : 1)) % 4);
+		if (q.reward == QuestReward::UniqueItem && q.uniqueItem.empty() && !Choices.uniques.empty())
+			q.uniqueItem = Choices.uniques.front();
+		SaveQuests();
+	});
+	if (q.reward == QuestReward::Gold || q.reward == QuestReward::Experience) {
+		static std::string amountText;
+		static int amountFor = -1;
+		if (TypingInto != &amountText || amountFor != QuestIndex) {
+			amountText = StrCat(q.amount);
+			amountFor = QuestIndex;
+		}
+		Field(out, { o + Displacement { 316, y }, { 120, 22 } }, amountText, "amount", 8, true, [] {
+			const ParseIntResult<int> v = ParseInt<int>(amountText);
+			if (v.has_value() && *v > 0)
+				QuestList[QuestIndex].amount = *v;
+			SaveQuests();
+		});
+	} else if (q.reward == QuestReward::UniqueItem) {
+		Button(out, { o + Displacement { 316, y }, { 284, 22 } }, q.uniqueItem.empty() ? std::string("(choose)") : q.uniqueItem, [](bool right) {
+			CampaignQuest &q = QuestList[QuestIndex];
+			q.uniqueItem = Cycle(Choices.uniques, q.uniqueItem, right);
+			SaveQuests();
+		});
+	} else {
+		Text(out, "a random good item for the hero's level", o + Displacement { 316, y + 5 }, 284, UiFlags::ColorUiSilverDark);
+	}
+	y += 26;
+	label("Offered after");
+	std::string afterLabel = "Any time";
+	for (const CampaignQuest &other : QuestList) {
+		if (other.id == q.after && !q.after.empty())
+			afterLabel = StrCat("\"", other.title, "\" is done");
+	}
+	Button(out, { o + Displacement { 170, y }, { 430, 22 } }, afterLabel, [](bool right) {
+		CampaignQuest &q = QuestList[QuestIndex];
+		std::vector<std::string> ids;
+		for (const CampaignQuest &other : QuestList) {
+			if (other.id != q.id)
+				ids.push_back(other.id);
+		}
+		q.after = Cycle(ids, q.after, right, /*allowNone=*/true);
+		SaveQuests();
+	});
+	y += 30;
+	label("They ask");
+	Field(out, { o + Displacement { 170, y }, { 430, 22 } }, q.offer, "What the giver says (blank: a plain request)", 200, false, save);
+	y += 26;
+	label("While waiting");
+	Field(out, { o + Displacement { 170, y }, { 430, 22 } }, q.progress, "What they say until it is done (optional)", 200, false, save);
+	y += 26;
+	label("When done");
+	Field(out, { o + Displacement { 170, y }, { 430, 22 } }, q.thanks, "What they say with the reward (optional)", 200, false, save);
+	y += 26;
+	if (q.goal == QuestGoal::Talk) {
+		label("They say");
+		Field(out, { o + Displacement { 170, y }, { 430, 22 } }, q.targetText, "What the person you were sent to says (optional)", 200, false, save);
+	}
+	Button(out, { o + Displacement { 400, 400 }, { 200, 28 } }, "Done", [](bool) { StopTyping(true); Current = Screen::Quests; });
 }
 
 void Activate(const Clickable &c, bool right)
@@ -591,6 +854,8 @@ bool MenuConsoleHandleEvent(SDL_Event &event)
 			Current = Screen::Campaigns;
 			break;
 		case Screen::NewMap: Current = Screen::Campaign; break;
+		case Screen::Quests: Current = Screen::Campaign; break;
+		case Screen::Quest: Current = Screen::Quests; break;
 		}
 	} else if ((sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER) && Current == Screen::NewMap) {
 		CreateMap();
@@ -626,6 +891,8 @@ void DrawMenuConsole()
 	case Screen::NewCampaign: DrawNewCampaignScreen(out, o); break;
 	case Screen::Campaign: DrawCampaignScreen(out, o); break;
 	case Screen::NewMap: DrawNewMapScreen(out, o); break;
+	case Screen::Quests: DrawQuestsScreen(out, o); break;
+	case Screen::Quest: DrawQuestScreen(out, o); break;
 	}
 	if (!Notice.empty())
 		Text(out, Notice, o + Displacement { 40, 378 }, 560, UiFlags::ColorUiGold);

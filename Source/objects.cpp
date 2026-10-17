@@ -42,6 +42,7 @@
 #include "stores.h"
 #include "tables/objdat.h"
 #include "towners.h"
+#include "custom_maps/campaign_quests.hpp"
 #include "track.h"
 #include "utils/algorithm/container.hpp"
 #include "utils/endian_swap.hpp"
@@ -2027,6 +2028,7 @@ void OperateChest(const Player &player, Object &chest, bool sendLootMsg)
 	PlaySfxLoc(SfxID::ChestOpen, chest.position);
 	chest.selectionRegion = SelectionRegion::None;
 	chest._oAnimFrame += 2;
+	CampaignQuestChestOpened(chest.position);
 	SetRndSeed(chest._oRndSeed);
 	if (setlevel) {
 		for (int j = 0; j < chest._oVar1; j++) {

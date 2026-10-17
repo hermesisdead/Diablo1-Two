@@ -21,6 +21,7 @@
 #include "custom_maps/custom_map.hpp"
 #include "custom_maps/custom_town.hpp"
 #include "custom_maps/campaign.hpp"
+#include "custom_maps/campaign_quests.hpp"
 #include "levels/desert.hpp"
 #include "control/control.hpp"
 #include "cursor.h"
@@ -2460,6 +2461,27 @@ std::string ReadShortString(uint32_t saveNum, const char *entry)
 	return text;
 }
 
+std::string ReadLongString(uint32_t saveNum, const char *entry)
+{
+	LoadHelper file(OpenSaveArchive(saveNum), entry);
+	std::string text;
+	if (file.IsValid(2)) {
+		const uint16_t length = file.NextLE<uint16_t>();
+		for (uint16_t i = 0; i < length && file.IsValid(1); i++)
+			text.push_back(static_cast<char>(file.NextLE<uint8_t>()));
+	}
+	return text;
+}
+
+void WriteLongString(SaveWriter &saveWriter, const char *entry, std::string_view text)
+{
+	text = text.substr(0, 60000);
+	SaveHelper file(saveWriter, entry, 2 + text.size());
+	file.WriteLE<uint16_t>(static_cast<uint16_t>(text.size()));
+	for (const char c : text)
+		file.WriteLE<uint8_t>(static_cast<uint8_t>(c));
+}
+
 void WriteShortString(SaveWriter &saveWriter, const char *entry, std::string_view text)
 {
 	text = text.substr(0, 255);
@@ -2478,6 +2500,7 @@ void LoadCampaignState(uint32_t saveNum)
 	SetActiveCampaign(IsValidCampaignId(campaign) ? campaign : std::string {});
 	const std::string town = ReadShortString(saveNum, "customtown");
 	SetCurrentCustomTown(IsValidMapName(town) && CustomMapExists(town) ? town : std::string {});
+	LoadCampaignQuestState(ActiveCampaign().empty() ? std::string {} : ReadLongString(saveNum, "cquests"));
 	LogVerbose("Hero save {}: campaign \"{}\", town \"{}\"", saveNum, ActiveCampaign(), CurrentCustomTown());
 }
 
@@ -2490,6 +2513,7 @@ void SaveCustomTownState(SaveWriter &saveWriter)
 {
 	WriteShortString(saveWriter, "campaign", ActiveCampaign());
 	WriteShortString(saveWriter, "customtown", CurrentCustomTown());
+	WriteLongString(saveWriter, "cquests", SaveCampaignQuestState());
 }
 
 void SaveNewHeroCampaign(SaveWriter &saveWriter, bool startInItsTown)

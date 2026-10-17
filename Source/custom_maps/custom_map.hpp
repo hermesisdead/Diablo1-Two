@@ -137,6 +137,13 @@ void FollowMapLink(const MapLink &link);
 /** @brief Builds the level for the active map (called while loading SL_CUSTOM). */
 std::expected<void, std::string> LoadActiveCustomMapLevel();
 
+/** @brief .dun object id of a chest (ObjTypeConv: OBJ_CHEST1). */
+inline constexpr uint16_t MapChestObjectId = 77;
+/** @brief World tiles of the chests placed in a map. */
+[[nodiscard]] std::vector<Point> MapChests(const CustomMap &map);
+/** @brief Places or removes a chest at a world tile of a map. */
+void SetMapChest(CustomMap &map, Point tile, bool chest);
+
 /** @brief The campaign's folder of songs (ends with a separator); empty for Diablo: Original. */
 [[nodiscard]] std::string CampaignMusicDirectory();
 /** @brief Songs (.ogg, .wav) in the open campaign's music folder, by name. */

@@ -224,6 +224,7 @@ std::expected<void, std::string> TravelToCustomTown(std::string_view name, std::
 	TownMap = std::move(*map);
 	PendingArrival = true;
 	PendingEntry = std::string(entry);
+	MyPlayer->setLevel(0); // from a dungeon or hand-made map: "town" means level 0, not where the hero is
 	StartNewLvl(*MyPlayer, WM_DIABRETOWN, 0);
 	return {};
 }
@@ -235,6 +236,7 @@ void TravelToTristram(std::string_view entry)
 	SetInDesertRegion(false);
 	PendingArrival = true;
 	PendingEntry = std::string(entry);
+	MyPlayer->setLevel(0); // from a dungeon or hand-made map: "town" means level 0, not where the hero is
 	StartNewLvl(*MyPlayer, WM_DIABRETOWN, 0);
 }
 
@@ -243,6 +245,7 @@ void EnterCustomTownForEditor(std::string_view entry)
 	SetInDesertRegion(false);
 	PendingArrival = true;
 	PendingEntry = std::string(entry);
+	MyPlayer->setLevel(0); // from a dungeon or hand-made map: "town" means level 0, not where the hero is
 	StartNewLvl(*MyPlayer, WM_DIABRETOWN, 0);
 }
 

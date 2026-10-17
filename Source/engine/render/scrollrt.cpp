@@ -56,6 +56,7 @@
 #include "engine/render/color_overlay.hpp"
 #include "engine/render/dungeon_mood.hpp"
 #include "custom_maps/map_editor.hpp"
+#include "custom_maps/campaign_quests.hpp"
 #include "engine/render/gore_fx.hpp"
 #include "engine/render/spell_fx.hpp"
 #include "levels/forest.hpp"
@@ -1973,6 +1974,7 @@ void DrawAndBlit()
 		DrawPartyMemberInfoPanel(out);
 
 	DrawWeatherPanel(out);
+	DrawCampaignQuests(out);
 	DrawMapEditor(out);
 
 	DrawCursor(out);

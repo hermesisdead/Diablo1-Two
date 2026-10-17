@@ -1,4 +1,5 @@
 #include "towners.h"
+#include "custom_maps/campaign_quests.hpp"
 
 #include <algorithm>
 #include <array>
@@ -941,6 +942,9 @@ void TalkToTowner(Player &player, int t)
 	if (!player.HoldItem.isEmpty()) {
 		return;
 	}
+
+	if (CampaignQuestTalk(player, t))
+		return; // a campaign quest conversation (it can lead on to the usual talk)
 
 	towner.talk(player, towner);
 }
