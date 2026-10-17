@@ -55,6 +55,12 @@ bool gbSoundOn = true;
 namespace {
 
 SoundSample music;
+/** The previous song while it fades out under the new one. */
+SoundSample musicFadingOut;
+/** File the current song was loaded from when it is not one of the game's tracks (campaign music). */
+std::string musicFile;
+
+constexpr int MusicCrossfadeMs = 1800;
 
 std::string GetMp3Path(const char *path)
 {
@@ -335,18 +341,20 @@ _music_id GetLevelMusic(dungeon_type dungeonType)
 void music_stop()
 {
 	music.Release();
+	musicFadingOut.Release();
+	musicFile.clear();
 	sgnMusicTrack = NUM_MUSIC;
 }
 
-void music_start(_music_id nTrack)
+namespace {
+
+/** Loads and starts a song (a game track, or a file when `file` is set), looping, fading in over `fadeMs`. */
+bool StartSong(_music_id nTrack, const std::string &file, int fadeMs)
 {
 	const char *trackPath;
-
-	assert(nTrack < NUM_MUSIC);
-	music_stop();
-	if (!gbMusicOn)
-		return;
-	if (HaveFullMusic())
+	if (!file.empty())
+		trackPath = file.c_str();
+	else if (HaveFullMusic())
 		trackPath = MusicTracks[nTrack];
 	else
 		trackPath = SpawnMusicTracks[nTrack];
@@ -356,27 +364,70 @@ void music_start(_music_id nTrack)
 #else
 	const bool stream = true;
 #endif
-	if (!LoadAudioFile(trackPath, stream, music).has_value()) {
-		music_stop();
-		return;
+	if (std::expected<void, std::string> loaded = LoadAudioFile(trackPath, stream, music); !loaded.has_value()) {
+		if (!file.empty())
+			LogError(LogCategory::Audio, "Music {}: {}", file, loaded.error());
+		music.Release();
+		return false;
 	}
 
 	music.SetVolume(*GetOptions().Audio.musicVolume, VOLUME_MIN, VOLUME_MAX);
-	if (!music.Play(/*numIterations=*/0)) {
+	if (!music.Play(/*numIterations=*/0, fadeMs)) {
 		LogError(LogCategory::Audio, "Aulib::Stream::play (from music_start): {}", SDL_GetError());
-		music_stop();
-		return;
+		music.Release();
+		return false;
 	}
+	return true;
+}
 
+} // namespace
+
+void music_start(_music_id nTrack)
+{
+	assert(nTrack < NUM_MUSIC);
+	music_stop();
+	if (!gbMusicOn)
+		return;
+	if (StartSong(nTrack, {}, 0))
+		sgnMusicTrack = nTrack;
+}
+
+void music_crossfade_to(_music_id nTrack, std::string_view file)
+{
+	assert(nTrack < NUM_MUSIC);
+	if (nTrack == sgnMusicTrack && file == musicFile && (music.IsLoaded() || !gbMusicOn))
+		return; // already playing
+	// The song playing now fades out while the new one fades in.
+	musicFadingOut.Release();
+	if (music.IsLoaded()) {
+		music.Stop(MusicCrossfadeMs);
+		musicFadingOut = std::move(music);
+	}
+	const int fadeIn = musicFadingOut.IsLoaded() ? MusicCrossfadeMs : MusicCrossfadeMs / 2;
 	sgnMusicTrack = nTrack;
+	musicFile = std::string(file);
+	if (!gbMusicOn)
+		return;
+	if (!StartSong(nTrack, musicFile, fadeIn) && !musicFile.empty()) {
+		// A campaign song that does not load: the level's usual music instead.
+		musicFile.clear();
+		StartSong(nTrack, {}, fadeIn);
+	}
 }
 
 void sound_disable_music(bool disable)
 {
 	if (disable) {
+		const _music_id track = sgnMusicTrack;
+		const std::string file = musicFile;
 		music_stop();
+		sgnMusicTrack = track; // remembered for when music is turned back on
+		musicFile = file;
 	} else if (sgnMusicTrack != NUM_MUSIC) {
-		music_start(sgnMusicTrack);
+		const _music_id track = sgnMusicTrack;
+		const std::string file = musicFile;
+		sgnMusicTrack = NUM_MUSIC;
+		music_crossfade_to(track, file);
 	}
 }
 
@@ -417,6 +468,8 @@ void music_mute()
 {
 	if (music.IsLoaded())
 		music.Mute();
+	if (musicFadingOut.IsLoaded())
+		musicFadingOut.Mute();
 }
 
 void music_unmute()

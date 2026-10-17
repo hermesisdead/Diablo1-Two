@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cctype>
 #include <cstring>
 #include <string>
 
@@ -146,6 +147,7 @@ std::string BuildMeta(const CustomMap &map)
 	out += StrCat("name=", map.name, "\n");
 	out += StrCat("style=", MapStyleName(map.style), "\n");
 	out += StrCat("weather=", map.weather, "\n");
+	out += StrCat("music=", map.music, "\n");
 	for (const MapEntryPoint &e : map.entries)
 		out += StrCat("entry=", e.name, ",", e.tile.x, ",", e.tile.y, "\n");
 	for (const MapPortal &p : map.portals)
@@ -179,6 +181,8 @@ void ParseMeta(std::string_view text, CustomMap &map)
 				map.style = *style;
 		} else if (key == "weather") {
 			map.weather = std::string(value);
+		} else if (key == "music") {
+			map.music = std::string(value);
 		} else if (key == "entry" && f.size() >= 3) {
 			map.entries.push_back({ std::string(f[0]), { ToInt(f[1]), ToInt(f[2]) } });
 		} else if (key == "portal" && f.size() >= 7) {
@@ -533,6 +537,41 @@ std::expected<void, std::string> LoadActiveCustomMapLevel()
 	PortalsPlaced = false;
 	LastHeroTile = arrival;
 	return {};
+}
+
+std::string CampaignMusicDirectory()
+{
+	const std::string campaign = ActiveCampaignDirectory();
+	return campaign.empty() ? std::string {} : StrCat(campaign, "music" DIRECTORY_SEPARATOR_STR);
+}
+
+std::vector<std::string> ListCampaignMusic()
+{
+	std::vector<std::string> songs;
+	const std::string dir = CampaignMusicDirectory();
+	if (dir.empty() || !DirectoryExists(dir.c_str()))
+		return songs;
+	for (std::string &name : ListFiles(dir.c_str())) {
+		std::string lower = name;
+		std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		if (lower.ends_with(".ogg") || lower.ends_with(".wav"))
+			songs.push_back(std::move(name));
+	}
+	std::sort(songs.begin(), songs.end());
+	return songs;
+}
+
+std::string CurrentLevelMusicFile()
+{
+	const CustomMap *map = nullptr;
+	if (setlevel && setlvlnum == SL_CUSTOM)
+		map = ActiveCustomMap();
+	else if (!setlevel && currlevel == 0 && InCustomTown())
+		map = CurrentCustomTownMap();
+	if (map == nullptr || map->music.empty() || map->music.find_first_of("/\\") != std::string::npos)
+		return {};
+	const std::string path = CampaignMusicDirectory() + map->music;
+	return FileExists(path.c_str()) ? AbsolutePath(path) : std::string {};
 }
 
 void UpdateCustomMapPortals()

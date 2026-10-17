@@ -21,6 +21,7 @@
 #include "utils/sdl2_backports.h"
 #endif
 #include "utils/aulib.hpp"
+#include "utils/aulib_ogg_decoder.hpp"
 #endif
 
 #include "engine/assets.hpp"
@@ -113,16 +114,18 @@ float PanLogToLinear(int logPan)
 	return copysign(1.F - factor, static_cast<float>(logPan));
 }
 
-std::unique_ptr<Aulib::Decoder> CreateDecoder(bool isMp3)
+std::unique_ptr<Aulib::Decoder> CreateDecoder(SDL_IOStream *handle, bool isMp3)
 {
 	if (isMp3)
 		return std::make_unique<Aulib::DecoderDrmp3>();
+	if (DecoderOgg::LooksLikeOgg(handle))
+		return std::make_unique<DecoderOgg>(); // campaign music
 	return std::make_unique<Aulib::DecoderDrwav>();
 }
 
 std::unique_ptr<Aulib::Stream> CreateStream(SDL_IOStream *handle, bool isMp3)
 {
-	auto decoder = CreateDecoder(isMp3);
+	auto decoder = CreateDecoder(handle, isMp3);
 	if (!decoder->open(handle)) // open for `getRate`
 		return nullptr;
 	auto resampler = CreateAulibResampler(decoder->getRate());
@@ -196,14 +199,14 @@ void SoundSample::SetFinishCallback(Aulib::Stream::Callback &&callback)
 }
 #endif
 
-void SoundSample::Stop()
+void SoundSample::Stop(int fadeOutMs)
 {
 #ifdef USE_SDL3
 	if (track_ != nullptr) {
-		MIX_StopTrack(track_, 0);
+		MIX_StopTrack(track_, fadeOutMs > 0 ? MIX_TrackMSToFrames(track_, fadeOutMs) : 0);
 	}
 #else
-	stream_->stop();
+	stream_->stop(std::chrono::milliseconds(fadeOutMs));
 #endif
 }
 
@@ -262,7 +265,7 @@ bool SoundSample::IsPlaying()
 #endif
 }
 
-bool SoundSample::Play(int numIterations)
+bool SoundSample::Play(int numIterations, int fadeInMs)
 {
 #ifdef USE_SDL3
 	if (audio_ == nullptr || CurrentMixer == nullptr) return false;
@@ -300,6 +303,8 @@ bool SoundSample::Play(int numIterations)
 		SDL_SetNumberProperty(props, MIX_PROP_PLAY_LOOPS_NUMBER, numIterations - 1);
 	}
 	// numIterations == 1 means play once with no looping, which is the default (0 loops).
+	if (fadeInMs > 0)
+		SDL_SetNumberProperty(props, MIX_PROP_PLAY_FADE_IN_MILLISECONDS_NUMBER, fadeInMs);
 
 	bool result = MIX_PlayTrack(track_, props);
 	SDL_DestroyProperties(props);
@@ -310,7 +315,7 @@ bool SoundSample::Play(int numIterations)
 	}
 	return true;
 #else
-	if (!stream_->play(numIterations)) {
+	if (!stream_->play(numIterations, std::chrono::milliseconds(fadeInMs))) {
 		LogError(LogCategory::Audio, "Aulib::Stream::play (from SoundSample::Play): {}", SDL_GetError());
 		return false;
 	}

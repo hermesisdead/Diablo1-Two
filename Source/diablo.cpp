@@ -31,6 +31,7 @@
 #include "class_skills.hpp"
 #include "panels/skill_tree.hpp"
 #include "panels/weather_panel.hpp"
+#include "custom_maps/campaign.hpp"
 #include "custom_maps/custom_map.hpp"
 #include "custom_maps/custom_town.hpp"
 #include "custom_maps/map_editor.hpp"
@@ -3159,6 +3160,11 @@ int DiabloMain(int argc, char **argv)
 		if (Players.empty())
 			Players.resize(MAX_PLRS);
 		const bool devAutoLoad = std::getenv("DEVILUTIONX_DEV_AUTOLOAD") != nullptr;
+		if (const char *campaign = std::getenv("DEVILUTIONX_DEV_CAMPAIGN"); campaign != nullptr) {
+			// Test hook: the hero (and the editor) belong to this campaign.
+			SetActiveCampaign(campaign);
+			SetNewHeroCampaign(campaign);
+		}
 		if (const char *editMap = std::getenv("DEVILUTIONX_DEV_EDITOR"); editMap != nullptr) {
 			const std::string_view editArg = editMap;
 			const size_t colon = editArg.find(':');
@@ -3441,16 +3447,16 @@ void DisableInputEventHandler(const SDL_Event &event, uint16_t /*modState*/)
 	MainWndProc(event);
 }
 
-void LoadGameLevelStopMusic(_music_id neededTrack)
+void LoadGameLevelStopMusic(_music_id /*neededTrack*/)
 {
-	if (neededTrack != sgnMusicTrack)
-		music_stop();
+	// The music keeps playing through the loading screen and crossfades into the new level's.
 }
 
 void LoadGameLevelStartMusic(_music_id neededTrack)
 {
-	if (sgnMusicTrack != neededTrack)
-		music_start(neededTrack);
+	// GetLevelMusic was asked before the level loaded; ask again now the level type is final.
+	neededTrack = GetLevelMusic(leveltype);
+	music_crossfade_to(neededTrack, CurrentLevelMusicFile());
 
 	if (MinimizePaused) {
 		music_mute();

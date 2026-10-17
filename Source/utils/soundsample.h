@@ -73,7 +73,8 @@ public:
 	/**
 	 * @brief Start playing the sound for a given number of iterations (0 means loop).
 	 */
-	bool Play(int numIterations = 1);
+	/** @param fadeInMs Fades the sound in over this time (0: at once). */
+	bool Play(int numIterations = 1, int fadeInMs = 0);
 
 	/**
 	 * @brief Start playing the sound with the given sound and user volume, and a stereo position.
@@ -88,7 +89,8 @@ public:
 	/**
 	 * @brief Stop playing the sound
 	 */
-	void Stop();
+	/** @param fadeOutMs Fades the sound out over this time instead of stopping at once. */
+	void Stop(int fadeOutMs = 0);
 
 	void SetVolume(int logVolume, int logMin, int logMax);
 	void SetStereoPosition(int logPan);

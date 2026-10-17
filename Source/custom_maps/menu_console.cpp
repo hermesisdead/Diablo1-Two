@@ -17,6 +17,7 @@
 #include "engine/rectangle.hpp"
 #include "engine/render/primitive_render.hpp"
 #include "engine/render/text_render.hpp"
+#include "engine/sound.h"
 #include "engine/surface.hpp"
 #include "utils/sdl_compat.h"
 #include "utils/str_cat.hpp"
@@ -38,6 +39,7 @@ struct MapRow {
 	dungeon_type style;
 	std::string info;
 	bool town;
+	std::string music;
 };
 
 /** A clickable area drawn this frame (immediate mode: rebuilt every frame). */
@@ -156,9 +158,60 @@ void RefreshMaps()
 			info = StrCat(map->spawners.size(), " packs, ", map->bosses.size(), " bosses");
 		else if (map->style == DTYPE_TOWN)
 			info = StrCat(map->npcs.size(), " townspeople");
-		Maps.push_back({ name, map->style, std::move(info), map->style == DTYPE_TOWN && !map->entries.empty() });
+		Maps.push_back({ name, map->style, std::move(info), map->style == DTYPE_TOWN && !map->entries.empty(), map->music });
 	}
 	MapScroll = std::clamp(MapScroll, 0, std::max(0, static_cast<int>(Maps.size()) - RowsShown));
+}
+
+/** The song being previewed in the menu, and the menu's own track to go back to. */
+bool Previewing = false;
+_music_id PreviewReturnTrack = TMUSIC_INTRO;
+
+void PreviewSong(const std::string &song)
+{
+	if (!Previewing) {
+		PreviewReturnTrack = sgnMusicTrack < NUM_MUSIC ? sgnMusicTrack : TMUSIC_INTRO;
+		Previewing = true;
+	}
+	const std::string path = song.empty() ? std::string {} : CampaignMusicDirectory() + song;
+	music_crossfade_to(PreviewReturnTrack, path);
+}
+
+void EndPreview()
+{
+	if (!Previewing)
+		return;
+	Previewing = false;
+	music_crossfade_to(PreviewReturnTrack);
+}
+
+/** Next (or previous) song for a map: its style's usual music, then each song in the campaign. */
+void CycleMapMusic(const std::string &mapName, bool back)
+{
+	std::expected<CustomMap, std::string> map = ReadCustomMap(mapName);
+	if (!map.has_value())
+		return;
+	std::vector<std::string> choices { "" };
+	for (std::string &song : ListCampaignMusic())
+		choices.push_back(std::move(song));
+	if (choices.size() == 1) {
+		Notice = StrCat("No songs yet: put .ogg or .wav files in ", CampaignMusicDirectory());
+		return;
+	}
+	auto it = std::find(choices.begin(), choices.end(), map->music);
+	int i = it == choices.end() ? 0 : static_cast<int>(it - choices.begin());
+	i = (i + (back ? -1 : 1) + static_cast<int>(choices.size())) % static_cast<int>(choices.size());
+	map->music = choices[i];
+	if (std::expected<void, std::string> r = WriteCustomMap(*map); !r.has_value()) {
+		Notice = r.error();
+		return;
+	}
+	for (MapRow &row : Maps) {
+		if (row.name == mapName)
+			row.music = map->music;
+	}
+	PreviewSong(map->music);
+	Notice = map->music.empty() ? StrCat(mapName, ": its usual music.") : StrCat(mapName, ": ", map->music, " (loops; playing it now)");
 }
 
 void SaveEditing()
@@ -184,6 +237,7 @@ void OpenCampaign(const std::string &id)
 
 void LaunchEditor(std::string_view map, dungeon_type style, bool play)
 {
+	Previewing = false; // the game starts its own music
 	StopTyping(true);
 	QueueMapEditor(map, style, play);
 	WantsEditor = true;
@@ -290,7 +344,7 @@ void DrawCampaignsScreen(const Surface &out, Point o)
 		Current = Screen::NewCampaign;
 		StartTyping(NewTitle, 32, false, [] { CreateCampaign(); });
 	});
-	Button(out, { o + Displacement { 400, 400 }, { 200, 28 } }, "Close  (`)", [](bool) { StopTyping(true); Open = false; });
+	Button(out, { o + Displacement { 400, 400 }, { 200, 28 } }, "Close  (`)", [](bool) { StopTyping(true); EndPreview(); Open = false; });
 }
 
 void CreateCampaign()
@@ -368,17 +422,19 @@ void DrawCampaignScreen(const Surface &out, Point o)
 	for (int i = MapScroll; i < static_cast<int>(Maps.size()) && i < MapScroll + RowsShown; i++, y += 24) {
 		const MapRow &m = Maps[i];
 		const bool isStart = m.name == c.start;
-		FillRect(out, o.x + 40, o.y + y, 400, 22, isStart ? MenuColours.rowStart : MenuColours.row);
-		Text(out, m.name, o + Displacement { 46, y + 5 }, 170, isStart ? UiFlags::ColorUiGold : UiFlags::ColorUiSilver);
-		Text(out, StyleLabel(m.style), o + Displacement { 220, y + 5 }, 80, UiFlags::ColorUiGold);
-		Text(out, isStart ? std::string("start") : m.info, o + Displacement { 300, y + 5 }, 140, UiFlags::ColorUiSilverDark);
+		FillRect(out, o.x + 40, o.y + y, 220, 22, isStart ? MenuColours.rowStart : MenuColours.row);
+		Text(out, isStart ? StrCat(m.name, " (start)") : m.name, o + Displacement { 46, y + 5 }, 140, isStart ? UiFlags::ColorUiGold : UiFlags::ColorUiSilver);
+		Text(out, StyleLabel(m.style), o + Displacement { 190, y + 5 }, 70, UiFlags::ColorUiGold);
 		const std::string name = m.name;
 		const dungeon_type style = m.style;
+		Button(out, { o + Displacement { 266, y }, { 174, 22 } }, m.music.empty() ? std::string("Music: usual") : StrCat("Music: ", m.music), [name](bool right) { CycleMapMusic(name, right); });
 		Button(out, { o + Displacement { 446, y }, { 74, 22 } }, "Edit", [name, style](bool) { LaunchEditor(name, style, false); });
 		Button(out, { o + Displacement { 526, y }, { 74, 22 } }, "Play", [name, style](bool) { LaunchEditor(name, style, true); });
 	}
 	if (static_cast<int>(Maps.size()) > RowsShown)
 		Text(out, "(mouse wheel: more maps)", o + Displacement { 40, 170 + RowsShown * 24 }, 300, UiFlags::ColorUiSilverDark);
+	if (!Maps.empty() && Notice.empty())
+		Text(out, StrCat("Songs (.ogg or .wav, looped): campaigns/", c.id, "/music"), o + Displacement { 40, 378 }, 560, UiFlags::ColorUiSilverDark);
 
 	Button(out, { o + Displacement { 40, 400 }, { 160, 28 } }, "New Map", [](bool) {
 		NewMapName.clear();
@@ -389,6 +445,7 @@ void DrawCampaignScreen(const Surface &out, Point o)
 	Button(out, { o + Displacement { 210, 400 }, { 200, 28 } }, "Portals in Tristram", [](bool) { LaunchEditor(TristramLayerName, DTYPE_TOWN, false); });
 	Button(out, { o + Displacement { 420, 400 }, { 180, 28 } }, "Back", [](bool) {
 		StopTyping(true);
+		EndPreview();
 		RefreshCampaigns();
 		Current = Screen::Campaigns;
 	});
@@ -449,6 +506,8 @@ bool MenuConsoleHandleEvent(SDL_Event &event)
 	if (keyDown && SDLC_EventScancode(event) == SDL_SCANCODE_GRAVE) {
 		StopTyping(true);
 		Open = !Open;
+		if (!Open)
+			EndPreview();
 		if (Open) {
 			RefreshCampaigns();
 			if (Current == Screen::Campaign || Current == Screen::NewMap) {
@@ -527,6 +586,7 @@ bool MenuConsoleHandleEvent(SDL_Event &event)
 		case Screen::Campaigns: Open = false; break;
 		case Screen::NewCampaign: Current = Screen::Campaigns; break;
 		case Screen::Campaign:
+			EndPreview();
 			RefreshCampaigns();
 			Current = Screen::Campaigns;
 			break;

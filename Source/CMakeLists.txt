@@ -930,6 +930,7 @@ else()
     )
   else()
     target_sources(libdevilutionx_sound PRIVATE
+      utils/aulib_ogg_decoder.cpp
       utils/push_aulib_decoder.cpp)
     target_link_dependencies(libdevilutionx_sound PUBLIC
       SDL_audiolib::SDL_audiolib

@@ -84,6 +84,7 @@ struct CustomMap {
 	std::vector<MapSpawner> spawners; // not in towns
 	std::vector<MapBoss> bosses;      // not in towns
 	std::string weather; // mood name, empty for the level's usual roll
+	std::string music;   // song file in the campaign's music folder (.ogg or .wav, looped); empty: the style's usual music
 
 	// Editor layers (40 x 40, [y * 40 + x]): the painted floor plan the walls are built from, and
 	// pieces placed by hand on top of it (0 = none). Saved next to the map, ignored by the game.
@@ -135,6 +136,13 @@ void FollowMapLink(const MapLink &link);
 
 /** @brief Builds the level for the active map (called while loading SL_CUSTOM). */
 std::expected<void, std::string> LoadActiveCustomMapLevel();
+
+/** @brief The campaign's folder of songs (ends with a separator); empty for Diablo: Original. */
+[[nodiscard]] std::string CampaignMusicDirectory();
+/** @brief Songs (.ogg, .wav) in the open campaign's music folder, by name. */
+[[nodiscard]] std::vector<std::string> ListCampaignMusic();
+/** @brief Full path of the song the level being played uses, or empty for its usual music. */
+[[nodiscard]] std::string CurrentLevelMusicFile();
 
 /** @brief Each game tick: the hero stepping onto a portal or door travels. */
 void UpdateCustomMapPortals();

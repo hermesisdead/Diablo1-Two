@@ -147,6 +147,7 @@ std::expected<void, std::string> WriteCampaign(const Campaign &campaign)
 		return std::unexpected(StrCat("Not a valid campaign name: ", campaign.id));
 	const std::string folder = CampaignFolder(campaign.id);
 	RecursivelyCreateDir((folder + "maps").c_str());
+	RecursivelyCreateDir((folder + "music").c_str());
 	const std::string text = StrCat("# Campaign (map editor). Share this whole folder to share the campaign.\n",
 	    "title=", OneLine(campaign.title), "\n",
 	    "description=", OneLine(campaign.description), "\n",
