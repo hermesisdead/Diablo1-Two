@@ -434,7 +434,7 @@ std::expected<void, std::string> LoadWildsLevel()
 		RETURN_IF_ERROR(SetMapObjects(data.data(), 0, 0));
 	}
 	dminPosition = { 14, 14 };
-	dmaxPosition = { 18 + 2 * Active->width, 18 + 2 * Active->height };
+	dmaxPosition = WorldTilePosition { static_cast<WorldTileCoord>(18 + 2 * Active->width), static_cast<WorldTileCoord>(18 + 2 * Active->height) };
 	const Point arrival = ActiveCustomMapArrival();
 	ViewPosition = arrival;
 	DRLG_InitTrans();

@@ -282,7 +282,7 @@ void CreateCustomTownLevel(lvl_entry entry)
 		return;
 	}
 	dminPosition = { 14, 14 };
-	dmaxPosition = { 18 + 2 * map->width, 18 + 2 * map->height };
+	dmaxPosition = WorldTilePosition { static_cast<WorldTileCoord>(18 + 2 * map->width), static_cast<WorldTileCoord>(18 + 2 * map->height) };
 	ViewPosition = map->entries.empty() ? Point { 16 + map->width, 16 + map->height } : map->entries.front().tile;
 	LogVerbose("Custom town {} created (entry {})", map->name, static_cast<int>(entry));
 }
