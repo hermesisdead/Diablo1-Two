@@ -87,6 +87,7 @@ set(libdevilutionx_SRCS
   custom_maps/campaign.cpp
   custom_maps/campaign_quests.cpp
   custom_maps/custom_map.cpp
+  custom_maps/custom_npcs.cpp
   custom_maps/custom_town.cpp
   custom_maps/map_monsters.cpp
   custom_maps/map_editor.cpp

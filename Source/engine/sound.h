@@ -98,6 +98,8 @@ void StopAmbience();
 void PlayThunder(float level);
 void music_mute();
 void music_unmute();
+/** @brief Plays a recording once at the sound effects volume (a townsperson's voice line), stopping the last one. */
+void PlayVoiceFile(const std::string &path);
 
 /* data */
 

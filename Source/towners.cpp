@@ -1,5 +1,7 @@
 #include "towners.h"
 #include "custom_maps/campaign_quests.hpp"
+#include "custom_maps/custom_npcs.hpp"
+#include "stores.h"
 
 #include <algorithm>
 #include <array>
@@ -154,6 +156,13 @@ void InitTownerFromData(Towner &towner, const TownerDataEntry &entry)
 		const auto index = std::max<int32_t>(GenerateRnd(static_cast<int32_t>(entry.gossipTexts.size())), 0);
 		towner.gossip = entry.gossipTexts[index];
 	}
+}
+
+/** Campaign townspeople: a borrowed look, their own name and colours. */
+void InitCustomNpc(Towner &towner, const TownerDataEntry &entry)
+{
+	InitTownerFromData(towner, entry);
+	InitCustomNpcTowner(towner);
 }
 
 /**
@@ -742,6 +751,7 @@ const TownerData TownersData[] = {
 	{ TOWN_PRIEST,  nullptr,       TalkToPriest      },
 	{ TOWN_CARAVAN, nullptr,       TalkToCaravan     },
 	{ TOWN_PACKCOW, InitPackCow,   TalkToCow         },
+	{ TOWN_CUSTOM,  InitCustomNpc, TalkToCustomNpc   },
 	// clang-format on
 };
 
@@ -943,6 +953,7 @@ void TalkToTowner(Player &player, int t)
 		return;
 	}
 
+	StoreKeeperName.clear(); // the game's own shopkeepers
 	if (CampaignQuestTalk(player, t))
 		return; // a campaign quest conversation (it can lead on to the usual talk)
 

@@ -464,6 +464,28 @@ int SoundGetOrSetAudioCuesVolume(int volume)
 	return *GetOptions().Audio.audioCuesVolume;
 }
 
+namespace {
+SoundSample voiceLine;
+} // namespace
+
+void PlayVoiceFile(const std::string &path)
+{
+	if (!gbSndInited || !gbSoundOn)
+		return;
+	if (voiceLine.IsLoaded()) {
+		voiceLine.Stop();
+		voiceLine.Release();
+	}
+	if (std::expected<void, std::string> loaded = LoadAudioFile(path.c_str(), /*stream=*/true, voiceLine); !loaded.has_value()) {
+		LogError(LogCategory::Audio, "Voice line {}: {}", path, loaded.error());
+		voiceLine.Release();
+		return;
+	}
+	voiceLine.SetVolume(*GetOptions().Audio.soundVolume, VOLUME_MIN, VOLUME_MAX);
+	if (!voiceLine.Play(/*numIterations=*/1))
+		voiceLine.Release();
+}
+
 void music_mute()
 {
 	if (music.IsLoaded())

@@ -49,6 +49,7 @@
 #include "objects.h"
 #include "options.h"
 #include "player.h"
+#include "custom_maps/custom_town.hpp"
 #include "class_skills.hpp"
 #include "free_move.hpp"
 #include "qol/autopickup.h"
@@ -2601,7 +2602,8 @@ void InitPlayer(Player &player, bool firstTime)
 
 		player._pdir = Direction::South;
 
-		if (&player == MyPlayer && (!firstTime || leveltype != DTYPE_TOWN)) {
+		// A campaign's own town has no fixed spawn spots: the hero starts at its arrival point.
+		if (&player == MyPlayer && (!firstTime || leveltype != DTYPE_TOWN || InCustomTown())) {
 			player.position.tile = ViewPosition;
 		}
 

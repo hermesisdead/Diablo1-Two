@@ -73,6 +73,11 @@ enum class TalkID : uint8_t {
 	Caravan,
 };
 
+/** Name of a campaign townsperson running the store (empty: the game's own shopkeeper). */
+extern std::string StoreKeeperName;
+/** Called instead of the store's "Talk to" page when StoreKeeperName is set. */
+extern void (*StoreKeeperTalk)();
+
 /** Currently active store */
 extern DVL_API_FOR_TEST TalkID ActiveStore;
 

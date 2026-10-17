@@ -45,6 +45,8 @@ enum _talker_id : uint8_t {
 	TOWN_CARAVAN,
 	/** The caravan's cow, loaded with bags. */
 	TOWN_PACKCOW,
+	/** A townsperson made in the Campaign Editor (any number of them; see custom_maps/custom_npcs.hpp). */
+	TOWN_CUSTOM,
 	// Note: Enum values are parsed from TSV using magic_enum
 	// The actual count is determined dynamically from TSV data
 };

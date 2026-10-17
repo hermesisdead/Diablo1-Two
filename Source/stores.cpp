@@ -159,6 +159,18 @@ namespace {
 
 /** The current towner being interacted with */
 _talker_id TownerId;
+} // namespace
+
+std::string StoreKeeperName;
+void (*StoreKeeperTalk)() = nullptr;
+
+namespace {
+
+/** "Talk to <shopkeeper>", for a campaign townsperson running a shop. */
+std::string TalkToLabel(std::string_view usual)
+{
+	return StoreKeeperName.empty() ? std::string(usual) : StrCat(_("Talk to "), StoreKeeperName);
+}
 
 /** Is the current dialog full size */
 bool IsTextFullSize;
@@ -459,7 +471,7 @@ void StartSmith()
 	AddSText(0, 1, _("Welcome to the"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSText(0, 3, _("Blacksmith's shop"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSText(0, 7, _("Would you like to:"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
-	AddSText(0, 10, _("Talk to Griswold"), UiFlags::ColorBlue | UiFlags::AlignCenter, true);
+	AddSText(0, 10, TalkToLabel(_("Talk to Griswold")), UiFlags::ColorBlue | UiFlags::AlignCenter, true);
 	if (*GetOptions().Gameplay.storeUi == StoreUi::VisualGrid) {
 		AddSText(0, 12, _("Trade / Repair"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
 		AddSText(0, 14, _("Leave the shop"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
@@ -716,7 +728,7 @@ void StartWitch()
 	HasScrollbar = false;
 	AddSText(0, 2, _("Witch's shack"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSText(0, 9, _("Would you like to:"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
-	AddSText(0, 12, _("Talk to Adria"), UiFlags::ColorBlue | UiFlags::AlignCenter, true);
+	AddSText(0, 12, TalkToLabel(_("Talk to Adria")), UiFlags::ColorBlue | UiFlags::AlignCenter, true);
 	if (*GetOptions().Gameplay.storeUi == StoreUi::VisualGrid) {
 		AddSText(0, 14, _("Buy / Sell"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
 		AddSText(0, 16, _("Recharge staves"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
@@ -1113,14 +1125,14 @@ void StartBoy()
 	AddSText(0, 2, _("Wirt the Peg-legged boy"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSLine(5);
 	if (!BoyItem.isEmpty()) {
-		AddSText(0, 8, _("Talk to Wirt"), UiFlags::ColorBlue | UiFlags::AlignCenter, true);
+		AddSText(0, 8, TalkToLabel(_("Talk to Wirt")), UiFlags::ColorBlue | UiFlags::AlignCenter, true);
 		AddSText(0, 12, _("I have something for sale,"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 		AddSText(0, 14, _("but it will cost 50 gold"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 		AddSText(0, 16, _("just to take a look. "), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 		AddSText(0, 18, _("What have you got?"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
 		AddSText(0, 20, _("Say goodbye"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
 	} else {
-		AddSText(0, 12, _("Talk to Wirt"), UiFlags::ColorBlue | UiFlags::AlignCenter, true);
+		AddSText(0, 12, TalkToLabel(_("Talk to Wirt")), UiFlags::ColorBlue | UiFlags::AlignCenter, true);
 		AddSText(0, 18, _("Say goodbye"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
 	}
 }
@@ -1173,7 +1185,7 @@ void StartHealer()
 	AddSText(0, 1, _("Welcome to the"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSText(0, 3, _("Healer's home"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSText(0, 9, _("Would you like to:"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
-	AddSText(0, 12, _("Talk to Pepin"), UiFlags::ColorBlue | UiFlags::AlignCenter, true);
+	AddSText(0, 12, TalkToLabel(_("Talk to Pepin")), UiFlags::ColorBlue | UiFlags::AlignCenter, true);
 	AddSText(0, 14, _("Buy items"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
 	AddSText(0, 18, _("Leave Healer's home"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
 	AddSLine(5);
@@ -1213,7 +1225,7 @@ void StartStoryteller()
 	HasScrollbar = false;
 	AddSText(0, 2, _("The Town Elder"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSText(0, 9, _("Would you like to:"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
-	AddSText(0, 12, _("Talk to Cain"), UiFlags::ColorBlue | UiFlags::AlignCenter, true);
+	AddSText(0, 12, TalkToLabel(_("Talk to Cain")), UiFlags::ColorBlue | UiFlags::AlignCenter, true);
 	AddSText(0, 14, _("Identify an item"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
 	AddSText(0, 18, _("Say goodbye"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
 	AddSLine(5);
@@ -2574,6 +2586,13 @@ void StartStore(TalkID s)
 	// Fire StoreOpened Lua event for main store entries
 	if (const char *name = TownerNameForTalkID(s); name != nullptr)
 		lua::StoreOpened(name);
+
+	if (s == TalkID::Gossip && !StoreKeeperName.empty() && StoreKeeperTalk != nullptr) {
+		// A campaign townsperson's shop: back to their own conversation.
+		ActiveStore = TalkID::None;
+		StoreKeeperTalk();
+		return;
+	}
 
 	switch (s) {
 	case TalkID::Smith:

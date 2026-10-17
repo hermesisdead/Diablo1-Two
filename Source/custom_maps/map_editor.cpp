@@ -13,6 +13,7 @@
 #include "cursor.h"
 #include "custom_maps/campaign.hpp"
 #include "custom_maps/custom_map.hpp"
+#include "custom_maps/custom_npcs.hpp"
 #include "custom_maps/custom_town.hpp"
 #include "custom_maps/map_monsters.hpp"
 #include "diablo.h"
@@ -465,13 +466,29 @@ int BossAt(Point tile)
 	return -1;
 }
 
-std::string_view NpcLabel(std::string_view type)
+/** Townspeople the People tool places: the game's own, then the campaign's (NPC editor). */
+struct Person {
+	std::string type;
+	std::string label;
+};
+
+std::vector<Person> People()
 {
-	for (const PlaceableTowner &t : PlaceableTowners()) {
-		if (t.type == type)
-			return t.label;
+	std::vector<Person> people;
+	for (const PlaceableTowner &t : PlaceableTowners())
+		people.push_back({ std::string(t.type), std::string(t.label) });
+	for (const CustomNpc &npc : ReadCustomNpcs())
+		people.push_back({ CustomNpcType(npc.id), StrCat(npc.name, " (yours)") });
+	return people;
+}
+
+std::string NpcLabel(std::string_view type)
+{
+	for (const Person &p : People()) {
+		if (p.type == type)
+			return p.label;
 	}
-	return type;
+	return std::string(type);
 }
 
 std::string NewEntryName()
@@ -615,8 +632,8 @@ std::vector<std::string> PaletteRows()
 			rows.push_back(StrCat("Copied area ", S.clipWidth, "x", S.clipHeight));
 		break;
 	case Tool::Npc:
-		for (const PlaceableTowner &t : PlaceableTowners())
-			rows.emplace_back(t.label);
+		for (const Person &p : People())
+			rows.push_back(p.label);
 		break;
 	case Tool::Spawner:
 		for (const SpawnableMonster &m : SpawnableMonsters())
@@ -1251,7 +1268,8 @@ void MouseDown(Point p, bool right)
 		}
 		if (!CanPlaceAt(tile))
 			break;
-		const PlaceableTowner &who = PlaceableTowners()[S.npc];
+		const std::vector<Person> people = People();
+		const Person &who = people[std::clamp(S.npc, 0, static_cast<int>(people.size()) - 1)];
 		PushUndo();
 		auto existing = std::find_if(S.map.npcs.begin(), S.map.npcs.end(), [&](const MapNpc &npc) { return npc.type == who.type; });
 		if (existing != S.map.npcs.end()) {
@@ -1560,7 +1578,7 @@ void MapEditorTick()
 					ScrollPalette(n[1] - S.paletteScroll - PaletteVisibleRows() / 2);
 				} else if (w[0] == "npc" && n.size() >= 4) {
 					PushUndo();
-					S.map.npcs.push_back({ std::string(PlaceableTowners()[n[1]].type), { n[2], n[3] }, 0 });
+					S.map.npcs.push_back({ People()[n[1]].type, { n[2], n[3] }, 0 });
 				} else if (w[0] == "entry" && n.size() >= 3)
 					S.map.entries.push_back({ w.size() >= 4 ? std::string(w[3]) : NewEntryName(), { n[1], n[2] } });
 				else if ((w[0] == "portal" || w[0] == "door") && n.size() >= 4) {

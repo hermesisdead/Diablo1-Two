@@ -27,6 +27,7 @@ void UpdateAmbience(AmbienceTrack track, float level) { }
 void StopAmbience() { }
 void PlayThunder(float level) { }
 void music_mute() { }
+void PlayVoiceFile(const std::string &path) { }
 void music_unmute() { }
 _music_id GetLevelMusic(dungeon_type dungeonType) { return TMUSIC_TOWN; }
 

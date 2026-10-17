@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <cstdlib>
 #include <functional>
 #include <optional>
@@ -13,6 +14,10 @@
 #include "custom_maps/campaign.hpp"
 #include "custom_maps/campaign_quests.hpp"
 #include "custom_maps/custom_town.hpp"
+#include "custom_maps/custom_npcs.hpp"
+#include "engine/load_cel.hpp"
+#include "engine/load_file.hpp"
+#include "engine/render/clx_render.hpp"
 #include "tables/itemdat.h"
 #include "utils/parse_int.hpp"
 #include "custom_maps/custom_map.hpp"
@@ -38,6 +43,8 @@ enum class Screen : uint8_t {
 	NewMap,
 	Quests,
 	Quest,
+	Npcs,
+	Npc,
 };
 
 struct MapRow {
@@ -85,6 +92,7 @@ constexpr int RowsShown = 9;
 void CreateCampaign();
 void CreateMap();
 void OpenQuests();
+void OpenNpcs();
 
 const std::vector<std::pair<dungeon_type, std::string_view>> &Styles()
 {
@@ -242,8 +250,11 @@ void OpenCampaign(const std::string &id)
 	RefreshMaps();
 }
 
+void UseTownPalette(bool on);
+
 void LaunchEditor(std::string_view map, dungeon_type style, bool play)
 {
+	UseTownPalette(false);
 	Previewing = false; // the game starts its own music
 	StopTyping(true);
 	QueueMapEditor(map, style, play);
@@ -297,9 +308,44 @@ void Frame(const Surface &out, Rectangle r, uint8_t border)
 	DrawVerticalLine(out, r.position + Displacement { r.size.width - 1, 0 }, r.size.height, border);
 }
 
+/** The NPC form shows the town's palette (for a true preview); the menu's font colours then use the game's. */
+bool GamePalette = false;
+std::array<SDL_Color, 256> SavedPalette;
+
+void UseTownPalette(bool on)
+{
+	if (on == GamePalette)
+		return;
+	if (on) {
+		std::array<Color, 256> town;
+		LoadFileInMem("levels\\towndata\\town.pal", town);
+		SavedPalette = logical_palette;
+		for (size_t i = 0; i < town.size(); i++)
+			logical_palette[i] = town[i].toSDL();
+	} else {
+		logical_palette = SavedPalette;
+	}
+	GamePalette = on;
+	UpdateSystemPalette(logical_palette);
+}
+
+UiFlags Ink(UiFlags flags)
+{
+	if (!GamePalette)
+		return flags;
+	const struct {
+		UiFlags menu, game;
+	} map[] = { { UiFlags::ColorUiGold, UiFlags::ColorGold }, { UiFlags::ColorUiSilver, UiFlags::ColorWhite }, { UiFlags::ColorUiSilverDark, UiFlags::ColorBlue }, { UiFlags::ColorUiGoldDark, UiFlags::ColorGold } };
+	for (const auto &m : map) {
+		if (HasAnyOf(flags, m.menu))
+			return (flags & ~m.menu) | m.game;
+	}
+	return flags;
+}
+
 void Text(const Surface &out, std::string_view text, Point at, int width, UiFlags flags = UiFlags::ColorUiSilver)
 {
-	DrawString(out, text, { at, { width, 14 } }, { .flags = flags | UiFlags::KerningFitSpacing });
+	DrawString(out, text, { at, { width, 14 } }, { .flags = Ink(flags) | UiFlags::KerningFitSpacing });
 }
 
 void Button(const Surface &out, Rectangle r, std::string label, std::function<void(bool)> action, bool on = false)
@@ -308,7 +354,7 @@ void Button(const Surface &out, Rectangle r, std::string label, std::function<vo
 	FillRect(out, r.position.x, r.position.y, r.size.width, r.size.height, on ? MenuColours.buttonOn : (hover ? MenuColours.buttonHover : MenuColours.button));
 	Frame(out, r, hover || on ? MenuColours.borderBright : MenuColours.border);
 	DrawString(out, label, { r.position + Displacement { 0, (r.size.height - 12) / 2 }, { r.size.width, 12 } },
-	    { .flags = (on || hover ? UiFlags::ColorUiGold : UiFlags::ColorUiSilver) | UiFlags::AlignCenter | UiFlags::KerningFitSpacing });
+	    { .flags = Ink(on || hover ? UiFlags::ColorUiGold : UiFlags::ColorUiSilver) | UiFlags::AlignCenter | UiFlags::KerningFitSpacing });
 	Clickables.push_back({ r, std::move(label), std::move(action) });
 }
 
@@ -361,7 +407,7 @@ void DrawCampaignsScreen(const Surface &out, Point o)
 		Current = Screen::NewCampaign;
 		StartTyping(NewTitle, 32, false, [] { CreateCampaign(); });
 	});
-	Button(out, { o + Displacement { 400, 400 }, { 200, 28 } }, "Close  (`)", [](bool) { StopTyping(true); EndPreview(); Open = false; });
+	Button(out, { o + Displacement { 400, 400 }, { 200, 28 } }, "Close  (`)", [](bool) { StopTyping(true); EndPreview(); Open = false; UseTownPalette(false); });
 }
 
 void CreateCampaign()
@@ -453,15 +499,16 @@ void DrawCampaignScreen(const Surface &out, Point o)
 	if (!Maps.empty() && Notice.empty())
 		Text(out, StrCat("Songs (.ogg or .wav, looped): campaigns/", c.id, "/music"), o + Displacement { 40, 378 }, 560, UiFlags::ColorUiSilverDark);
 
-	Button(out, { o + Displacement { 40, 400 }, { 126, 28 } }, "New Map", [](bool) {
+	Button(out, { o + Displacement { 40, 400 }, { 100, 28 } }, "New Map", [](bool) {
 		NewMapName.clear();
 		NewMapStyle = Maps.empty() ? DTYPE_TOWN : DTYPE_FOREST;
 		Current = Screen::NewMap;
 		StartTyping(NewMapName, 32, true);
 	});
-	Button(out, { o + Displacement { 172, 400 }, { 126, 28 } }, "Quests", [](bool) { OpenQuests(); });
-	Button(out, { o + Displacement { 304, 400 }, { 170, 28 } }, "Portals in Tristram", [](bool) { LaunchEditor(TristramLayerName, DTYPE_TOWN, false); });
-	Button(out, { o + Displacement { 480, 400 }, { 120, 28 } }, "Back", [](bool) {
+	Button(out, { o + Displacement { 146, 400 }, { 90, 28 } }, "NPCs", [](bool) { OpenNpcs(); });
+	Button(out, { o + Displacement { 242, 400 }, { 90, 28 } }, "Quests", [](bool) { OpenQuests(); });
+	Button(out, { o + Displacement { 338, 400 }, { 150, 28 } }, "Portals in Tristram", [](bool) { LaunchEditor(TristramLayerName, DTYPE_TOWN, false); });
+	Button(out, { o + Displacement { 494, 400 }, { 106, 28 } }, "Back", [](bool) {
 		StopTyping(true);
 		EndPreview();
 		RefreshCampaigns();
@@ -754,6 +801,211 @@ void DrawQuestScreen(const Surface &out, Point o)
 	Button(out, { o + Displacement { 400, 400 }, { 200, 28 } }, "Done", [](bool) { StopTyping(true); Current = Screen::Quests; });
 }
 
+// --- NPCs --------------------------------------------------------------------------------------
+
+std::vector<CustomNpc> NpcList;
+int NpcIndex = -1;
+std::vector<std::string> VoiceFiles;
+
+void SaveNpcs()
+{
+	if (std::expected<void, std::string> r = WriteCustomNpcs(NpcList); !r.has_value())
+		Notice = r.error();
+}
+
+void OpenNpcs()
+{
+	StopTyping(true);
+	NpcList = ReadCustomNpcs();
+	VoiceFiles = ListCampaignVoices();
+	Current = Screen::Npcs;
+}
+
+std::string_view LookLabel(std::string_view key)
+{
+	const NpcLook *look = FindNpcLook(key);
+	return look != nullptr ? look->label : key;
+}
+
+void DrawNpcsScreen(const Surface &out, Point o)
+{
+	Text(out, StrCat("Townspeople (", NpcList.size(), ")"), o + Displacement { 40, 66 }, 300, UiFlags::ColorUiGold);
+	Text(out, "Place them in a town with the map editor's People tool.", o + Displacement { 40, 84 }, 560, UiFlags::ColorUiSilverDark);
+	int y = 106;
+	if (NpcList.empty())
+		Text(out, "No townspeople yet. Click New NPC.", o + Displacement { 40, y + 6 }, 400, UiFlags::ColorUiSilver);
+	for (int i = 0; i < static_cast<int>(NpcList.size()) && i < 9; i++, y += 31) {
+		const CustomNpc &npc = NpcList[i];
+		FillRect(out, o.x + 40, o.y + y, 400, 29, MenuColours.row);
+		Text(out, npc.name, o + Displacement { 46, y + 2 }, 390, UiFlags::ColorUiGold);
+		Text(out, StrCat("Looks like: ", LookLabel(npc.look), "  -  ", npc.shop == NpcShop::None ? std::string("no shop") : std::string(NpcShopLabel(npc.shop)), "  -  ", npc.lines.size(), " lines"),
+		    o + Displacement { 46, y + 15 }, 390, UiFlags::ColorUiSilverDark);
+		const int index = i;
+		Button(out, { o + Displacement { 446, y }, { 74, 29 } }, "Edit", [index](bool) { NpcIndex = index; Current = Screen::Npc; });
+		Button(out, { o + Displacement { 526, y }, { 74, 29 } }, "Delete", [index](bool right) {
+			if (!right) {
+				Notice = "Right-click Delete to remove them (and from any town they stand in).";
+				return;
+			}
+			NpcList.erase(NpcList.begin() + index);
+			SaveNpcs();
+		});
+	}
+	Button(out, { o + Displacement { 40, 400 }, { 200, 28 } }, "New NPC", [](bool) {
+		CustomNpc npc;
+		npc.id = NewNpcId(NpcList);
+		npc.name = "New townsperson";
+		if (!NpcLooks().empty())
+			npc.look = std::string(NpcLooks().front().key);
+		npc.lines.push_back({ "Well met, traveller.", "" });
+		NpcList.push_back(std::move(npc));
+		SaveNpcs();
+		NpcIndex = static_cast<int>(NpcList.size()) - 1;
+		Current = Screen::Npc;
+		StartTyping(NpcList.back().name, 32, false, [] { SaveNpcs(); });
+	});
+	Button(out, { o + Displacement { 400, 400 }, { 200, 28 } }, "Back", [](bool) { StopTyping(true); Current = Screen::Campaign; });
+}
+
+/** Sprite of the look being previewed. */
+std::string PreviewLook;
+std::optional<OwnedClxSpriteList> PreviewSprites;
+
+void DrawNpcPreview(const Surface &out, const CustomNpc &npc, Rectangle box)
+{
+	FillRect(out, box.position.x, box.position.y, box.size.width, box.size.height, Colour(18, 16, 14));
+	Frame(out, box, MenuColours.border);
+	const NpcLook *look = FindNpcLook(npc.look);
+	if (look == nullptr)
+		return;
+	if (PreviewLook != look->path || !PreviewSprites) {
+		PreviewLook = std::string(look->path);
+		PreviewSprites = LoadCel(PreviewLook.c_str(), 96);
+	}
+	const std::array<uint8_t, 256> trn = BuildNpcTrn(npc, logical_palette);
+	const int frame = static_cast<int>((SDL_GetTicks() / static_cast<uint32_t>(std::max(1, look->delay) * 50)) % static_cast<uint32_t>(std::max(1, look->frames)));
+	const ClxSprite sprite = (*PreviewSprites)[std::min<int>(frame, static_cast<int>(PreviewSprites->numSprites()) - 1)];
+	// Drawn at twice the size: onto a scratch surface, then doubled into the box.
+	OwnedSurface scratch(sprite.width(), sprite.height());
+	std::memset(scratch.at(0, 0), 0, static_cast<size_t>(scratch.pitch()) * sprite.height());
+	RenderClxSpriteWithTRN(scratch, sprite, { 0, 0 }, trn.data());
+	const int scale = 2;
+	const int w = std::min(sprite.width() * scale, box.size.width - 4);
+	const int h = std::min(sprite.height() * scale, box.size.height - 4);
+	const Point at { box.position.x + (box.size.width - w) / 2, box.position.y + (box.size.height - h) / 2 };
+	for (int y = 0; y < h; y++) {
+		for (int x = 0; x < w; x++) {
+			const uint8_t c = *scratch.at(x / scale, y / scale);
+			if (c != 0)
+				out.SetPixel(at + Displacement { x, y }, c);
+		}
+	}
+}
+
+/** "-" and "+" around a value: click the value for +, right-click for -. */
+void Stepper(const Surface &out, Rectangle r, std::string label, std::function<void(int)> change)
+{
+	Button(out, r, std::move(label), [change](bool right) { change(right ? -1 : 1); });
+}
+
+void DrawNpcScreen(const Surface &out, Point o)
+{
+	if (NpcIndex < 0 || NpcIndex >= static_cast<int>(NpcList.size())) {
+		Current = Screen::Npcs;
+		return;
+	}
+	CustomNpc &npc = NpcList[NpcIndex];
+	const auto save = [] { SaveNpcs(); };
+	int y = 62;
+	const auto label = [&](std::string_view text) { Text(out, text, o + Displacement { 40, y + 5 }, 90, UiFlags::ColorUiGold); };
+
+	label("Name");
+	Field(out, { o + Displacement { 130, y }, { 290, 22 } }, npc.name, "Their name", 32, false, save);
+	y += 26;
+	label("Looks like");
+	Button(out, { o + Displacement { 130, y }, { 290, 22 } }, std::string(LookLabel(npc.look)), [](bool right) {
+		CustomNpc &npc = NpcList[NpcIndex];
+		std::vector<std::string> keys;
+		for (const NpcLook &look : NpcLooks())
+			keys.emplace_back(look.key);
+		npc.look = Cycle(keys, npc.look, right);
+		SaveNpcs();
+	});
+	y += 26;
+	for (int slot = 0; slot < 2; slot++) {
+		label(slot == 0 ? "Colours" : "and");
+		const NpcRecolor &r = npc.recolor[slot];
+		Button(out, { o + Displacement { 130, y }, { 96, 22 } }, std::string(NpcColorSources()[r.source]), [slot](bool right) {
+			NpcRecolor &r = NpcList[NpcIndex].recolor[slot];
+			const int n = static_cast<int>(NpcColorSources().size());
+			r.source = (r.source + (right ? n - 1 : 1)) % n;
+			SaveNpcs();
+		});
+		if (r.source != 0) {
+			Stepper(out, { o + Displacement { 230, y }, { 64, 22 } }, r.source == 1 ? StrCat("turn ", r.hue) : StrCat("to ", r.hue), [slot](int d) {
+				NpcRecolor &r = NpcList[NpcIndex].recolor[slot];
+				r.hue = (r.hue + d * 20 + 360) % 360;
+				SaveNpcs();
+			});
+			Stepper(out, { o + Displacement { 298, y }, { 60, 22 } }, StrCat("vivid ", r.saturation), [slot](int d) {
+				NpcRecolor &r = NpcList[NpcIndex].recolor[slot];
+				r.saturation = std::clamp(r.saturation + d * 20, 0, 200);
+				SaveNpcs();
+			});
+			Stepper(out, { o + Displacement { 362, y }, { 58, 22 } }, StrCat("light ", r.brightness), [slot](int d) {
+				NpcRecolor &r = NpcList[NpcIndex].recolor[slot];
+				r.brightness = std::clamp(r.brightness + d * 10, 30, 200);
+				SaveNpcs();
+			});
+		}
+		y += 26;
+	}
+	label("Shop");
+	Button(out, { o + Displacement { 130, y }, { 290, 22 } }, std::string(NpcShopLabel(npc.shop)), [](bool right) {
+		CustomNpc &npc = NpcList[NpcIndex];
+		npc.shop = static_cast<NpcShop>((static_cast<int>(npc.shop) + (right ? NpcShopCount - 1 : 1)) % NpcShopCount);
+		SaveNpcs();
+	});
+	y += 30;
+
+	// What they say: each line can have a recording.
+	Text(out, "What they say (one line each time; each can have a recording)", o + Displacement { 40, y }, 380, UiFlags::ColorUiGold);
+	y += 18;
+	for (int i = 0; i < static_cast<int>(npc.lines.size()) && i < 5; i++, y += 25) {
+		NpcLine &line = npc.lines[i];
+		Field(out, { o + Displacement { 40, y }, { 196, 22 } }, line.text, "A line they say", 160, false, save);
+		const int index = i;
+		Button(out, { o + Displacement { 240, y }, { 92, 22 } }, line.voice.empty() ? std::string("No voice") : line.voice, [index](bool right) {
+			NpcLine &line = NpcList[NpcIndex].lines[index];
+			if (VoiceFiles.empty()) {
+				Notice = StrCat("No recordings yet: put .wav or .ogg files in ", CampaignVoiceDirectory());
+				return;
+			}
+			line.voice = Cycle(VoiceFiles, line.voice, right, /*allowNone=*/true);
+			SaveNpcs();
+			PlayNpcVoice(line.voice);
+		});
+		Button(out, { o + Displacement { 336, y }, { 42, 22 } }, "Play", [index](bool) { PlayNpcVoice(NpcList[NpcIndex].lines[index].voice); });
+		Button(out, { o + Displacement { 382, y }, { 38, 22 } }, "Cut", [index](bool) {
+			StopTyping(true);
+			NpcList[NpcIndex].lines.erase(NpcList[NpcIndex].lines.begin() + index);
+			SaveNpcs();
+		});
+	}
+	if (npc.lines.size() < 5) {
+		Button(out, { o + Displacement { 40, y }, { 140, 22 } }, "Add a line", [](bool) {
+			StopTyping(true);
+			NpcList[NpcIndex].lines.push_back({ "", "" });
+			SaveNpcs();
+			StartTyping(NpcList[NpcIndex].lines.back().text, 160, false, [] { SaveNpcs(); });
+		});
+	}
+
+	DrawNpcPreview(out, npc, { o + Displacement { 430, 62 }, { 170, 300 } });
+	Text(out, "Preview", o + Displacement { 430, 366 }, 170, UiFlags::ColorUiSilverDark | UiFlags::AlignCenter);
+	Button(out, { o + Displacement { 400, 400 }, { 200, 28 } }, "Done", [](bool) { StopTyping(true); Current = Screen::Npcs; });
+}
+
 void Activate(const Clickable &c, bool right)
 {
 	Notice.clear();
@@ -769,8 +1021,10 @@ bool MenuConsoleHandleEvent(SDL_Event &event)
 	if (keyDown && SDLC_EventScancode(event) == SDL_SCANCODE_GRAVE) {
 		StopTyping(true);
 		Open = !Open;
-		if (!Open)
+		if (!Open) {
 			EndPreview();
+			UseTownPalette(false);
+		}
 		if (Open) {
 			RefreshCampaigns();
 			if (Current == Screen::Campaign || Current == Screen::NewMap) {
@@ -846,7 +1100,10 @@ bool MenuConsoleHandleEvent(SDL_Event &event)
 	}
 	if (sc == SDL_SCANCODE_ESCAPE) {
 		switch (Current) {
-		case Screen::Campaigns: Open = false; break;
+		case Screen::Campaigns:
+			Open = false;
+			UseTownPalette(false);
+			break;
 		case Screen::NewCampaign: Current = Screen::Campaigns; break;
 		case Screen::Campaign:
 			EndPreview();
@@ -856,6 +1113,8 @@ bool MenuConsoleHandleEvent(SDL_Event &event)
 		case Screen::NewMap: Current = Screen::Campaign; break;
 		case Screen::Quests: Current = Screen::Campaign; break;
 		case Screen::Quest: Current = Screen::Quests; break;
+		case Screen::Npcs: Current = Screen::Campaign; break;
+		case Screen::Npc: Current = Screen::Npcs; break;
 		}
 	} else if ((sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER) && Current == Screen::NewMap) {
 		CreateMap();
@@ -867,6 +1126,7 @@ void DrawMenuConsole()
 {
 	if (!Open)
 		return;
+	UseTownPalette(Current == Screen::Npc);
 	if (NeedsRefresh) {
 		// Back from the editor: the campaign may have new maps.
 		NeedsRefresh = false;
@@ -885,7 +1145,7 @@ void DrawMenuConsole()
 	const Rectangle panel { o + Displacement { 20, 20 }, { 600, 440 } };
 	DrawHalfTransparentRectTo(out, panel.position.x, panel.position.y, panel.size.width, panel.size.height);
 	Frame(out, panel, MenuColours.border);
-	DrawString(out, "Campaign Editor", { o + Displacement { 0, 30 }, { 640, 30 } }, { .flags = UiFlags::FontSize24 | UiFlags::ColorUiGold | UiFlags::AlignCenter });
+	DrawString(out, "Campaign Editor", { o + Displacement { 0, 30 }, { 640, 30 } }, { .flags = UiFlags::FontSize24 | Ink(UiFlags::ColorUiGold) | UiFlags::AlignCenter });
 	switch (Current) {
 	case Screen::Campaigns: DrawCampaignsScreen(out, o); break;
 	case Screen::NewCampaign: DrawNewCampaignScreen(out, o); break;
@@ -893,6 +1153,8 @@ void DrawMenuConsole()
 	case Screen::NewMap: DrawNewMapScreen(out, o); break;
 	case Screen::Quests: DrawQuestsScreen(out, o); break;
 	case Screen::Quest: DrawQuestScreen(out, o); break;
+	case Screen::Npcs: DrawNpcsScreen(out, o); break;
+	case Screen::Npc: DrawNpcScreen(out, o); break;
 	}
 	if (!Notice.empty())
 		Text(out, Notice, o + Displacement { 40, 378 }, 560, UiFlags::ColorUiGold);

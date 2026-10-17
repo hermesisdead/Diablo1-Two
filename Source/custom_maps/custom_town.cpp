@@ -9,6 +9,7 @@
 #include <magic_enum/magic_enum.hpp>
 
 #include "custom_maps/custom_map.hpp"
+#include "custom_maps/custom_npcs.hpp"
 #include "custom_maps/map_editor.hpp"
 #include "control/control.hpp"
 #include "cursor.h"
@@ -411,6 +412,13 @@ void ApplyCustomTownTowners(std::vector<TownerDataEntry> &entries)
 	std::vector<TownerDataEntry> placed;
 	if (map != nullptr) {
 		for (const MapNpc &npc : map->npcs) {
+			if (const std::string_view customId = CustomNpcIdOf(npc.type); !customId.empty()) {
+				// A townsperson made in the Campaign Editor (any number of them).
+				TownerDataEntry entry;
+				if (MakeCustomNpcEntry(customId, npc.tile, npc.direction, entry))
+					placed.push_back(std::move(entry));
+				continue;
+			}
 			const std::optional<_talker_id> type = magic_enum::enum_cast<_talker_id>(npc.type);
 			if (!type)
 				continue;

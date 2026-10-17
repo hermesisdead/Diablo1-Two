@@ -13,6 +13,8 @@
 #include "cursor.h"
 #include "custom_maps/campaign.hpp"
 #include "custom_maps/custom_map.hpp"
+#include "custom_maps/custom_npcs.hpp"
+#include "stores.h"
 #include "custom_maps/custom_town.hpp"
 #include "diablo_msg.hpp"
 #include "engine/palette.h"
@@ -221,7 +223,70 @@ void ContinueToTownerTalk(Player &player, int townerIndex)
 std::string TownerKey(const Towner &towner)
 {
 	const std::string town = InCustomTown() ? CurrentCustomTown() : std::string("tristram");
+	if (const CustomNpc *npc = CustomNpcOf(towner); npc != nullptr)
+		return StrCat(town, ":", CustomNpcType(npc->id));
 	return StrCat(town, ":", magic_enum::enum_name(towner._ttype));
+}
+
+/** One of a campaign townsperson's lines, spoken (its voice recording plays). */
+std::string SayLine(const CustomNpc &npc, int avoid = -1)
+{
+	if (npc.lines.empty())
+		return "Greetings, stranger.";
+	int pick = std::rand() % static_cast<int>(npc.lines.size());
+	if (pick == avoid && npc.lines.size() > 1)
+		pick = (pick + 1) % static_cast<int>(npc.lines.size());
+	PlayNpcVoice(npc.lines[pick].voice);
+	return npc.lines[pick].text.empty() ? std::string("...") : npc.lines[pick].text;
+}
+
+TalkID ShopStore(NpcShop shop)
+{
+	switch (shop) {
+	case NpcShop::Smith: return TalkID::Smith;
+	case NpcShop::Healer: return TalkID::Healer;
+	case NpcShop::Witch: return TalkID::Witch;
+	case NpcShop::Boy: return TalkID::Boy;
+	case NpcShop::Gambler: return TalkID::Gambler;
+	case NpcShop::Storyteller: return TalkID::Storyteller;
+	default: return TalkID::None;
+	}
+}
+
+int LastNpcTowner = -1;
+
+void ReopenNpcTalk()
+{
+	if (LastNpcTowner >= 0 && static_cast<size_t>(LastNpcTowner) < Towners.size() && MyPlayer != nullptr)
+		CampaignQuestTalk(*MyPlayer, LastNpcTowner);
+}
+
+/** Choices every campaign townsperson offers after the quest ones: their shop, more talk, goodbye. */
+void AddNpcChoices(const CustomNpc &npc, int townerIndex)
+{
+	if (npc.shop != NpcShop::None) {
+		const TalkID store = ShopStore(npc.shop);
+		const std::string name = npc.name;
+		Talk.choices.push_back({ "Let me see your wares", [store, name, townerIndex]() {
+			                        Close();
+			                        StoreKeeperName = name;
+			                        StoreKeeperTalk = &ReopenNpcTalk;
+			                        LastNpcTowner = townerIndex;
+			                        StartStore(store);
+		                        } });
+	}
+	if (npc.lines.size() > 1) {
+		const std::string id = npc.id;
+		Talk.choices.push_back({ "Tell me more", [id]() {
+			                        if (const CustomNpc *n = FindCustomNpc(id); n != nullptr) {
+				                        const std::string before = Talk.text;
+				                        Talk.text = SayLine(*n);
+				                        if (Talk.text == before)
+					                        Talk.text = SayLine(*n);
+			                        }
+		                        } });
+	}
+	Talk.choices.push_back({ "Farewell", [] { Close(); } });
 }
 
 void SetState(const CampaignQuest &quest, QuestState state)
@@ -367,6 +432,10 @@ std::string QuestPersonLabel(std::string_view key)
 	const std::string town = KeyPart(key, false);
 	const std::string type = KeyPart(key, true);
 	std::string name = type;
+	if (const std::string_view customId = CustomNpcIdOf(type); !customId.empty()) {
+		const CustomNpc *npc = FindCustomNpc(customId);
+		name = npc != nullptr ? npc->name : std::string("(removed townsperson)");
+	}
 	for (const PlaceableTowner &t : PlaceableTowners()) {
 		if (t.type == type)
 			name = std::string(t.label);
@@ -450,7 +519,8 @@ bool CampaignQuestTalk(Player &player, int townerIndex)
 		else if (q.giver == key && state == QuestState::NotStarted && Unlocked(q) && offer == nullptr)
 			offer = &q;
 	}
-	if (ready == nullptr && deliver == nullptr && active == nullptr && offer == nullptr)
+	const CustomNpc *npc = CustomNpcOf(towner);
+	if (ready == nullptr && deliver == nullptr && active == nullptr && offer == nullptr && npc == nullptr)
 		return false;
 
 	Talk = {};
@@ -459,6 +529,13 @@ bool CampaignQuestTalk(Player &player, int townerIndex)
 	Talk.speaker = std::string(towner.name);
 	Player *hero = &player;
 	const auto talkOn = [hero, townerIndex]() { ContinueToTownerTalk(*hero, townerIndex); };
+	LastNpcTowner = townerIndex;
+	if (ready == nullptr && deliver == nullptr && active == nullptr && offer == nullptr) {
+		// A campaign townsperson with nothing to ask: they greet the hero.
+		Talk.text = SayLine(*npc);
+		AddNpcChoices(*npc, townerIndex);
+		return true;
+	}
 	if (ready != nullptr) {
 		const CampaignQuest quest = *ready;
 		if (!quest.thanks.empty())
@@ -499,7 +576,10 @@ bool CampaignQuestTalk(Player &player, int townerIndex)
 		                        } });
 		Talk.choices.push_back({ "Not now", [] { Close(); } });
 	}
-	Talk.choices.push_back({ "Talk about something else", talkOn });
+	if (npc != nullptr)
+		AddNpcChoices(*npc, townerIndex);
+	else
+		Talk.choices.push_back({ "Talk about something else", talkOn });
 	return true;
 }
 
@@ -587,6 +667,10 @@ void CampaignQuestsDevTick()
 		SaveGame();
 	} else if (cmd == "log") {
 		LogInfo("QUESTSCRIPT state: {}", SaveCampaignQuestState());
+		for (const Towner &t : Towners)
+			LogInfo("QUESTSCRIPT towner {} at {},{} anim {} dMonster {} visible {}", t.name, t.position.x, t.position.y, t.anim ? 1 : 0, dMonster[t.position.x][t.position.y],
+			    HasAnyOf(dFlags[t.position.x][t.position.y], DungeonFlag::Visible) ? 1 : 0);
+		LogInfo("QUESTSCRIPT hero at {},{}", player.position.tile.x, player.position.tile.y);
 	}
 }
 #endif
