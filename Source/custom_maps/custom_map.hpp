@@ -65,6 +65,19 @@ struct MapBoss {
 /** @brief Sentinel monster for spawners that pick a type fitting the hero's level. */
 inline constexpr std::string_view AutoMonster = "auto";
 
+/** @brief An animal that wanders around where it was placed (town-tiled maps). */
+struct MapAnimal {
+	Point tile; // world tile it lives around
+	std::string kind; // see map_animals.hpp
+};
+
+/** @brief Fencing on a world tile. */
+enum class FenceKind : uint8_t {
+	None,
+	Fence,
+	Gate, // players pass, animals do not
+};
+
 struct MapPortal {
 	Point tile; // world tile
 	bool door = false; // a doorway rather than a magic portal
@@ -84,6 +97,8 @@ struct CustomMap {
 	// Decor over the ground (town-tiled styles): width * height ids per layer, see engine/render/tile_decor.hpp.
 	std::array<std::vector<uint16_t>, MapDecorLayerCount> decor;
 	std::array<std::vector<int8_t>, MapDecorLayerCount> decorHues;
+	std::vector<uint8_t> fences;     // (2 * width) * (2 * height) FenceKind per world tile
+	std::vector<MapAnimal> animals;  // town-tiled maps
 	std::vector<uint16_t> monsters; // (2 * width) * (2 * height) .dun monster ids, 0 = none
 	std::vector<uint16_t> objects;  // (2 * width) * (2 * height) .dun object ids, 0 = none
 	std::vector<MapEntryPoint> entries;

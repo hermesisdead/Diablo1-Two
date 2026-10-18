@@ -27,6 +27,7 @@ struct Building {
 	std::vector<int8_t> hues;
 	std::array<std::vector<uint16_t>, MapDecorLayerCount> decor;
 	std::array<std::vector<int8_t>, MapDecorLayerCount> decorHues;
+	std::vector<uint8_t> fences; // (2 * width) * (2 * height) FenceKind per world tile
 
 	/** Sizes every layer for width * height (cleared). */
 	void Resize(int w, int h);

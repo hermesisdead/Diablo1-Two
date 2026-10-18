@@ -90,6 +90,7 @@ set(libdevilutionx_SRCS
   custom_maps/campaign_quests.cpp
   custom_maps/building_library.cpp
   custom_maps/custom_map.cpp
+  custom_maps/map_animals.cpp
   custom_maps/custom_npcs.cpp
   custom_maps/custom_town.cpp
   custom_maps/map_monsters.cpp

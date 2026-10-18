@@ -10,6 +10,7 @@
 
 #include "custom_maps/custom_map.hpp"
 #include "custom_maps/custom_npcs.hpp"
+#include "custom_maps/map_animals.hpp"
 #include "custom_maps/map_editor.hpp"
 #include "control/control.hpp"
 #include "cursor.h"
@@ -263,6 +264,19 @@ void PaintDecorLayers(const CustomMap &map)
 	std::memset(dDecorFlower, 0, sizeof(dDecorFlower));
 	std::memset(dDecorHue, 0, sizeof(dDecorHue));
 	std::memset(dDecorSolid, 0, sizeof(dDecorSolid));
+	std::memset(dFence, 0, sizeof(dFence));
+	if (map.fences.size() == map.tiles.size() * 4) {
+		// Fences block everyone; gates let people through (animals keep away from both).
+		const int cols = 2 * map.width;
+		for (int y = 0; y < 2 * map.height; y++) {
+			for (int x = 0; x < cols; x++) {
+				const uint8_t fence = map.fences[static_cast<size_t>(y) * cols + x];
+				dFence[16 + x][16 + y] = fence;
+				if (fence == static_cast<uint8_t>(FenceKind::Fence))
+					dDecorSolid[16 + x][16 + y] = true;
+			}
+		}
+	}
 	for (int layer = 0; layer < MapDecorLayerCount; layer++) {
 		if ((HiddenDecorLayers & (1u << layer)) != 0 || map.decor[layer].size() != map.tiles.size())
 			continue;
@@ -296,6 +310,7 @@ void PaintDecorLayers(const CustomMap &map)
 			}
 		}
 	}
+	SetLevelAnimals(map.animals);
 	MarkWalkabilityChanged();
 }
 } // namespace

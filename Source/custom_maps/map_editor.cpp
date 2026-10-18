@@ -19,6 +19,7 @@
 #include "custom_maps/custom_map.hpp"
 #include "custom_maps/custom_npcs.hpp"
 #include "custom_maps/custom_town.hpp"
+#include "custom_maps/map_animals.hpp"
 #include "custom_maps/map_monsters.hpp"
 #include "diablo.h"
 #include "engine/light_tables.hpp"
@@ -81,6 +82,8 @@ enum class Tool : uint8_t {
 	Spawner,
 	Boss,
 	Chest,
+	Fence,
+	Animal,
 	COUNT,
 };
 
@@ -105,6 +108,8 @@ struct Snapshot {
 	std::vector<int8_t> hues;
 	std::array<std::vector<uint16_t>, MapDecorLayerCount> decor;
 	std::array<std::vector<int8_t>, MapDecorLayerCount> decorHues;
+	std::vector<uint8_t> fences;
+	std::vector<MapAnimal> animals;
 };
 
 /** What the Paint tool lays: ground (a brush or one tile), decor on a decor layer, or a whole building. */
@@ -181,6 +186,10 @@ struct Session {
 
 	bool weatherMenu = false; // the weather list is open
 
+	int fenceKind = 0; // Fence tool: 0 fence, 1 gate, 2 remove
+	int animal = 0;    // Animals tool: index in AnimalKinds()
+	std::vector<std::pair<Point, uint8_t>> fenceGhost; // fencing previewed this frame, and what it covered
+
 	// Tile picker (Paint tool): every megatile of the tileset as a picture.
 	bool showTilePicker = false;
 	int pickerTab = 0;         // Ground, Decor, Buildings, All
@@ -235,8 +244,8 @@ void Say(std::string text)
 const std::vector<Tool> &ToolsFor(Kind kind)
 {
 	static const std::vector<Tool> dungeon { Tool::Room, Tool::Erase, Tool::Spawner, Tool::Boss, Tool::Chest, Tool::Entry, Tool::Portal, Tool::Door };
-	static const std::vector<Tool> town { Tool::Paint, Tool::Stamp, Tool::Copy, Tool::Npc, Tool::Entry, Tool::Portal, Tool::Door };
-	static const std::vector<Tool> wilds { Tool::Paint, Tool::Stamp, Tool::Copy, Tool::Spawner, Tool::Boss, Tool::Chest, Tool::Entry, Tool::Portal, Tool::Door };
+	static const std::vector<Tool> town { Tool::Paint, Tool::Stamp, Tool::Copy, Tool::Fence, Tool::Animal, Tool::Npc, Tool::Entry, Tool::Portal, Tool::Door };
+	static const std::vector<Tool> wilds { Tool::Paint, Tool::Stamp, Tool::Copy, Tool::Fence, Tool::Animal, Tool::Spawner, Tool::Boss, Tool::Chest, Tool::Entry, Tool::Portal, Tool::Door };
 	static const std::vector<Tool> tristram { Tool::Entry, Tool::Portal, Tool::Door };
 	switch (kind) {
 	case Kind::Town: return town;
@@ -281,7 +290,7 @@ bool OnEditorLevel()
 
 void PushUndo()
 {
-	S.undo.push_back({ S.map.plan, S.map.overrides, S.map.tiles, S.map.entries, S.map.portals, S.map.npcs, S.map.spawners, S.map.bosses, S.map.objects, S.map.hues, S.map.decor, S.map.decorHues });
+	S.undo.push_back({ S.map.plan, S.map.overrides, S.map.tiles, S.map.entries, S.map.portals, S.map.npcs, S.map.spawners, S.map.bosses, S.map.objects, S.map.hues, S.map.decor, S.map.decorHues, S.map.fences, S.map.animals });
 	if (S.undo.size() > 60)
 		S.undo.erase(S.undo.begin());
 	S.dirty = true;
@@ -427,6 +436,56 @@ int8_t &TownDecorHue(int layer, Point piece)
 	return hues[static_cast<size_t>(piece.y) * S.map.width + piece.x];
 }
 
+/** Town: fencing on a world tile of the map, nullptr outside it. */
+uint8_t *TownFence(Point world)
+{
+	const int cols = 2 * S.map.width, rows = 2 * S.map.height;
+	const Point local = world - Displacement { 16, 16 };
+	if (local.x < 0 || local.y < 0 || local.x >= cols || local.y >= rows)
+		return nullptr;
+	if (S.map.fences.size() != static_cast<size_t>(cols) * rows)
+		S.map.fences.assign(static_cast<size_t>(cols) * rows, 0);
+	return &S.map.fences[static_cast<size_t>(local.y) * cols + local.x];
+}
+
+/** The world tiles of a straight run of fence from a towards b (along whichever way is longer). */
+std::vector<Point> FenceRun(Point a, Point b)
+{
+	std::vector<Point> run;
+	const Displacement d = b - a;
+	if (std::abs(d.deltaX) >= std::abs(d.deltaY)) {
+		for (int x = std::min(a.x, b.x); x <= std::max(a.x, b.x); x++)
+			run.push_back({ x, a.y });
+	} else {
+		for (int y = std::min(a.y, b.y); y <= std::max(a.y, b.y); y++)
+			run.push_back({ a.x, y });
+	}
+	return run;
+}
+
+void SetFenceRun(Point a, Point b, uint8_t kind)
+{
+	PushUndo();
+	int changed = 0;
+	for (const Point t : FenceRun(a, b)) {
+		if (uint8_t *f = TownFence(t); f != nullptr) {
+			*f = kind;
+			changed++;
+		}
+	}
+	Rebuild();
+	Say(kind == 0 ? StrCat("Removed fencing (", changed, " tiles).") : StrCat("Built ", changed, " tiles of ", kind == 2 ? "gate." : "fence."));
+}
+
+int AnimalAt(Point tile)
+{
+	for (size_t i = 0; i < S.map.animals.size(); i++) {
+		if (S.map.animals[i].tile.WalkingDistance(tile) <= 1)
+			return static_cast<int>(i);
+	}
+	return -1;
+}
+
 /** Town: the building the Stamp tool places (the copied area for stamp -1), nullptr if none. */
 const Building *StampBuilding()
 {
@@ -479,6 +538,12 @@ void PlaceBuilding(const Building &b, Point centre)
 				TownDecor(layer, at) = b.decor[layer][i];
 				TownDecorHue(layer, at) = b.decorHues[layer][i];
 			}
+			if (b.fences.size() == b.tiles.size() * 4) {
+				for (int k = 0; k < 4; k++) {
+					if (uint8_t *f = TownFence({ 16 + 2 * at.x + k % 2, 16 + 2 * at.y + k / 2 }); f != nullptr)
+						*f = b.fences[static_cast<size_t>(2 * y + k / 2) * (2 * b.width) + 2 * x + k % 2];
+				}
+			}
 		}
 	}
 	Rebuild();
@@ -508,6 +573,10 @@ Building TakeArea(Point a, Point b)
 			for (int layer = 0; layer < MapDecorLayerCount; layer++) {
 				out.decor[layer][i] = TownDecor(layer, { x, y });
 				out.decorHues[layer][i] = TownDecorHue(layer, { x, y });
+			}
+			for (int k = 0; k < 4; k++) {
+				const uint8_t *f = TownFence({ 16 + 2 * x + k % 2, 16 + 2 * y + k / 2 });
+				out.fences[static_cast<size_t>(2 * (y - y0) + k / 2) * (2 * out.width) + 2 * (x - x0) + k % 2] = f != nullptr ? *f : 0;
 			}
 		}
 	}
@@ -736,6 +805,8 @@ std::string_view ToolName(Tool tool)
 	case Tool::Spawner: return "Monsters";
 	case Tool::Boss: return "Boss";
 	case Tool::Chest: return "Chest";
+	case Tool::Fence: return "Fence";
+	case Tool::Animal: return "Animals";
 	default: return "";
 	}
 }
@@ -755,6 +826,8 @@ std::string_view ToolHint(Tool tool)
 	case Tool::Spawner: return "Click to place a pack (click one to change it). Right-click removes. Wheel over the list scrolls it.";
 	case Tool::Boss: return "Click to place the chosen boss with its minions. Right-click removes. Wheel over the list scrolls it.";
 	case Tool::Chest: return "Click to place a chest (quests can hide an item in it). Right-click removes.";
+	case Tool::Fence: return "Drag a straight run of fence (or a gate). Right-drag removes fencing.";
+	case Tool::Animal: return "Click to place the chosen animal; it wanders around there, never past fences. Right-click removes.";
 	default: return "";
 	}
 }
@@ -790,6 +863,15 @@ std::vector<std::string> PaletteRows()
 		for (const std::string &name : PlaceableBosses())
 			rows.push_back(name);
 		break;
+	case Tool::Fence:
+		rows.push_back("Wooden fence");
+		rows.push_back("Gate (people pass, animals don't)");
+		rows.push_back("Remove fencing");
+		break;
+	case Tool::Animal:
+		for (const AnimalKindInfo &a : AnimalKinds())
+			rows.emplace_back(a.label);
+		break;
 	default:
 		break;
 	}
@@ -807,6 +889,8 @@ std::string PaletteTitle()
 	case Tool::Npc: return "Townspeople";
 	case Tool::Spawner: return StrCat("Pack of ", S.packSize, "  (click +/right -)");
 	case Tool::Boss: return "Bosses (with minions)";
+	case Tool::Fence: return "Wooden fencing";
+	case Tool::Animal: return StrCat("Animals (", S.map.animals.size(), " placed)");
 	default: return "";
 	}
 }
@@ -820,6 +904,8 @@ int PaletteSelected()
 	case Tool::Npc: return S.npc;
 	case Tool::Spawner: return S.monster;
 	case Tool::Boss: return S.boss;
+	case Tool::Fence: return S.fenceKind;
+	case Tool::Animal: return S.animal;
 	default: return -1;
 	}
 }
@@ -841,6 +927,8 @@ void SelectPalette(int row)
 	case Tool::Npc: S.npc = row; break;
 	case Tool::Spawner: S.monster = row; break;
 	case Tool::Boss: S.boss = row; break;
+	case Tool::Fence: S.fenceKind = std::clamp(row, 0, 2); break;
+	case Tool::Animal: S.animal = row; break;
 	default: break;
 	}
 }
@@ -1418,6 +1506,22 @@ void DrawWorldOverlay(const Surface &out)
 		Marker(view, pr, s.tile, PAL16_ORANGE + 2, StrCat(SpawnerLabel(s.monster), " x", s.count), UiFlags::ColorGold);
 	for (const MapBoss &b : S.map.bosses)
 		Marker(view, pr, b.tile, PAL16_RED + 4, StrCat("Boss: ", b.name), UiFlags::ColorRed);
+	if (S.tool == Tool::Animal) {
+		for (const MapAnimal &a : S.map.animals)
+			Marker(view, pr, a.tile, PAL16_GRAY + 2, AnimalLabel(a.kind), UiFlags::ColorWhite);
+	}
+	if (S.tool == Tool::Fence && CanPlaceAt(cursPosition) && (S.dragging ? S.dragErase : S.fenceKind == 2)) {
+		// What would be removed, outlined in red.
+		for (const Point t : S.dragging ? FenceRun(S.dragStart, cursPosition) : std::vector<Point> { cursPosition }) {
+			const std::optional<Point> p0 = Screen(pr, t.x, t.y), p1 = Screen(pr, t.x + 1.0f, t.y), p2 = Screen(pr, t.x + 1.0f, t.y + 1.0f), p3 = Screen(pr, t.x, t.y + 1.0f);
+			if (p0 && p1 && p2 && p3) {
+				Line(view, *p0, *p1, PAL8_RED);
+				Line(view, *p1, *p2, PAL8_RED);
+				Line(view, *p2, *p3, PAL8_RED);
+				Line(view, *p3, *p0, PAL8_RED);
+			}
+		}
+	}
 	for (const Point chest : MapChests(S.map))
 		Marker(view, pr, chest, PAL16_YELLOW + 2, StrCat("Chest ", chest.x, ",", chest.y), UiFlags::ColorGold);
 }
@@ -1560,6 +1664,12 @@ void RenderBuilding(const Surface &out, Point base, const Building &b)
 					continue;
 				const Tables tables = tablesFor(b.decorHues[layer][i]);
 				DrawDecorPiece(out, lightmapFor(tables), at, static_cast<uint16_t>(decorPiece), tables[0].data());
+			}
+			if (b.fences.size() == static_cast<size_t>(cols) * rows) {
+				auto fenceAt = [&](int x, int y) { return x >= 0 && y >= 0 && x < cols && y < rows && b.fences[static_cast<size_t>(y) * cols + x] != 0; };
+				const uint8_t fence = b.fences[static_cast<size_t>(wy) * cols + wx];
+				if (fence != 0)
+					DrawFence(out, at, fence, { fenceAt(wx + 1, wy), fenceAt(wx - 1, wy), fenceAt(wx, wy + 1), fenceAt(wx, wy - 1) }, LightTables[0].data());
 			}
 			if (townRoofs && piece >= 0) {
 				const uint8_t special = TownSpecialForPiece(static_cast<uint16_t>(piece));
@@ -1968,6 +2078,8 @@ void Undo()
 	S.map.hues = s.hues;
 	S.map.decor = s.decor;
 	S.map.decorHues = s.decorHues;
+	S.map.fences = s.fences;
+	S.map.animals = s.animals;
 	S.dirty = true;
 	Rebuild();
 }
@@ -2503,6 +2615,34 @@ void MouseDown(Point p, bool right)
 		}
 		break;
 	}
+	case Tool::Fence:
+		if (CanPlaceAt(tile)) {
+			S.dragging = true;
+			S.dragErase = right || S.fenceKind == 2;
+			S.dragStart = tile;
+		}
+		break;
+	case Tool::Animal: {
+		const int at = AnimalAt(tile);
+		if (right) {
+			if (at >= 0) {
+				PushUndo();
+				Say(StrCat(AnimalLabel(S.map.animals[at].kind), " removed."));
+				S.map.animals.erase(S.map.animals.begin() + at);
+				Rebuild();
+			}
+			break;
+		}
+		if (!CanPlaceAt(tile) || !IsTileWalkable(tile) || dFence[tile.x][tile.y] != 0)
+			break;
+		const std::vector<AnimalKindInfo> &kinds = AnimalKinds();
+		const AnimalKindInfo &kind = kinds[std::clamp(S.animal, 0, static_cast<int>(kinds.size()) - 1)];
+		PushUndo();
+		S.map.animals.push_back({ tile, std::string(kind.key) });
+		Rebuild();
+		Say(StrCat(kind.label, " placed. It wanders around here (test with P); fences keep it in."));
+		break;
+	}
 	case Tool::Chest: {
 		if (!CanPlaceAt(tile))
 			break;
@@ -2589,7 +2729,9 @@ void MouseUp()
 	if (S.dragging) {
 		S.dragging = false;
 		const Point end = PieceAt(cursPosition);
-		if (S.tool == Tool::Paint && S.capturing)
+		if (S.tool == Tool::Fence)
+			SetFenceRun(S.dragStart, cursPosition, S.dragErase ? 0 : static_cast<uint8_t>(S.fenceKind + 1));
+		else if (S.tool == Tool::Paint && S.capturing)
 			CaptureArea(S.dragStart, end);
 		else if (S.tool == Tool::Paint && S.paintKind == PaintKind::Decor)
 			PaintDecor(S.dragStart, end);
@@ -2751,7 +2893,7 @@ void MapEditorTick()
 	// Test hook: DEVILUTIONX_DEV_EDITORSCRIPT = commands separated by ';' run one per tick once editing:
 	// room x0 y0 x1 y1 | erase x0 y0 x1 y1 | paint x0 y0 x1 y1 brush | stamp index x y | copy x0 y0 x1 y1 |
 	// npc index x y | entry x y | portal x y town [entry] | door x y map name | save | test | cam x y | tool n | dialog
-	if (const char *script = std::getenv("DEVILUTIONX_DEV_EDITORSCRIPT"); script != nullptr && IsMapEditing()) {
+	if (const char *script = std::getenv("DEVILUTIONX_DEV_EDITORSCRIPT"); script != nullptr && S.running && OnEditorLevel()) { // also while play-testing
 		static size_t step = 0;
 		static int wait = 0;
 		std::vector<std::string_view> cmds;
@@ -2893,6 +3035,18 @@ void MapEditorTick()
 				else if (w[0] == "zoom" && n.size() >= 2) {
 					S.pickerZoom = std::clamp(n[1], 1, 3);
 					ShowPickerSelection();
+				} else if (w[0] == "fence" && n.size() >= 6) {
+					// fence kind(0 fence, 1 gate, 2 remove) x0 y0 x1 y1 (world tiles)
+					SetFenceRun({ n[2], n[3] }, { n[4], n[5] }, n[1] == 2 ? 0 : static_cast<uint8_t>(n[1] + 1));
+				} else if (w[0] == "animal" && n.size() >= 4) {
+					PushUndo();
+					S.map.animals.push_back({ { n[2], n[3] }, std::string(w[1]) });
+					Rebuild();
+				} else if (w[0] == "animals") {
+					std::string where;
+					for (const Point p : AnimalPositions())
+						where += StrCat(p.x, ",", p.y, " ");
+					LogInfo("EDITORANIMALS {}", where);
 				} else if (w[0] == "weathermenu")
 					S.weatherMenu = true;
 				else if (w[0] == "weatherrow" && n.size() >= 2) {
@@ -2940,6 +3094,8 @@ void MapEditorTick()
 
 namespace {
 
+void RestoreFenceGhost();
+
 /** Puts back what the paint preview covered. */
 void RestoreGhost()
 {
@@ -2955,6 +3111,29 @@ void RestoreGhost()
 		}
 	}
 	S.ghost.clear();
+	RestoreFenceGhost();
+}
+
+void RestoreFenceGhost()
+{
+	for (auto it = S.fenceGhost.rbegin(); it != S.fenceGhost.rend(); ++it)
+		dFence[it->first.x][it->first.y] = it->second;
+	S.fenceGhost.clear();
+}
+
+/** Shows the run of fence being dragged (or the tile under the cursor) in place for this frame. */
+void PlaceFenceGhost()
+{
+	if (!S.editing || S.tool != Tool::Fence || S.linkPortal >= 0 || S.panning || OnInterface(MousePosition) || !CanPlaceAt(cursPosition))
+		return;
+	const bool erase = S.dragging ? S.dragErase : S.fenceKind == 2;
+	const uint8_t kind = erase ? 0 : static_cast<uint8_t>(S.fenceKind + 1);
+	for (const Point t : S.dragging ? FenceRun(S.dragStart, cursPosition) : std::vector<Point> { cursPosition }) {
+		if (TownFence(t) == nullptr)
+			continue;
+		S.fenceGhost.emplace_back(t, dFence[t.x][t.y]);
+		dFence[t.x][t.y] = kind;
+	}
 }
 
 /** Remembers the four world tiles of a megatile before the preview changes them. */
@@ -3187,8 +3366,10 @@ void MapEditorBeforeDraw()
 	// Dragging markers.
 	if (S.movingEntry >= 0 && S.movingEntry < static_cast<int>(S.map.entries.size()))
 		S.map.entries[S.movingEntry].tile = cursPosition;
-	if (OnEditorLevel())
+	if (OnEditorLevel()) {
 		PlaceGhost();
+		PlaceFenceGhost();
+	}
 }
 
 bool MapEditorHandleEvent(const SDL_Event &event)

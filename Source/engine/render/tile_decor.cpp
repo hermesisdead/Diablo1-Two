@@ -25,6 +25,9 @@ enum Shade : uint8_t {
 	Purple,
 	Blue,
 	Pink,
+	Wood,
+	WoodLight,
+	WoodDark,
 	ShadeCount,
 };
 
@@ -39,6 +42,9 @@ constexpr std::array<std::array<uint8_t, 3>, ShadeCount> ShadeRgb { {
     { 150, 70, 175 }, // purple
     { 80, 100, 215 }, // blue
     { 230, 130, 170 },// pink
+    { 125, 82, 45 },  // wood
+    { 170, 120, 70 }, // sunlit wood
+    { 62, 40, 22 },   // wood in shadow
 } };
 
 std::array<uint8_t, ShadeCount> ShadeIndex {};
@@ -175,6 +181,72 @@ void DrawFlowerPatch(const Surface &out, Point position, int patch, uint32_t see
 	}
 }
 
+namespace {
+
+void Line(const Surface &out, Point a, Point b, Shade shade, const uint8_t *tbl)
+{
+	const int dx = std::abs(b.x - a.x), dy = -std::abs(b.y - a.y);
+	const int sx = a.x < b.x ? 1 : -1, sy = a.y < b.y ? 1 : -1;
+	int err = dx + dy;
+	for (int guard = 0; guard < 200; guard++) {
+		Put(out, a, shade, tbl);
+		if (a == b)
+			break;
+		const int e2 = 2 * err;
+		if (e2 >= dy) {
+			err += dy;
+			a.x += sx;
+		}
+		if (e2 <= dx) {
+			err += dx;
+			a.y += sy;
+		}
+	}
+}
+
+/** A wooden rail: a sunlit top edge over a shaded underside. */
+void Rail(const Surface &out, Point a, Point b, const uint8_t *tbl, bool gate)
+{
+	Line(out, a, b, gate ? WoodLight : Wood, tbl);
+	Line(out, a + Displacement { 0, -1 }, b + Displacement { 0, -1 }, WoodLight, tbl);
+	Line(out, a + Displacement { 0, 1 }, b + Displacement { 0, 1 }, WoodDark, tbl);
+}
+
+void Post(const Surface &out, Point ground, int height, const uint8_t *tbl)
+{
+	for (int y = 0; y < height; y++) {
+		Put(out, ground + Displacement { -1, -y }, WoodDark, tbl);
+		Put(out, ground + Displacement { 0, -y }, Wood, tbl);
+		Put(out, ground + Displacement { 1, -y }, WoodLight, tbl);
+	}
+	Put(out, ground + Displacement { 0, -height }, WoodDark, tbl);
+}
+
+} // namespace
+
+void DrawFence(const Surface &out, Point position, uint8_t fence, std::array<bool, 4> links, const uint8_t *tbl)
+{
+	if (fence == 0)
+		return;
+	RefreshShades();
+	const bool gate = fence == 2;
+	// Ground point at the middle of the tile, and the middle of each edge it links through:
+	// +x (down-right), -x (up-left), +y (down-left), -y (up-right).
+	const Point centre = position + Displacement { 32, -16 };
+	constexpr std::array<Displacement, 4> Edge { Displacement { 16, 8 }, Displacement { -16, -8 }, Displacement { -16, 8 }, Displacement { 16, -8 } };
+	// Back edges first, so the near rails cover the far ones.
+	for (int i : { 1, 3, 0, 2 }) {
+		if (!links[i])
+			continue;
+		const Point end = centre + Edge[i];
+		for (const int h : { 7, 15 })
+			Rail(out, centre + Displacement { 0, -h }, end + Displacement { 0, -h }, tbl, gate);
+		if (gate) // a cross brace on the gate's boards
+			Line(out, centre + Displacement { 0, -7 }, end + Displacement { 0, -15 }, WoodDark, tbl);
+	}
+	Post(out, centre, gate ? 22 : 19, tbl);
+}
+
 bool PieceHasStandingParts(uint16_t piece)
 {
 	if (piece >= MAXTILES)
@@ -235,6 +307,12 @@ void DrawDecorFloor(const Surface &out, Point tilePosition, Point targetBufferPo
 
 void DrawDecorCell(const Surface &out, const Lightmap &lightmap, Point tilePosition, Point targetBufferPosition, int lightTableIndex)
 {
+	if (const uint8_t fence = dFence[tilePosition.x][tilePosition.y]; fence != 0) {
+		auto fenced = [](Point p) { return InDungeonBounds(p) && dFence[p.x][p.y] != 0; };
+		const std::array<bool, 4> links { fenced(tilePosition + Displacement { 1, 0 }), fenced(tilePosition + Displacement { -1, 0 }),
+			fenced(tilePosition + Displacement { 0, 1 }), fenced(tilePosition + Displacement { 0, -1 }) };
+		DrawFence(out, targetBufferPosition, fence, links, LightTables[lightTableIndex].data());
+	}
 	for (int layer = 0; layer < DecorLayerCount; layer++) {
 		const uint16_t piece = dDecorPiece[layer][tilePosition.x][tilePosition.y];
 		if (piece == 0)

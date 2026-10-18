@@ -68,6 +68,10 @@ std::string Encode(const Building &b)
 		for (size_t i = 0; i < n; i++)
 			out.push_back(static_cast<char>(b.decorHues[layer][i]));
 	}
+	// Optional sections after the decor: "FNC" then a fence byte per world tile.
+	out += "FNC";
+	for (size_t i = 0; i < n * 4; i++)
+		out.push_back(static_cast<char>(b.fences[i]));
 	return out;
 }
 
@@ -94,6 +98,11 @@ bool Decode(std::string_view d, Building &b)
 			b.decor[layer][i] = u16(at);
 		for (size_t i = 0; i < n; i++, at++)
 			b.decorHues[layer][i] = static_cast<int8_t>(d[at]);
+	}
+	if (at + 3 + n * 4 <= d.size() && d.substr(at, 3) == "FNC") {
+		at += 3;
+		for (size_t i = 0; i < n * 4; i++, at++)
+			b.fences[i] = static_cast<uint8_t>(d[at]) <= 2 ? static_cast<uint8_t>(d[at]) : 0;
 	}
 	return true;
 }
@@ -164,6 +173,7 @@ void Building::Resize(int w, int h)
 		decor[layer].assign(n, 0);
 		decorHues[layer].assign(n, 0);
 	}
+	fences.assign(n * 4, 0);
 }
 
 const std::vector<Building> &Buildings()

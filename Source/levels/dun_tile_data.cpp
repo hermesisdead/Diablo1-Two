@@ -44,6 +44,7 @@ uint16_t dDecorPiece[DecorLayerCount][MAXDUNX][MAXDUNY];
 uint8_t dDecorFlower[DecorLayerCount][MAXDUNX][MAXDUNY];
 int8_t dDecorHue[DecorLayerCount][MAXDUNX][MAXDUNY];
 bool dDecorSolid[MAXDUNX][MAXDUNY];
+uint8_t dFence[MAXDUNX][MAXDUNY];
 std::unique_ptr<std::byte[]> pDungeonCels;
 TileProperties SOLData[MAXTILES];
 WorldTilePosition dminPosition;

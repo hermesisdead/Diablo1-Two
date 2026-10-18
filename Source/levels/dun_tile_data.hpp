@@ -86,8 +86,10 @@ extern uint16_t dDecorPiece[DecorLayerCount][MAXDUNX][MAXDUNY];
 extern uint8_t dDecorFlower[DecorLayerCount][MAXDUNX][MAXDUNY];
 /** Hue shift of each decor layer, in tile hue steps. */
 extern int8_t dDecorHue[DecorLayerCount][MAXDUNX][MAXDUNY];
-/** Decor that blocks walking (rocks, trunks, walls). */
+/** Decor that blocks walking (rocks, trunks, walls, fences). */
 extern bool dDecorSolid[MAXDUNX][MAXDUNY];
+/** Wooden fencing on a world tile in hand-made maps: 0 none, 1 fence, 2 gate (players pass, animals do not). */
+extern uint8_t dFence[MAXDUNX][MAXDUNY];
 extern DVL_API_FOR_TEST std::unique_ptr<std::byte[]> pDungeonCels;
 /**
  * List tile properties

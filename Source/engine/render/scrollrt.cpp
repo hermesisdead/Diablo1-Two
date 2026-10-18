@@ -57,6 +57,7 @@
 #include "engine/render/dungeon_mood.hpp"
 #include "engine/render/tile_decor.hpp"
 #include "engine/render/tile_hue.hpp"
+#include "custom_maps/map_animals.hpp"
 #include "custom_maps/map_editor.hpp"
 #include "custom_maps/campaign_quests.hpp"
 #include "engine/render/gore_fx.hpp"
@@ -817,6 +818,7 @@ void DrawDungeon(const Surface &out, const Lightmap &lightmap, Point tilePositio
 	const int lightTableIndex = dLight[tilePosition.x][tilePosition.y];
 
 	DrawCell(out, lightmap, tilePosition, targetBufferPosition, lightTableIndex);
+	DrawAnimals(out, tilePosition, targetBufferPosition, lightTableIndex);
 
 	const int8_t bDead = dCorpse[tilePosition.x][tilePosition.y];
 	const int8_t bMap = dTransVal[tilePosition.x][tilePosition.y];
@@ -1951,6 +1953,7 @@ void DrawAndBlit()
 
 	this_sdl_thread::yield();
 	RefreshTileHueTables();
+	UpdateAnimals();
 	MapEditorBeforeDraw();
 	DrawView(out, ViewPosition);
 	DrawActionWorldOverlay(out);

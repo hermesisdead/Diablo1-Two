@@ -307,6 +307,7 @@ void InitGlobals()
 	memset(dDecorFlower, 0, sizeof(dDecorFlower));
 	memset(dDecorHue, 0, sizeof(dDecorHue));
 	memset(dDecorSolid, 0, sizeof(dDecorSolid));
+	memset(dFence, 0, sizeof(dFence));
 	uint8_t defaultLight = leveltype == DTYPE_TOWN ? 0 : 15;
 	if (leveltype == DTYPE_FOREST)
 		defaultLight = InDesertRegion() ? 3 : 9; // moonlight in the forest; the desert lies under a hazy sun

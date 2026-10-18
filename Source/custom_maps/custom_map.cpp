@@ -160,6 +160,8 @@ std::string BuildMeta(const CustomMap &map)
 		out += StrCat("spawner=", s.tile.x, ",", s.tile.y, ",", s.monster, ",", s.count, "\n");
 	for (const MapBoss &b : map.bosses)
 		out += StrCat("boss=", b.tile.x, ",", b.tile.y, ",", b.name, ",", b.minions, "\n");
+	for (const MapAnimal &a : map.animals)
+		out += StrCat("animal=", a.tile.x, ",", a.tile.y, ",", a.kind, "\n");
 	return out;
 }
 
@@ -200,6 +202,8 @@ void ParseMeta(std::string_view text, CustomMap &map)
 			map.npcs.push_back({ std::string(f[0]), { ToInt(f[1]), ToInt(f[2]) }, std::clamp(ToInt(f[3]), 0, 7) });
 		} else if (key == "spawner" && f.size() >= 4) {
 			map.spawners.push_back({ { ToInt(f[0]), ToInt(f[1]) }, std::string(f[2]), std::clamp(ToInt(f[3], 4), 1, 20) });
+		} else if (key == "animal" && f.size() >= 3) {
+			map.animals.push_back({ { ToInt(f[0]), ToInt(f[1]) }, std::string(f[2]) });
 		} else if (key == "boss" && f.size() >= 3) {
 			map.bosses.push_back({ { ToInt(f[0]), ToInt(f[1]) }, std::string(f[2]), std::clamp(f.size() >= 4 ? ToInt(f[3], 6) : 6, 0, 12) });
 		}
@@ -235,6 +239,7 @@ void CustomMap::Resize(int w, int h)
 		decor[layer].assign(static_cast<size_t>(width) * height, 0);
 		decorHues[layer].assign(static_cast<size_t>(width) * height, 0);
 	}
+	fences.assign(static_cast<size_t>(width) * 2 * height * 2, 0);
 	monsters.assign(static_cast<size_t>(width) * 2 * height * 2, 0);
 	objects.assign(static_cast<size_t>(width) * 2 * height * 2, 0);
 	plan.assign(40 * 40, 0);
@@ -336,6 +341,10 @@ std::expected<CustomMap, std::string> ReadCustomMap(std::string_view name)
 		for (size_t i = 0; i < map.hues.size(); i++)
 			map.hues[i] = static_cast<int8_t>((*hue)[i]);
 	}
+	if (std::expected<std::string, std::string> fence = ReadWholeFile(MapFolder(name) + "map.fence"); fence.has_value() && fence->size() == map.fences.size()) {
+		for (size_t i = 0; i < map.fences.size(); i++)
+			map.fences[i] = static_cast<uint8_t>((*fence)[i]) <= 2 ? static_cast<uint8_t>((*fence)[i]) : 0;
+	}
 	if (std::expected<std::string, std::string> dec = ReadWholeFile(MapFolder(name) + "map.decor"); dec.has_value()) {
 		// "DCR1", layer count, then per layer: ids (u16 each) and hues (one byte each) for every map piece.
 		const std::string &d = *dec;
@@ -391,6 +400,11 @@ std::expected<void, std::string> WriteCustomMap(const CustomMap &map)
 				dec.push_back(static_cast<char>(i < map.decorHues[layer].size() ? map.decorHues[layer][i] : 0));
 		}
 		if (std::expected<void, std::string> r = WriteWholeFile(folder + "map.decor", dec); !r.has_value())
+			return r;
+	}
+	if (map.fences.size() == map.tiles.size() * 4) {
+		const std::string fence(map.fences.begin(), map.fences.end());
+		if (std::expected<void, std::string> r = WriteWholeFile(folder + "map.fence", fence); !r.has_value())
 			return r;
 	}
 	return WriteWholeFile(folder + "map.ini", BuildMeta(map));

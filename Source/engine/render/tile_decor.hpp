@@ -7,6 +7,7 @@
  */
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string_view>
 
@@ -43,6 +44,13 @@ void DrawDecorFloor(const Surface &out, Point tilePosition, Point targetBufferPo
 
 /** @brief Standing decor of every decor layer at a world tile (drawn with the tile). */
 void DrawDecorCell(const Surface &out, const Lightmap &lightmap, Point tilePosition, Point targetBufferPosition, int lightTableIndex);
+
+/**
+ * @brief Draws wooden fencing on a world tile: a post, with rails out to the fenced neighbours.
+ * @param fence 1 fence, 2 gate.
+ * @param links Neighbours that are fenced too: +x, -x, +y, -y.
+ */
+void DrawFence(const Surface &out, Point position, uint8_t fence, std::array<bool, 4> links, const uint8_t *tbl);
 
 /** @brief Whether a level piece has anything standing on its floor (so it works as decor). */
 [[nodiscard]] bool PieceHasStandingParts(uint16_t piece);
