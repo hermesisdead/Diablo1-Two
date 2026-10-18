@@ -5,6 +5,7 @@
 
 #include "engine/load_file.hpp"
 #include "engine/render/color_overlay.hpp"
+#include "engine/render/hd_layer.hpp"
 #include "options.h"
 
 namespace devilution {
@@ -58,6 +59,29 @@ bool NewTexturesActive()
 bool HdTexturesActive()
 {
 	return *GetOptions().Graphics.textures == TextureMode::HD && ColorOverlayRecording();
+}
+
+bool DrawHdSpriteOnLayer(const Surface &out, Point position, const HdSprite &footprint, const HdHiresSprite &hires, int frame)
+{
+	if (!HdLayerWorldActive() || hires.frames.empty() || footprint.frames.empty())
+		return false;
+	const HdSpriteFrame &f = footprint.frames[static_cast<size_t>(frame) % footprint.frames.size()];
+	const HdHiresSprite::Frame &h = hires.frames[static_cast<size_t>(frame) % hires.frames.size()];
+	const int left = position.x, top = position.y - footprint.height + 1;
+	std::vector<int16_t> mask(static_cast<size_t>(f.width) * f.height, -1);
+	const uint8_t *px = f.pixels.data();
+	for (int y = 0; y < f.height; y++) {
+		for (int x = 0; x < f.width; x++, px += 5) {
+			if (px[3] == 0)
+				continue;
+			const Point p { left + f.x0 + x, top + f.y0 + y };
+			if (out.InBounds(p))
+				mask[static_cast<size_t>(y) * f.width + x] = *out.at(p.x, p.y);
+		}
+	}
+	HdLayerAdd(out, &h.image, static_cast<float>(left) + h.x, static_cast<float>(top) + h.y, h.w, h.h,
+	    left + f.x0, top + f.y0, f.width, f.height, std::move(mask), /*tint=*/true, /*cache=*/true);
+	return true;
 }
 
 void DrawHdSprite(const Surface &out, Point position, const HdSprite &sprite, int frame)

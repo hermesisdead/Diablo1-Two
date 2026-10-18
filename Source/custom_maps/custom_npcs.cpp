@@ -469,8 +469,10 @@ void InitCustomNpcTowner(Towner &towner)
 		bool recoloured = false;
 		for (int i = 0; i < 256; i++)
 			recoloured = recoloured || trn[i] != i;
-		if (recoloured)
+		if (recoloured) {
 			towner.hd = nullptr;
+			towner.hires = nullptr;
+		}
 		return;
 	}
 }

@@ -13,6 +13,7 @@
 #include "custom_maps/map_editor.hpp"
 #include "options.h"
 #include "engine/render/color_overlay.hpp"
+#include "engine/render/hd_layer.hpp"
 #include "engine/render/hd_sprite.hpp"
 #include "diablo.h"
 #include "engine/clx_sprite.hpp"
@@ -556,6 +557,7 @@ void BlitAnimal(const Surface &out, Point feet, const Canvas &canvas, bool facin
 struct SpriteFrame {
 	int ox = 0, oy = 0, width = 0, height = 0;
 	std::vector<uint8_t> rgb;
+	HdImage hd; // the same in RGBA (black is see-through), for the HD layer
 };
 
 struct SpriteSet {
@@ -601,6 +603,17 @@ const SpriteSet *AnimalSprites(int kind)
 			return nullptr;
 		f.rgb.assign(d + at, d + at + bytes);
 		at += bytes;
+		f.hd.width = f.width;
+		f.hd.height = f.height;
+		f.hd.rgba.resize(static_cast<size_t>(f.width) * f.height * 4);
+		for (size_t p = 0; p < static_cast<size_t>(f.width) * f.height; p++) {
+			const uint8_t *s = &f.rgb[p * 3];
+			uint8_t *o = &f.hd.rgba[p * 4];
+			o[0] = s[0];
+			o[1] = s[1];
+			o[2] = s[2];
+			o[3] = (s[0] | s[1] | s[2]) != 0 ? 255 : 0;
+		}
 		set.all.push_back(std::move(f));
 	}
 	if (set.directions != 8 || set.frames < 1)
@@ -612,6 +625,33 @@ const SpriteSet *AnimalSprites(int kind)
 /** Draws a sprite frame, feet at `feet`, scaled, lit by a tile's light, over a soft shadow. */
 void BlitSprite(const Surface &out, Point feet, const SpriteFrame &f, float scale, int lightLevel)
 {
+	if (HdLayerWorldActive() && ColorOverlayRecording()) {
+		// HD layer: a soft shadow in the frame, the animal itself at the window's resolution.
+		const float rx = static_cast<float>(f.width) * scale * 0.42f, ry = rx * 0.32f;
+		const Point c = feet + Displacement { static_cast<int>(static_cast<float>(f.ox) * scale) + static_cast<int>(static_cast<float>(f.width) * scale) / 2 + 2, 0 };
+		for (int y = static_cast<int>(-ry); y <= static_cast<int>(ry); y++) {
+			for (int x = static_cast<int>(-rx); x <= static_cast<int>(rx); x++) {
+				const float dd = (x * x) / (rx * rx) + (y * y) / (ry * ry);
+				const Point p = c + Displacement { x, y };
+				if (dd <= 1.0f && out.InBounds(p))
+					ColorOverlaySpritePixel(out, p, { 0, 0, 0 }, static_cast<uint8_t>(127.0f * std::min(1.0f, (1.0f - dd) * 2.5f)), *out.at(p.x, p.y));
+			}
+		}
+		const float left = static_cast<float>(feet.x) + static_cast<float>(f.ox) * scale, top = static_cast<float>(feet.y) + static_cast<float>(f.oy) * scale;
+		const float w = static_cast<float>(f.width) * scale, h = static_cast<float>(f.height) * scale;
+		const int mx = static_cast<int>(std::floor(left)), my = static_cast<int>(std::floor(top));
+		const int mw = static_cast<int>(std::ceil(left + w)) - mx, mh = static_cast<int>(std::ceil(top + h)) - my;
+		std::vector<int16_t> mask(static_cast<size_t>(std::max(0, mw)) * std::max(0, mh), -1);
+		for (int y = 0; y < mh; y++) {
+			for (int x = 0; x < mw; x++) {
+				const Point p { mx + x, my + y };
+				if (out.InBounds(p))
+					mask[static_cast<size_t>(y) * mw + x] = *out.at(p.x, p.y);
+			}
+		}
+		HdLayerAdd(out, &f.hd, left, top, w, h, mx, my, mw, mh, std::move(mask), /*tint=*/true, /*cache=*/true);
+		return;
+	}
 	RefreshNearest();
 	lightLevel = std::clamp(lightLevel, 0, static_cast<int>(LightTables.size()) - 1);
 	const int width = std::max(1, static_cast<int>(static_cast<float>(f.width) * scale + 0.5f));

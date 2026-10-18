@@ -233,42 +233,61 @@ set(devilutionx_assets
   animals/pig.anm
   animals/sheep.anm
   towners/new/adria.clx
-  towners/new/cain.clx
-  towners/new/celia1.clx
-  towners/new/celia2.clx
-  towners/new/celia_beer1.clx
-  towners/new/celia_beer2.clx
-  towners/new/deadguy.clx
-  towners/new/farnham.clx
-  towners/new/farnham_stand.clx
-  towners/new/gillian.clx
-  towners/new/griswold.clx
-  towners/new/lester.clx
-  towners/new/nut.clx
-  towners/new/nut_brown.clx
-  towners/new/ogden.clx
-  towners/new/pepin.clx
-  towners/new/wirt.clx
+  towners/new/adria.hdr
   towners/new/adria.hds
+  towners/new/cain.clx
+  towners/new/cain.hdr
   towners/new/cain.hds
+  towners/new/celia1.clx
+  towners/new/celia1.hdr
   towners/new/celia1.hds
+  towners/new/celia2.clx
+  towners/new/celia2.hdr
   towners/new/celia2.hds
+  towners/new/celia_beer1.clx
+  towners/new/celia_beer1.hdr
   towners/new/celia_beer1.hds
+  towners/new/celia_beer2.clx
+  towners/new/celia_beer2.hdr
   towners/new/celia_beer2.hds
+  towners/new/deadguy.clx
+  towners/new/deadguy.hdr
   towners/new/deadguy.hds
+  towners/new/farnham.clx
+  towners/new/farnham.hdr
   towners/new/farnham.hds
+  towners/new/farnham_stand.clx
+  towners/new/farnham_stand.hdr
   towners/new/farnham_stand.hds
+  towners/new/gillian.clx
+  towners/new/gillian.hdr
   towners/new/gillian.hds
+  towners/new/griswold.clx
+  towners/new/griswold.hdr
   towners/new/griswold.hds
   towners/new/griswold_walk.clx
+  towners/new/griswold_walk.hdr
   towners/new/griswold_walk.hds
-  ui_hd/panel.hds
+  towners/new/lester.clx
+  towners/new/lester.hdr
   towners/new/lester.hds
+  towners/new/nut.clx
+  towners/new/nut.hdr
   towners/new/nut.hds
+  towners/new/nut_brown.clx
+  towners/new/nut_brown.hdr
   towners/new/nut_brown.hds
+  towners/new/ogden.clx
+  towners/new/ogden.hdr
   towners/new/ogden.hds
+  towners/new/pepin.clx
+  towners/new/pepin.hdr
   towners/new/pepin.hds
+  towners/new/wirt.clx
+  towners/new/wirt.hdr
   towners/new/wirt.hds
+  ui_hd/panel.hdr
+  ui_hd/panel.hds
   ui_art/diablo.pal
   ui_art/creditsw.clx
   ui_art/dvl_but_sml.clx

@@ -28,6 +28,10 @@
 #include "init.hpp"
 #include "options.h"
 #include "engine/render/color_overlay.hpp"
+#include "engine/render/hd_layer.hpp"
+#include "utils/paths.h"
+#include <cstdio>
+#include <cstdlib>
 #include "utils/display.h"
 #include "utils/log.hpp"
 #include "utils/sdl_wrap.h"
@@ -322,6 +326,26 @@ void RenderPresent()
 		if (SDL_RenderClear(renderer) <= -1) ErrSdl();
 		if (SDL_UpdateTexture(texture.get(), nullptr, surface->pixels, surface->pitch) <= -1) ErrSdl();
 		if (SDL_RenderCopy(renderer, texture.get(), nullptr, nullptr) <= -1) ErrSdl();
+#endif
+		// The new textures at the window's own resolution, over the stretched frame.
+		HdLayerPresent(renderer, PalSurface, surface);
+#if defined(_DEBUG) && !defined(USE_SDL3)
+		// Test hook: DEVILUTIONX_DEV_WINDOWSHOT = N saves what reaches the window every N frames (window_NNN.bmp).
+		if (const char *every = std::getenv("DEVILUTIONX_DEV_WINDOWSHOT"); every != nullptr) {
+			static int frameNo = 0;
+			const int n = std::max(1, std::atoi(every));
+			if (++frameNo % n == 0) {
+				int ow, oh;
+				SDL_GetRendererOutputSize(renderer, &ow, &oh);
+				SDL_Surface *shot = SDL_CreateRGBSurfaceWithFormat(0, ow, oh, 32, SDL_PIXELFORMAT_ARGB8888);
+				if (shot != nullptr && SDL_RenderReadPixels(renderer, nullptr, SDL_PIXELFORMAT_ARGB8888, shot->pixels, shot->pitch) == 0) {
+					char name[64];
+					std::snprintf(name, sizeof(name), "window_%03d.bmp", frameNo / n);
+					SDL_SaveBMP(shot, (paths::PrefPath() + name).c_str());
+				}
+				SDL_FreeSurface(shot);
+			}
+		}
 #endif
 
 		if (ControlMode == ControlTypes::VirtualGamepad) {

@@ -36,6 +36,16 @@ struct HdSprite {
 /** @brief The new sprites are shown (HD or HD Redux). */
 [[nodiscard]] bool NewTexturesActive();
 
+struct HdHiresSprite;
+
+/**
+ * @brief Puts a frame on the HD layer (at the window's resolution) instead of the frame: nothing is
+ * drawn into the game's frame, so what is under it is what must still be there for it to show.
+ * @param footprint The game-size version (which pixels it covers). `position` as for ClxDraw.
+ * @return false when the layer is not in use (draw it the usual way).
+ */
+bool DrawHdSpriteOnLayer(const Surface &out, Point position, const HdSprite &footprint, const HdHiresSprite &hires, int frame);
+
 /** @brief Draws an HD frame, `position` being the bottom-left corner of its canvas (as ClxDraw). */
 void DrawHdSprite(const Surface &out, Point position, const HdSprite &sprite, int frame);
 

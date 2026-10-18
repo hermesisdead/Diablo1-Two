@@ -56,6 +56,7 @@
 #include "engine/render/color_overlay.hpp"
 #include "levels/desert.hpp"
 #include "panels/hd_panel.hpp"
+#include "engine/render/hd_layer.hpp"
 #include "engine/render/dungeon_mood.hpp"
 #include "engine/render/tile_decor.hpp"
 #include "engine/render/tile_hue.hpp"
@@ -796,12 +797,17 @@ void DrawMonsterHelper(const Surface &out, Point tilePosition, Point targetBuffe
 		if (mi == pcursmonst) {
 			ClxDrawOutlineSkipColorZero(out, OutlineColorsTowner, position, sprite);
 		}
-		if (towner.usingWalkSprite() && towner.walkHd != nullptr && HdTexturesActive())
-			DrawHdSprite(out, position, *towner.walkHd, towner.walkSpriteFrame());
-		else if (!towner.usingWalkSprite() && towner.showingNew && towner.hd != nullptr && HdTexturesActive())
-			DrawHdSprite(out, position, *towner.hd, towner._tAnimFrame);
-		else
+		const bool walk = towner.usingWalkSprite();
+		const HdSprite *footprint = walk ? towner.walkHd.get() : (towner.showingNew ? towner.hd.get() : nullptr);
+		const HdHiresSprite *hires = walk ? towner.walkHires.get() : (towner.showingNew ? towner.hires.get() : nullptr);
+		const int frame = walk ? towner.walkSpriteFrame() : towner._tAnimFrame;
+		if (footprint != nullptr && hires != nullptr && DrawHdSpriteOnLayer(out, position, *footprint, *hires, frame)) {
+			// on the HD layer, at the window's resolution
+		} else if (footprint != nullptr && HdTexturesActive()) {
+			DrawHdSprite(out, position, *footprint, frame);
+		} else {
 			ClxDraw(out, position, sprite);
+		}
 		if (towner.ownedOverlay && towner.ownedOverlay->numSprites() > 0)
 			ClxDraw(out, position, (*towner.ownedOverlay)[towner._tAnimFrame % towner.ownedOverlay->numSprites()]);
 		return;
@@ -1979,6 +1985,7 @@ void DrawAndBlit()
 	const Surface &out = GlobalBackBuffer();
 	UndrawCursor(out);
 	ColorOverlayBeginFrame();
+	HdLayerBeginFrame();
 
 	nthread_UpdateProgressToNextGameTick();
 

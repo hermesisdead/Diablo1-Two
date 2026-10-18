@@ -168,8 +168,10 @@ void LoadTownerAnimations(Towner &towner, const char *path, int frames, int dela
 	towner.hd = nullptr;
 	towner.classicIsNew = false;
 	const std::string_view classicPath = path;
+	towner.hires = nullptr;
 	auto loadHd = [&towner](std::string_view clxPath) {
 		towner.hd = LoadHdSprite(StrCat(clxPath.substr(0, clxPath.size() - 4), ".hds"));
+		towner.hires = LoadHdHiresSprite(StrCat(clxPath.substr(0, clxPath.size() - 4), ".hdr"));
 	};
 	const char *newPath = IsNewOnlyLook(classicPath) ? nullptr : NewTownerTexturePath(classicPath);
 	if (IsNewOnlyLook(classicPath)) {
@@ -195,10 +197,12 @@ void LoadTownerAnimations(Towner &towner, const char *path, int frames, int dela
 	NewTownerAnim(towner, *towner.ownedAnim, frames, delay);
 	if (towner._ttype == TOWN_SMITH && !towner.ownedWalk) {
 		towner.ownedWalk = LoadOptionalClx("towners\\new\\griswold_walk.clx");
-		if (towner.ownedWalk && towner.ownedWalk->numSprites() >= 8 * TownerWalkFrames)
+		if (towner.ownedWalk && towner.ownedWalk->numSprites() >= 8 * TownerWalkFrames) {
 			towner.walkHd = LoadHdSprite("towners\\new\\griswold_walk.hds");
-		else
+			towner.walkHires = LoadHdHiresSprite("towners\\new\\griswold_walk.hdr");
+		} else {
 			towner.ownedWalk = std::nullopt;
+		}
 	}
 	ApplyTownerTexture(towner);
 }
@@ -1051,6 +1055,7 @@ void FreeTownerGFX()
 		towner.ownedNewAnim = std::nullopt;
 		towner.classicAnim = std::nullopt;
 		towner.hd = nullptr;
+		towner.hires = nullptr;
 		towner.ownedOverlay = std::nullopt;
 	}
 	CowSprites = std::nullopt;

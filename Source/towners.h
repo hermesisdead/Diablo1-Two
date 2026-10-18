@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "engine/clx_sprite.hpp"
+#include "engine/render/hd_layer.hpp"
 #include "engine/render/hd_sprite.hpp"
 #include "items.h"
 #include "levels/dun_tile.hpp"
@@ -73,6 +74,9 @@ struct Towner {
 	/** Walk sprites: 8 directions (Direction order) of TownerWalkFrames frames; none: he stays put. */
 	OptionalOwnedClxSpriteList ownedWalk;
 	std::shared_ptr<const HdSprite> walkHd;
+	/** The new sprites at their art's resolution (HD textures on the HD layer). */
+	std::shared_ptr<const HdHiresSprite> hires;
+	std::shared_ptr<const HdHiresSprite> walkHires;
 	/** Where he works (where the map puts him) and where he is going. */
 	Point home;
 	Point goal;

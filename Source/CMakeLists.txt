@@ -84,6 +84,7 @@ set(libdevilutionx_SRCS
   engine/render/scrollrt.cpp
   engine/render/color_overlay.cpp
   engine/render/hd_sprite.cpp
+  engine/render/hd_layer.cpp
   engine/render/dungeon_mood.cpp
   engine/render/tile_hue.cpp
   engine/render/tile_decor.cpp

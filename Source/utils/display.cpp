@@ -634,7 +634,18 @@ bool SpawnWindow(const char *lpWindowName)
 		ghMainWnd = SDL_CreateWindow(lpWindowName, windowSize.width, windowSize.height, flags);
 	}
 #else
-	ghMainWnd = SDL_CreateWindow(lpWindowName, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, windowSize.width, windowSize.height, flags);
+	{
+		Size createSize = windowSize;
+#ifdef _DEBUG
+		// Test hook: DEVILUTIONX_DEV_WINDOWSIZE = WxH opens a window of that size (the game's frame is stretched into it).
+		if (const char *ws = std::getenv("DEVILUTIONX_DEV_WINDOWSIZE"); ws != nullptr) {
+			int w = 0, h = 0;
+			if (std::sscanf(ws, "%dx%d", &w, &h) == 2 && w > 0 && h > 0)
+				createSize = { w, h };
+		}
+#endif
+		ghMainWnd = SDL_CreateWindow(lpWindowName, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, createSize.width, createSize.height, flags);
+	}
 #endif
 
 #if defined(DEVILUTIONX_DISPLAY_PIXELFORMAT)
