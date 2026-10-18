@@ -111,20 +111,6 @@ const std::vector<GroundBrush> &GroundBrushes()
 	return brushes;
 }
 
-/** Get all tile variants from the current brush. */
-std::vector<uint16_t> CurrentBrushVariants()
-{
-	if (S.brush < 0 || S.brush >= static_cast<int>(GroundBrushes().size()))
-		return {};
-	return GroundBrushes()[S.brush].tiles;
-}
-
-/** Format a tile variant label for display. */
-std::string VariantLabel(uint16_t tileId)
-{
-	return StrCat("Tile ", tileId);
-}
-
 /** Pieces of classic Tristram that can be stamped into a town, in megatiles (inclusive). */
 struct TownStamp {
 	std::string_view name;
@@ -208,6 +194,20 @@ struct Session {
 Session S;
 
 // --- Helpers ---------------------------------------------------------------------------------
+
+/** Get all tile variants from the current brush. */
+std::vector<uint16_t> CurrentBrushVariants()
+{
+	if (S.brush < 0 || S.brush >= static_cast<int>(GroundBrushes().size()))
+		return {};
+	return GroundBrushes()[S.brush].tiles;
+}
+
+/** Format a tile variant label for display. */
+std::string VariantLabel(uint16_t tileId)
+{
+	return StrCat("Tile ", tileId);
+}
 
 void Say(std::string text)
 {
