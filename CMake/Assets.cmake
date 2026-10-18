@@ -260,6 +260,8 @@ set(devilutionx_assets
   towners/new/farnham_stand.hds
   towners/new/gillian.hds
   towners/new/griswold.hds
+  towners/new/griswold_walk.clx
+  towners/new/griswold_walk.hds
   towners/new/lester.hds
   towners/new/nut.hds
   towners/new/nut_brown.hds

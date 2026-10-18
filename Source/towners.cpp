@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <cstdint>
 #include <unordered_map>
 
@@ -25,6 +26,12 @@
 #include "game_mode.hpp"
 #include "inv.h"
 #include "minitext.h"
+#include "engine/path.h"
+#include "utils/log.hpp"
+#include "custom_maps/map_editor.hpp"
+#include "levels/gendung.h"
+#include "levels/tile_properties.hpp"
+#include "multi.h"
 #include "stores.h"
 #include "levels/town_shuffle.hpp"
 #include "tables/textdat.h"
@@ -185,6 +192,13 @@ void LoadTownerAnimations(Towner &towner, const char *path, int frames, int dela
 			loadHd(newPath);
 	}
 	NewTownerAnim(towner, *towner.ownedAnim, frames, delay);
+	if (towner._ttype == TOWN_SMITH && !towner.ownedWalk) {
+		towner.ownedWalk = LoadOptionalClx("towners\\new\\griswold_walk.clx");
+		if (towner.ownedWalk && towner.ownedWalk->numSprites() >= 8 * TownerWalkFrames)
+			towner.walkHd = LoadHdSprite("towners\\new\\griswold_walk.hds");
+		else
+			towner.ownedWalk = std::nullopt;
+	}
 	ApplyTownerTexture(towner);
 }
 
@@ -969,6 +983,8 @@ void InitTowners()
 
 		Towners.emplace_back();
 		InitTownerInfo(Towners.back(), *behaviorIt->second, entry);
+		Towners.back().home = entry.position;
+		Towners.back().walkTimer = static_cast<int16_t>(200 + i * 37);
 		i++;
 	}
 }
@@ -1038,8 +1054,195 @@ void FreeTownerGFX()
 	CowSprites = std::nullopt;
 }
 
+namespace {
+
+constexpr int StepTicks = 12; // a slow, heavy walk: about 1.7 tiles a second
+
+uint32_t StrollRandom(Towner &towner)
+{
+	// Its own sequence (single player only), so the game's random rolls are untouched.
+	static uint32_t state = 0x9E3779B9u;
+	state = state * 1664525u + 1013904223u + static_cast<uint32_t>(towner.position.x * 31 + towner.position.y);
+	return state >> 8;
+}
+
+int16_t StrollWait(Towner &towner, int minTicks, int maxTicks)
+{
+	return static_cast<int16_t>(minTicks + static_cast<int>(StrollRandom(towner) % static_cast<uint32_t>(maxTicks - minTicks + 1)));
+}
+
+bool StrollsNow(const Towner &towner)
+{
+	return towner.ownedWalk && towner.showingNew && !gbIsMultiplayer && !IsMapEditing() && leveltype == DTYPE_TOWN;
+}
+
+bool FreeForStroll(Point tile)
+{
+	if (!InDungeonBounds(tile) || !IsTileWalkable(tile) || dMonster[tile.x][tile.y] != 0 || dPlayer[tile.x][tile.y] != 0)
+		return false;
+	return true;
+}
+
+/** Moves him onto a tile (the game's map of who stands where follows). */
+void PlaceTowner(Towner &towner, Point to)
+{
+	const int id = static_cast<int>(&towner - Towners.data()) + 1;
+	if (dMonster[towner.position.x][towner.position.y] == id)
+		dMonster[towner.position.x][towner.position.y] = 0;
+	towner.position = to;
+	dMonster[to.x][to.y] = id;
+}
+
+/** Straight back to work (the walk is off, or he cannot get back). */
+void SendHome(Towner &towner)
+{
+	LogVerbose("Towner {} back to work from {},{} (state {}, goal {},{})", towner.name, towner.position.x, towner.position.y, towner.walkState, towner.goal.x, towner.goal.y);
+	towner.stepTick = 0;
+	towner.walkState = 0;
+	towner.stuckTicks = 0;
+	if (towner.position != towner.home && (dMonster[towner.home.x][towner.home.y] == 0 || dMonster[towner.home.x][towner.home.y] == static_cast<int>(&towner - Towners.data()) + 1) && dPlayer[towner.home.x][towner.home.y] == 0)
+		PlaceTowner(towner, towner.home);
+}
+
+/** A spot near his work he can stand on, or his work place. */
+Point PickStrollSpot(Towner &towner)
+{
+	constexpr int Reach = 3;
+	for (int tries = 0; tries < 12; tries++) {
+		const Point spot = towner.home + Displacement { static_cast<int>(StrollRandom(towner) % (2 * Reach + 1)) - Reach, static_cast<int>(StrollRandom(towner) % (2 * Reach + 1)) - Reach };
+		if (spot != towner.position && spot.WalkingDistance(towner.home) >= 2 && FreeForStroll(spot))
+			return spot;
+	}
+	return towner.home;
+}
+
+void UpdateStroll(Towner &towner)
+{
+	if (!StrollsNow(towner)) {
+		if (towner.walkState != 0 || towner.position != towner.home)
+			SendHome(towner);
+		return;
+	}
+	if (qtextflag || ActiveStore != TalkID::None)
+		return; // talking: he stands and listens
+	if (towner.stepTick > 0) {
+		towner.walkAnimTick++;
+		if (++towner.stepTick >= StepTicks)
+			towner.stepTick = 0;
+		return;
+	}
+	switch (towner.walkState) {
+	case 0: // at work
+		if (--towner.walkTimer > 0)
+			return;
+		towner.goal = PickStrollSpot(towner);
+		towner.strolls = 0;
+		if (towner.goal == towner.home) {
+			towner.walkTimer = StrollWait(towner, 200, 400);
+			return;
+		}
+		towner.walkState = 1;
+		towner.walkAnimTick = 0;
+		return;
+	case 2: // looking about
+		if (--towner.walkTimer > 0)
+			return;
+		towner.strolls++;
+		towner.goal = (towner.strolls >= 2 || StrollRandom(towner) % 2 == 0) ? towner.home : PickStrollSpot(towner);
+		towner.walkState = 1;
+		return;
+	default: break;
+	}
+	// Walking: one tile at a time, the free neighbour closest to where he is going.
+	if (towner.position == towner.goal) {
+		if (towner.goal == towner.home) {
+			towner.walkState = 0;
+			towner.walkTimer = StrollWait(towner, 300, 700);
+			towner._tAnimFrame = 0;
+			towner._tAnimFrameCnt = 0;
+			towner._tAnimCnt = 0;
+		} else {
+			towner.walkState = 2;
+			towner.walkTimer = StrollWait(towner, 40, 140);
+		}
+		return;
+	}
+	// The way there (around the buildings), one tile at a time.
+	const auto posOk = [&towner](Point p) {
+		// His own spot may be on the workshop floor the walk rules would refuse: it is always his.
+		if (p == towner.home)
+			return dMonster[p.x][p.y] == 0 && dPlayer[p.x][p.y] == 0;
+		return FreeForStroll(p) && p.WalkingDistance(towner.home) <= 6;
+	};
+	int8_t path[MaxPathLengthMonsters];
+	Point best = towner.position;
+	if (FindPath(CanStep, posOk, towner.position, towner.goal, path, MaxPathLengthMonsters) > 0) {
+		// Step numbers as GetPathDirection gives them.
+		static constexpr Displacement Steps[9] = { { 0, 0 }, { 0, -1 }, { -1, 0 }, { 1, 0 }, { 0, 1 }, { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } };
+		if (path[0] >= 1 && path[0] <= 8)
+			best = towner.position + Steps[path[0]];
+	}
+	if (best == towner.position) {
+		// Blocked (someone in the way): wait, then head back, and if even that fails, he is back at work.
+		if (++towner.stuckTicks > 60) {
+			towner.stuckTicks = 0;
+			if (towner.goal != towner.home)
+				towner.goal = towner.home;
+			else
+				SendHome(towner);
+		}
+		return;
+	}
+	towner.stuckTicks = 0;
+	towner.walkDir = GetDirection(towner.position, best);
+	towner.stepFrom = towner.position;
+	PlaceTowner(towner, best);
+	towner.stepTick = 1;
+	towner.walkAnimTick++;
+}
+
+} // namespace
+
+int Towner::walkSpriteFrame() const
+{
+	// Walking: the steps play through; stopped: the first frame, facing the way he went.
+	const int frame = walkState == 1 ? (walkAnimTick * TownerWalkFrames / (2 * StepTicks)) % TownerWalkFrames : 0;
+	return static_cast<int>(walkDir) * TownerWalkFrames + frame;
+}
+
+Displacement Towner::stepOffset() const
+{
+	if (stepTick <= 0)
+		return {};
+	// Drawn from the tile he is stepping onto, back toward the one he left.
+	const Displacement d = position - stepFrom;
+	const float left = 1.0f - static_cast<float>(stepTick) / static_cast<float>(StepTicks);
+	const float sx = static_cast<float>((d.deltaX - d.deltaY) * 32), sy = static_cast<float>((d.deltaX + d.deltaY) * 16);
+	return { static_cast<int>(-sx * left), static_cast<int>(-sy * left) };
+}
+
 void ProcessTowners()
 {
+	for (Towner &towner : Towners) {
+		if (!towner.ownedWalk)
+			continue;
+#ifdef _DEBUG
+		// Test hook: DEVILUTIONX_DEV_STROLL = he sets off at once and often, the view follows him.
+		if (std::getenv("DEVILUTIONX_DEV_STROLL") != nullptr) {
+			if (towner.walkState == 0 && towner.walkTimer > 30)
+				towner.walkTimer = 30;
+			if (towner.walkState == 2 && towner.walkTimer > 20)
+				towner.walkTimer = 20;
+			ViewPosition = towner.home;
+			const Point before = towner.position;
+			UpdateStroll(towner);
+			if (towner.position != before)
+				LogInfo("STROLL {},{} -> {},{} (home {},{}, state {})", before.x, before.y, towner.position.x, towner.position.y, towner.home.x, towner.home.y, towner.walkState);
+			continue;
+		}
+#endif
+		UpdateStroll(towner);
+	}
 	// BUGFIX: should be `i < numtowners`, was `i < NUM_TOWNERS`
 	for (auto &towner : Towners) {
 		if (towner._ttype == TOWN_DEADGUY) {

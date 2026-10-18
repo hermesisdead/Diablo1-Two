@@ -68,6 +68,31 @@ struct Towner {
 	bool classicIsNew = false;
 	/** The new sprites are the ones shown now. */
 	bool showingNew = false;
+
+	// Strolling about near where he stands (Griswold, with the new textures, single player).
+	/** Walk sprites: 8 directions (Direction order) of TownerWalkFrames frames; none: he stays put. */
+	OptionalOwnedClxSpriteList ownedWalk;
+	std::shared_ptr<const HdSprite> walkHd;
+	/** Where he works (where the map puts him) and where he is going. */
+	Point home;
+	Point goal;
+	Point stepFrom;
+	Direction walkDir = Direction::South;
+	/** 0 at work (his usual animation), 1 walking, 2 stopped for a moment. */
+	uint8_t walkState = 0;
+	uint8_t strolls = 0;      // stops made on this walk
+	int16_t walkTimer = 0;    // ticks to wait
+	int16_t stepTick = 0;     // ticks into the current step (0: not stepping)
+	int16_t walkAnimTick = 0; // walk animation clock
+	int16_t stuckTicks = 0;
+
+	/** The walk sprites are shown now (out of his usual spot or on the way). */
+	[[nodiscard]] bool usingWalkSprite() const
+	{
+		return walkState != 0 && ownedWalk && showingNew;
+	}
+	/** Frame of the walk sprites (direction * TownerWalkFrames + frame). */
+	[[nodiscard]] int walkSpriteFrame() const;
 	/** Drawn over the towner each frame (the pack cow's load). */
 	OptionalOwnedClxSpriteList ownedOverlay;
 	OptionalClxSpriteList anim;
@@ -95,13 +120,20 @@ struct Towner {
 
 	[[nodiscard]] ClxSprite currentSprite() const
 	{
+		if (usingWalkSprite())
+			return (*ownedWalk)[static_cast<size_t>(walkSpriteFrame()) % ownedWalk->numSprites()];
 		return (*anim)[_tAnimFrame % anim->numSprites()];
 	}
+	/** While stepping between tiles: where he is drawn from his tile. */
+	[[nodiscard]] Displacement stepOffset() const;
 	[[nodiscard]] Displacement getRenderingOffset() const
 	{
-		return { -CalculateSpriteTileCenterX(_tAnimWidth), 0 };
+		return Displacement { -CalculateSpriteTileCenterX(_tAnimWidth), 0 } + stepOffset();
 	}
 };
+
+/** Frames per direction of the walk sprites. */
+constexpr int TownerWalkFrames = 10;
 
 extern std::vector<Towner> Towners;
 
