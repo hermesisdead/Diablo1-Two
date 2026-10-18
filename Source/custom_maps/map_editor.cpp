@@ -715,7 +715,7 @@ std::string PaletteTitle()
 		if (S.showTilePicker)
 			return StrCat("Tile Picker [#", S.pickerTile, "]  Scroll: zoom  MMB: pan");
 		if (S.brush >= 0 && S.brush < static_cast<int>(GroundBrushes().size()))
-			return GroundBrushes()[S.brush].name;
+			return std::string(GroundBrushes()[S.brush].name);
 		return "Ground";
 	case Tool::Stamp: return "Pieces of Tristram";
 	case Tool::Npc: return "Townspeople";
@@ -729,8 +729,6 @@ int PaletteSelected()
 {
 	switch (S.tool) {
 	case Tool::Paint:
-		if (S.showVariants)
-			return S.selectedVariant >= 0 ? S.selectedVariant : -1;
 		return S.brush < 0 ? static_cast<int>(GroundBrushes().size()) : S.brush;
 	case Tool::Stamp: return S.stamp < 0 ? static_cast<int>(TownStamps().size()) : S.stamp;
 	case Tool::Npc: return S.npc;
@@ -1041,8 +1039,8 @@ void DrawTilePicker(const Surface &out)
 		// Draw tile rect
 		if (tile == S.pickerTile)
 			FillRect(out, x - 2, y - 2, tileSize + 4, tileSize + 4, PAL16_YELLOW + 12);
-
-		DrawRect(out, x, y, tileSize, tileSize, PAL16_GRAY + 5);
+		else
+			FillRect(out, x, y, tileSize, 1, PAL16_GRAY + 5);  // Top border
 
 		// Draw tile number label
 		DrawString(out, StrCat(tile), { { x, y + tileSize - 8 }, { tileSize, 8 } }, { .flags = UiFlags::ColorWhite | UiFlags::AlignCenter });
@@ -1829,7 +1827,7 @@ bool MapEditorHandleEvent(const SDL_Event &event)
 			SaveMap();
 		} else if (ctrl && sc == SDL_SCANCODE_Z) {
 			Undo();
-		} else if (sc == SDL_SCANCODE_G && !(S.tool == Tool::Paint && S.showVariants)) {
+		} else if (sc == SDL_SCANCODE_G) {
 			S.grid = !S.grid;
 		} else if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9) {
 			SelectTool(sc - SDL_SCANCODE_1);
@@ -1863,7 +1861,7 @@ bool MapEditorHandleEvent(const SDL_Event &event)
 	case SDL_EVENT_MOUSE_MOTION:
 		if (S.pickerDragging && S.showTilePicker) {
 			// Pan the tile picker with middle mouse drag
-			const Point delta = MousePosition - S.pickerDragStart;
+			const auto delta = MousePosition - S.pickerDragStart;
 			S.pickerPan = S.pickerPan + delta;
 			S.pickerDragStart = MousePosition;
 			return true;
