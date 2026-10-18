@@ -1788,7 +1788,7 @@ bool MapEditorHandleEvent(const SDL_Event &event)
 		return false;
 	switch (event.type) {
 	case SDL_EVENT_MOUSE_BUTTON_DOWN:
-		if (event.button.button == SDL_BUTTON_MIDDLE && S.editing && S.showTilePicker) {
+		if (event.button.button == 2 && S.editing && S.showTilePicker) {  // 2 = middle mouse button
 			// Middle mouse to drag tile picker
 			S.pickerDragging = true;
 			S.pickerDragStart = MousePosition;
