@@ -57,6 +57,12 @@ public:
 	    const uint8_t tileLights[MAXDUNX][MAXDUNY],
 	    uint_fast8_t microTileLen);
 
+	/** @brief The same lightmap, shading through other light tables (e.g. hue-shifted ones). */
+	[[nodiscard]] Lightmap withLightTables(std::span<const std::array<uint8_t, LightTableSize>, NumLightingLevels> tables) const
+	{
+		return Lightmap(outBuffer, outPitch, lightmapBuffer, lightmapPitch, tables, fullyLitLightTable_, fullyDarkLightTable_);
+	}
+
 	static Lightmap bleedUp(bool perPixelLighting, const Lightmap &source, Point targetBufferPosition, std::span<uint8_t> lightmapBuffer);
 
 private:

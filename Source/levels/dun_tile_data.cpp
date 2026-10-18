@@ -38,6 +38,8 @@ WorldTileRectangle SetPieceRoom;
 WorldTileRectangle SetPiece;
 OptionalOwnedClxSpriteList pSpecialCels;
 std::unique_ptr<MegaTile[]> pMegaTiles;
+size_t MegaTileCount;
+int8_t dTileHue[MAXDUNX][MAXDUNY];
 std::unique_ptr<std::byte[]> pDungeonCels;
 TileProperties SOLData[MAXTILES];
 WorldTilePosition dminPosition;

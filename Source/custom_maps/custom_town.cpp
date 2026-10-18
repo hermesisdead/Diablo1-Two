@@ -26,6 +26,7 @@
 #include "tables/townerdat.hpp"
 #include "towners.h"
 #include "engine/load_file.hpp"
+#include "engine/render/tile_hue.hpp"
 #include "utils/endian_swap.hpp"
 #include "utils/log.hpp"
 #include "utils/str_cat.hpp"
@@ -263,11 +264,20 @@ void PaintTownStyleTiles(const CustomMap *map)
 			dPiece[x][y] = 426;
 	}
 	std::memset(dungeon, 0, sizeof(dungeon));
+	ClearTileHues();
 	if (map == nullptr)
 		return;
+	const bool hasHues = map->hues.size() == map->tiles.size();
 	for (int y = 0; y < map->height; y++) {
-		for (int x = 0; x < map->width; x++)
-			FillMegaTile(16 + 2 * x, 16 + 2 * y, map->tiles[static_cast<size_t>(y) * map->width + x]);
+		for (int x = 0; x < map->width; x++) {
+			const size_t i = static_cast<size_t>(y) * map->width + x;
+			FillMegaTile(16 + 2 * x, 16 + 2 * y, map->tiles[i]);
+			const int8_t hue = hasHues ? map->hues[i] : 0;
+			for (int dy = 0; dy < 2; dy++) {
+				for (int dx = 0; dx < 2; dx++)
+					dTileHue[16 + 2 * x + dx][16 + 2 * y + dy] = hue;
+			}
+		}
 	}
 }
 

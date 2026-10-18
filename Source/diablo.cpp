@@ -1641,7 +1641,7 @@ std::expected<void, std::string> LoadLvlGFX()
 
 	const auto loadAll = [](const char *cel, const char *til, const char *special) -> std::expected<void, std::string> {
 		ASSIGN_OR_RETURN(pDungeonCels, LoadFileInMemWithStatus(cel));
-		ASSIGN_OR_RETURN(pMegaTiles, LoadFileInMemWithStatus<MegaTile>(til));
+		ASSIGN_OR_RETURN(pMegaTiles, LoadFileInMemWithStatus<MegaTile>(til, &MegaTileCount));
 		ASSIGN_OR_RETURN(pSpecialCels, LoadCelWithStatus(special, SpecialCelWidth));
 		return {};
 	};
@@ -1652,7 +1652,7 @@ std::expected<void, std::string> LoadLvlGFX()
 		if (InDesertRegion()) {
 			// Sand Tristram and the Desert Wastes have their own tiles.
 			ASSIGN_OR_RETURN(pDungeonCels, LoadFileInMemWithStatus(std::string(DesertCelPath).c_str()));
-			ASSIGN_OR_RETURN(pMegaTiles, LoadFileInMemWithStatus<MegaTile>(std::string(DesertTilPath).c_str()));
+			ASSIGN_OR_RETURN(pMegaTiles, LoadFileInMemWithStatus<MegaTile>(std::string(DesertTilPath).c_str(), &MegaTileCount));
 			ASSIGN_OR_RETURN(pSpecialCels, LoadCelWithStatus("levels\\towndata\\towns", SpecialCelWidth));
 			return {};
 		}
@@ -1662,9 +1662,9 @@ std::expected<void, std::string> LoadLvlGFX()
 		} else {
 			pDungeonCels = std::move(*cel);
 		}
-		auto til = LoadFileInMemWithStatus<MegaTile>("nlevels\\towndata\\town.til");
+		auto til = LoadFileInMemWithStatus<MegaTile>("nlevels\\towndata\\town.til", &MegaTileCount);
 		if (!til.has_value()) {
-			ASSIGN_OR_RETURN(pMegaTiles, LoadFileInMemWithStatus<MegaTile>("levels\\towndata\\town.til"));
+			ASSIGN_OR_RETURN(pMegaTiles, LoadFileInMemWithStatus<MegaTile>("levels\\towndata\\town.til", &MegaTileCount));
 		} else {
 			pMegaTiles = std::move(*til);
 		}
@@ -3010,6 +3010,7 @@ void FreeGameMem()
 {
 	pDungeonCels = nullptr;
 	pMegaTiles = nullptr;
+	MegaTileCount = 0;
 	pSpecialCels = std::nullopt;
 
 	FreeMonsters();

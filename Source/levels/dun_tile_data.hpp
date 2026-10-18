@@ -74,6 +74,10 @@ extern WorldTileRectangle SetPiece;
 extern OptionalOwnedClxSpriteList pSpecialCels;
 /** Specifies the tile definitions of the active dungeon type; (e.g. levels/l1data/l1.til). */
 extern DVL_API_FOR_TEST std::unique_ptr<MegaTile[]> pMegaTiles;
+/** Number of entries in pMegaTiles. */
+extern size_t MegaTileCount;
+/** Hue shift of each world tile in steps (painted maps; see engine/render/tile_hue.hpp), 0 = as drawn. */
+extern int8_t dTileHue[MAXDUNX][MAXDUNY];
 extern DVL_API_FOR_TEST std::unique_ptr<std::byte[]> pDungeonCels;
 /**
  * List tile properties

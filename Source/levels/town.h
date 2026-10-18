@@ -59,5 +59,7 @@ void CreateTown(lvl_entry entry);
 void RefreshCustomTownLevel();
 /** @brief Sets the see-through arches of town pieces (towns and wilds made in the map editor). */
 void InitTownStylePieces();
+/** @brief Roof/arch overlay (index + 1 into the town's special cels) drawn over a town piece, 0 for none. */
+uint8_t TownSpecialForPiece(uint16_t piece);
 
 } // namespace devilution

@@ -229,6 +229,7 @@ void CustomMap::Resize(int w, int h)
 	width = std::clamp(w, 4, 40);
 	height = std::clamp(h, 4, 40);
 	tiles.assign(static_cast<size_t>(width) * height, 0);
+	hues.assign(static_cast<size_t>(width) * height, 0);
 	monsters.assign(static_cast<size_t>(width) * 2 * height * 2, 0);
 	objects.assign(static_cast<size_t>(width) * 2 * height * 2, 0);
 	plan.assign(40 * 40, 0);
@@ -326,6 +327,10 @@ std::expected<CustomMap, std::string> ReadCustomMap(std::string_view name)
 		for (size_t i = 0; i < map.overrides.size(); i++)
 			map.overrides[i] = static_cast<uint16_t>(static_cast<uint8_t>((*over)[i * 2]) | (static_cast<uint8_t>((*over)[i * 2 + 1]) << 8));
 	}
+	if (std::expected<std::string, std::string> hue = ReadWholeFile(MapFolder(name) + "map.hue"); hue.has_value() && hue->size() == map.hues.size()) {
+		for (size_t i = 0; i < map.hues.size(); i++)
+			map.hues[i] = static_cast<int8_t>((*hue)[i]);
+	}
 	map.name = std::string(name);
 	return map;
 }
@@ -348,6 +353,12 @@ std::expected<void, std::string> WriteCustomMap(const CustomMap &map)
 		for (const uint16_t v : map.overrides)
 			PutU16(over, v);
 		if (std::expected<void, std::string> r = WriteWholeFile(folder + "map.over", over); !r.has_value())
+			return r;
+	}
+	if (map.hues.size() == map.tiles.size()) {
+		// Colour shifts painted in the editor (one signed byte per map piece).
+		const std::string hue(map.hues.begin(), map.hues.end());
+		if (std::expected<void, std::string> r = WriteWholeFile(folder + "map.hue", hue); !r.has_value())
 			return r;
 	}
 	return WriteWholeFile(folder + "map.ini", BuildMeta(map));

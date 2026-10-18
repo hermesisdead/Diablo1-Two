@@ -6,10 +6,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
 #include "control/control.hpp"
+#include "controls/control_mode.hpp"
 #include "cursor.h"
 #include "custom_maps/campaign.hpp"
 #include "custom_maps/custom_map.hpp"
@@ -17,12 +19,18 @@
 #include "custom_maps/custom_town.hpp"
 #include "custom_maps/map_monsters.hpp"
 #include "diablo.h"
+#include "engine/light_tables.hpp"
 #include "engine/load_file.hpp"
 #include "engine/palette.h"
 #include "engine/rectangle.hpp"
+#include "engine/render/clx_render.hpp"
+#include "engine/render/dun_render.hpp"
+#include "engine/render/light_render.hpp"
 #include "engine/render/primitive_render.hpp"
 #include "engine/render/text_render.hpp"
+#include "engine/render/tile_hue.hpp"
 #include "engine/render/world_projector.hpp"
+#include "engine/surface.hpp"
 #include "gamemenu.h"
 #include "levels/desert.hpp"
 #include "levels/drlg_l1.h"
@@ -88,6 +96,7 @@ struct Snapshot {
 	std::vector<MapSpawner> spawners;
 	std::vector<MapBoss> bosses;
 	std::vector<uint16_t> objects;
+	std::vector<int8_t> hues;
 };
 
 /** Town ground brushes: town megatiles (1-based), one picked at random per tile for variety. */
@@ -164,22 +173,36 @@ struct Session {
 	std::vector<Snapshot> undo;
 
 	// Town tools.
-	int brush = 0;            // ground brush, or -1 for the picked tile
-	uint16_t pickedTile = 0;  // eyedropper
+	int brush = 0;            // ground brush, or -1 for a single tile (pickerTile)
 	int stamp = 0;            // town stamp, or -1 for the clipboard
 	std::vector<uint16_t> clipboard;
+	std::vector<int8_t> clipHues;
 	int clipWidth = 0;
 	int clipHeight = 0;
 	int npc = 0;
 
-	// Tile picker panel.
-	bool showTilePicker = false;  // showing visual tile picker
-	uint16_t pickerTile = 1;      // current tile being previewed/selected
-	int pickerZoom = 2;           // zoom level of tile picker (32px per megatile)
-	Point pickerPan {};           // pan offset for tile picker
-	bool pickerDragging = false;  // dragging with middle mouse
-	Point pickerDragStart {};
-	int hueShift = 0;             // hue shift for tiles (-30 to +30 degrees)
+	// Tile picker (Paint tool): every megatile of the tileset as a picture.
+	bool showTilePicker = false;
+	uint16_t pickerTile = 1;   // painted when brush < 0
+	int pickerScroll = 0;      // first row of pictures shown
+	int pickerZoom = 2;        // picture size, 1 to 3
+	int hueShift = 0;          // colour shift of painted tiles, in TileHueStepDegrees steps
+
+	// Middle-mouse drag: scrolls the picker, or moves the camera over the map.
+	bool panning = false;
+	bool panningPicker = false;
+	Point panLast {};
+	Displacement panRemainder {};
+
+	// What painting would lay under the cursor, put into the level for one frame so it is drawn
+	// exactly as it will look; this remembers what it covered.
+	struct GhostCell {
+		Point tile;
+		uint16_t piece;
+		int8_t hue;
+		int8_t special;
+	};
+	std::vector<GhostCell> ghost;
 
 	// Monster tools.
 	int monster = 0;    // index in SpawnableMonsters()
@@ -198,20 +221,6 @@ struct Session {
 Session S;
 
 // --- Helpers ---------------------------------------------------------------------------------
-
-/** Get all tile variants from the current brush. */
-std::vector<uint16_t> CurrentBrushVariants()
-{
-	if (S.brush < 0 || S.brush >= static_cast<int>(GroundBrushes().size()))
-		return {};
-	return GroundBrushes()[S.brush].tiles;
-}
-
-/** Format a tile variant label for display. */
-std::string VariantLabel(uint16_t tileId)
-{
-	return StrCat("  Tile #", tileId);
-}
 
 void Say(std::string text)
 {
@@ -268,7 +277,7 @@ bool OnEditorLevel()
 
 void PushUndo()
 {
-	S.undo.push_back({ S.map.plan, S.map.overrides, S.map.tiles, S.map.entries, S.map.portals, S.map.npcs, S.map.spawners, S.map.bosses, S.map.objects });
+	S.undo.push_back({ S.map.plan, S.map.overrides, S.map.tiles, S.map.entries, S.map.portals, S.map.npcs, S.map.spawners, S.map.bosses, S.map.objects, S.map.hues });
 	if (S.undo.size() > 60)
 		S.undo.erase(S.undo.begin());
 	S.dirty = true;
@@ -358,58 +367,39 @@ uint16_t &TownTile(Point piece)
 	return S.map.tiles[static_cast<size_t>(piece.y) * S.map.width + piece.x];
 }
 
-/** Town: get the tile to paint (handles variant selection and hue shift). */
-uint16_t GetPaintTile()
+/** Town: hue shift of a megatile (in TileHueStepDegrees steps). */
+int8_t &TownHue(Point piece)
 {
-	if (S.showTilePicker)
-		return S.pickerTile;
-
-	const auto &brushes = GroundBrushes();
-	if (S.brush < 0 || S.brush >= static_cast<int>(brushes.size()))
-		return 0;
-
-	const auto &choices = brushes[S.brush].tiles;
-	if (choices.empty())
-		return 0;
-
-	// Use random tile from the brush.
-	return choices[0];
+	if (S.map.hues.size() != S.map.tiles.size())
+		S.map.hues.assign(S.map.tiles.size(), 0);
+	return S.map.hues[static_cast<size_t>(piece.y) * S.map.width + piece.x];
 }
 
-/** Town: fills a rectangle of megatiles with the current ground brush. */
+/** Town: the megatile painting lays at a piece (brushes vary it by position), 0 for none. */
+uint16_t PaintTileAt(Point piece)
+{
+	if (S.brush < 0)
+		return S.pickerTile;
+	const std::vector<GroundBrush> &brushes = GroundBrushes();
+	if (S.brush >= static_cast<int>(brushes.size()) || brushes[S.brush].tiles.empty())
+		return 0;
+	const std::vector<uint16_t> &choices = brushes[S.brush].tiles;
+	const uint32_t h = static_cast<uint32_t>(piece.x) * 73856093u ^ static_cast<uint32_t>(piece.y) * 19349663u;
+	return choices[(h >> 4) % choices.size()];
+}
+
+/** Town: fills a rectangle of megatiles with the current brush or picked tile, in the current hue. */
 void PaintGround(Point a, Point b)
 {
 	const int x0 = std::max(0, std::min(a.x, b.x)), x1 = std::min(S.map.width - 1, std::max(a.x, b.x));
 	const int y0 = std::max(0, std::min(a.y, b.y)), y1 = std::min(S.map.height - 1, std::max(a.y, b.y));
-	if (x0 > x1 || y0 > y1)
+	if (x0 > x1 || y0 > y1 || PaintTileAt({ x0, y0 }) == 0)
 		return;
-
-	std::vector<uint16_t> choices;
-	if (S.showTilePicker) {
-		choices = { S.pickerTile };
-	} else {
-		const auto &brushes = GroundBrushes();
-		if (S.brush < 0 || S.brush >= static_cast<int>(brushes.size()))
-			return;
-		choices = brushes[S.brush].tiles;
-	}
-
-	if (choices.empty() || choices.front() == 0)
-		return;
-
 	PushUndo();
 	for (int y = y0; y <= y1; y++) {
 		for (int x = x0; x <= x1; x++) {
-			uint16_t tile;
-			if (S.showTilePicker) {
-				// Use the picker tile directly
-				tile = S.pickerTile;
-			} else {
-				// Random selection from brush
-				const uint32_t h = static_cast<uint32_t>(x) * 73856093u ^ static_cast<uint32_t>(y) * 19349663u;
-				tile = choices[(h >> 4) % choices.size()];
-			}
-			TownTile({ x, y }) = tile;
+			TownTile({ x, y }) = PaintTileAt({ x, y });
+			TownHue({ x, y }) = static_cast<int8_t>(S.hueShift);
 		}
 	}
 	Rebuild();
@@ -445,14 +435,20 @@ void PlaceStamp(Point centre)
 			if (!InMap(at))
 				continue;
 			uint16_t tile;
+			int8_t hue = 0;
 			if (S.stamp < 0) {
-				tile = S.clipboard[static_cast<size_t>(y) * S.clipWidth + x];
+				const size_t i = static_cast<size_t>(y) * S.clipWidth + x;
+				tile = S.clipboard[i];
+				if (i < S.clipHues.size())
+					hue = S.clipHues[i];
 			} else {
 				const TownStamp &s = TownStamps()[S.stamp];
 				tile = classic[static_cast<size_t>(s.y0 + y) * 48 + s.x0 + x];
 			}
-			if (tile != 0)
+			if (tile != 0) {
 				TownTile(at) = tile;
+				TownHue(at) = hue;
+			}
 		}
 	}
 	Rebuild();
@@ -468,9 +464,12 @@ void CopyArea(Point a, Point b)
 	S.clipWidth = x1 - x0 + 1;
 	S.clipHeight = y1 - y0 + 1;
 	S.clipboard.clear();
+	S.clipHues.clear();
 	for (int y = y0; y <= y1; y++) {
-		for (int x = x0; x <= x1; x++)
+		for (int x = x0; x <= x1; x++) {
 			S.clipboard.push_back(TownTile({ x, y }));
+			S.clipHues.push_back(TownHue({ x, y }));
+		}
 	}
 	S.stamp = -1;
 	S.tool = Tool::Stamp;
@@ -659,7 +658,7 @@ std::string_view ToolHint(Tool tool)
 	case Tool::Entry: return "Click to add an arrival point, drag to move, right-click to delete.";
 	case Tool::Portal: return "Click to place a portal and choose where it leads. Right-click deletes.";
 	case Tool::Door: return "Click to place a doorway exit and choose where it leads. Right-click deletes.";
-	case Tool::Paint: return "Drag to paint ground. Right-click picks up the tile under the cursor.";
+	case Tool::Paint: return "Drag to paint. Right-click picks up a tile and its hue. T: tile picker (F/G: hue).";
 	case Tool::Stamp: return "Click to place the chosen piece of Tristram (centred on the cursor).";
 	case Tool::Copy: return "Drag over an area to copy it, then click to paste it anywhere.";
 	case Tool::Npc: return "Click to place the chosen townsperson (or move them). Right-click removes.";
@@ -676,14 +675,10 @@ std::vector<std::string> PaletteRows()
 	std::vector<std::string> rows;
 	switch (S.tool) {
 	case Tool::Paint:
-		// Show ground brushes.
+		// Ground brushes (a mix of variants), then any single tile from the picker.
 		for (const GroundBrush &b : GroundBrushes())
 			rows.emplace_back(b.name);
-		rows.push_back("---");
-		if (S.pickedTile != 0)
-			rows.push_back(StrCat("Tile picker [", S.pickerTile, "]"));
-		else
-			rows.push_back("Open tile picker");
+		rows.push_back(S.brush < 0 ? StrCat("Tile #", S.pickerTile, "  (T: picker)") : std::string("Pick a tile...  (T)"));
 		break;
 	case Tool::Stamp:
 		for (const TownStamp &s : TownStamps())
@@ -712,14 +707,12 @@ std::vector<std::string> PaletteRows()
 std::string PaletteTitle()
 {
 	switch (S.tool) {
-	case Tool::Paint:
-		if (S.showTilePicker) {
-			const std::string hue = S.hueShift != 0 ? StrCat("  Hue: ", S.hueShift >= 0 ? "+" : "", S.hueShift, "°") : "";
-			return StrCat("Tile Picker [#", S.pickerTile, "]", hue, "  F/G: hue");
-		}
+	case Tool::Paint: {
+		const std::string hue = S.hueShift != 0 ? StrCat("  hue ", S.hueShift > 0 ? "+" : "", S.hueShift * TileHueStepDegrees) : std::string {};
 		if (S.brush >= 0 && S.brush < static_cast<int>(GroundBrushes().size()))
-			return std::string(GroundBrushes()[S.brush].name);
-		return "Ground";
+			return StrCat(GroundBrushes()[S.brush].name, hue);
+		return StrCat("Tile #", S.pickerTile, hue);
+	}
 	case Tool::Stamp: return "Pieces of Tristram";
 	case Tool::Npc: return "Townspeople";
 	case Tool::Spawner: return StrCat("Pack of ", S.packSize, "  (click +/right -)");
@@ -744,18 +737,15 @@ int PaletteSelected()
 void SelectPalette(int row)
 {
 	switch (S.tool) {
-	case Tool::Paint: {
-		const auto &brushes = GroundBrushes();
-		if (row < static_cast<int>(brushes.size())) {
+	case Tool::Paint:
+		if (row < static_cast<int>(GroundBrushes().size())) {
 			S.brush = row;
-		} else if (row == static_cast<int>(brushes.size()) + 1) {
-			// Separator
+			S.showTilePicker = false;
 		} else {
-			// Open tile picker
-			S.showTilePicker = !S.showTilePicker;
+			S.brush = -1;
+			S.showTilePicker = true;
 		}
 		break;
-	}
 	case Tool::Stamp: S.stamp = row >= static_cast<int>(TownStamps().size()) ? -1 : row; break;
 	case Tool::Npc: S.npc = row; break;
 	case Tool::Spawner: S.monster = row; break;
@@ -799,6 +789,142 @@ Rectangle PaletteTitleRect()
 {
 	const Rectangle panel = PaletteRect();
 	return { panel.position, { panel.size.width, 20 } };
+}
+
+// --- Tile picker layout ------------------------------------------------------------------------
+
+constexpr int PickerHeader = 44; // title, then a row of buttons
+constexpr int PickerGap = 4;
+constexpr int PickerScrollBar = 6;
+constexpr std::array<std::string_view, 4> PickerButtonLabels { "Hue -  (F)", "Hue +  (G)", "Hue off", "Close (T)" };
+constexpr std::array<std::string_view, 4> PickerButtonShortLabels { "Hue -", "Hue +", "Reset", "Close" };
+
+bool PickerShown()
+{
+	return S.editing && S.showTilePicker && S.tool == Tool::Paint;
+}
+
+int PickerCell()
+{
+	return S.pickerZoom <= 1 ? 52 : (S.pickerZoom == 2 ? 72 : 100);
+}
+
+int PickerColumns()
+{
+	const int room = std::max(PaletteWidth * 2, gnScreenWidth * 2 / 5);
+	return std::clamp((room - PickerScrollBar - PickerGap) / (PickerCell() + PickerGap), 2, 8);
+}
+
+Rectangle PickerRect()
+{
+	const int w = PickerColumns() * (PickerCell() + PickerGap) + PickerGap + PickerScrollBar + 4;
+	const int top = TopBarHeight + 4;
+	return { { gnScreenWidth - w - 4, top }, { w, std::max(160, gnViewportHeight - 22 - top) } };
+}
+
+/** Short screens skip the large picture (the preview on the map still shows the tile in place). */
+bool PickerHasPreview()
+{
+	return PickerRect().size.height >= 400;
+}
+
+/** The large picture of the hovered (or chosen) tile at the bottom of the picker. */
+Rectangle PickerPreviewRect()
+{
+	const Rectangle r = PickerRect();
+	const int h = std::clamp(r.size.height / 3, 80, 170);
+	return { { r.position.x + 4, r.position.y + r.size.height - h - 4 }, { r.size.width - 8, h } };
+}
+
+Rectangle PickerGridRect()
+{
+	const Rectangle r = PickerRect();
+	const int top = r.position.y + PickerHeader;
+	const int bottom = PickerHasPreview() ? PickerPreviewRect().position.y - 4 : r.position.y + r.size.height - 4;
+	return { { r.position.x + PickerGap, top }, { r.size.width - PickerGap - PickerScrollBar - 4, bottom - top } };
+}
+
+Rectangle PickerButton(int index)
+{
+	const Rectangle r = PickerRect();
+	const int n = static_cast<int>(PickerButtonLabels.size());
+	const int w = (r.size.width - 8 - (n - 1) * 3) / n;
+	return { { r.position.x + 4 + index * (w + 3), r.position.y + 20 }, { w, 18 } };
+}
+
+int PickerTileCount()
+{
+	return pMegaTiles == nullptr ? 0 : static_cast<int>(MegaTileCount);
+}
+
+int PickerRowCount()
+{
+	return (PickerTileCount() + PickerColumns() - 1) / PickerColumns();
+}
+
+int PickerVisibleRows()
+{
+	return std::max(1, PickerGridRect().size.height / (PickerCell() + PickerGap));
+}
+
+void ScrollPicker(int rows)
+{
+	S.pickerScroll = std::clamp(S.pickerScroll + rows, 0, std::max(0, PickerRowCount() - PickerVisibleRows()));
+}
+
+/** Scrolls so the chosen tile is on screen. */
+void ShowPickerTile()
+{
+	const int row = (S.pickerTile - 1) / PickerColumns();
+	if (row < S.pickerScroll)
+		ScrollPicker(row - S.pickerScroll);
+	else if (row >= S.pickerScroll + PickerVisibleRows())
+		ScrollPicker(row - S.pickerScroll - PickerVisibleRows() + 1);
+	ScrollPicker(0);
+}
+
+/** Screen cell of a tile (1-based id), whether or not it is scrolled into view. */
+Rectangle PickerCellRect(int tile)
+{
+	const Rectangle grid = PickerGridRect();
+	const int index = tile - 1;
+	const int row = index / PickerColumns() - S.pickerScroll;
+	const int col = index % PickerColumns();
+	return { { grid.position.x + col * (PickerCell() + PickerGap), grid.position.y + row * (PickerCell() + PickerGap) }, { PickerCell(), PickerCell() } };
+}
+
+/** Tile under a screen point in the picker's grid, 0 if none. */
+int PickerTileAt(Point p)
+{
+	const Rectangle grid = PickerGridRect();
+	if (!grid.contains(p))
+		return 0;
+	const int stride = PickerCell() + PickerGap;
+	const int col = (p.x - grid.position.x) / stride;
+	const int row = (p.y - grid.position.y) / stride;
+	if (col >= PickerColumns() || row >= PickerVisibleRows() || (p.x - grid.position.x) % stride >= PickerCell() || (p.y - grid.position.y) % stride >= PickerCell())
+		return 0;
+	const int tile = (row + S.pickerScroll) * PickerColumns() + col + 1;
+	return tile <= PickerTileCount() ? tile : 0;
+}
+
+void OpenTilePicker()
+{
+	S.brush = -1;
+	S.showTilePicker = true;
+	S.pickerTile = static_cast<uint16_t>(std::clamp<int>(S.pickerTile, 1, std::max(1, PickerTileCount())));
+	ShowPickerTile();
+}
+
+void ShiftHue(int steps)
+{
+	int hue = S.hueShift + steps;
+	// Round the colour wheel: past half a turn one way is the same as coming from the other side.
+	if (hue > MaxTileHueSteps)
+		hue -= 2 * MaxTileHueSteps;
+	if (hue < -MaxTileHueSteps)
+		hue += 2 * MaxTileHueSteps;
+	S.hueShift = hue;
 }
 
 constexpr int DialogWidth = 320;
@@ -1020,45 +1146,195 @@ void DrawPalette(const Surface &out)
 	}
 }
 
+/**
+ * Draws a megatile's four pieces the way the game draws them (floors first, then walls, foliage
+ * and roofs). `base` is where the top piece's lowest blocks start (their bottom-left corner).
+ */
+void RenderMegaTile(const Surface &out, Point base, int tile, int hue)
+{
+	if (tile <= 0 || tile > PickerTileCount() || pDungeonCels == nullptr)
+		return;
+	const MegaTile mega = pMegaTiles[tile - 1];
+	const std::array<uint16_t, 4> pieces { Swap16LE(mega.micro1), Swap16LE(mega.micro2), Swap16LE(mega.micro3), Swap16LE(mega.micro4) };
+	// Screen offsets of the pieces at (0,0), (1,0), (0,1) and (1,1), back to front.
+	constexpr std::array<Displacement, 4> Offsets { Displacement { 0, 0 }, Displacement { 32, 16 }, Displacement { -32, 16 }, Displacement { 0, 32 } };
+
+	constexpr int HalfTileWidth = static_cast<int>(DunFrameWidth);
+	const HueLightTableSet *hueTables = GetTileHueLightTables(hue);
+	const std::span<const std::array<uint8_t, LightTableSize>, NumLightingLevels> tables = hueTables != nullptr
+	    ? std::span<const std::array<uint8_t, LightTableSize>, NumLightingLevels>(*hueTables)
+	    : std::span<const std::array<uint8_t, LightTableSize>, NumLightingLevels>(LightTables);
+	const uint8_t *tbl = tables[0].data(); // fully lit
+	static std::vector<uint8_t> fullLight;
+	fullLight.assign(out.pitch(), 0);
+	const Lightmap lightmap(out.at(0, 0), out.pitch(), fullLight, 0, tables, FullyLitLightTable, FullyDarkLightTable);
+
+	auto isFloor = [](uint16_t piece) { return !HasAnyOf(SOLData[piece], TileProperties::Solid | TileProperties::BlockMissile); };
+	for (size_t i = 0; i < pieces.size(); i++) {
+		if (pieces[i] >= MAXTILES || !isFloor(pieces[i]))
+			continue;
+		for (int half = 0; half < 2; half++) {
+			const LevelCelBlock block { DPieceMicros[pieces[i]].mt[half] };
+			if (block.hasValue())
+				RenderTileFrame(out, lightmap, base + Offsets[i] + Displacement { half * HalfTileWidth, 0 }, half == 0 ? TileType::LeftTriangle : TileType::RightTriangle,
+				    GetDunFrame(pDungeonCels.get(), block.frame()), DunFrameTriangleHeight, MaskType::Solid, tbl);
+		}
+	}
+	for (size_t i = 0; i < pieces.size(); i++) {
+		if (pieces[i] >= MAXTILES)
+			continue;
+		const bool floor = isFloor(pieces[i]);
+		const MICROS &micros = DPieceMicros[pieces[i]];
+		Point at = base + Offsets[i];
+		for (int half = 0; half < 2; half++) {
+			const LevelCelBlock block { micros.mt[half] };
+			if (!block.hasValue())
+				continue;
+			const Point p = at + Displacement { half * HalfTileWidth, 0 };
+			if (floor && block.type() == TileType::TransparentSquare)
+				RenderTileFoliage(out, lightmap, p, pDungeonCels.get(), block, tbl);
+			else if (!floor)
+				RenderTile(out, lightmap, p, pDungeonCels.get(), block, MaskType::Solid, tbl);
+		}
+		at.y -= TILE_HEIGHT;
+		for (int b = 2; b + 1 < static_cast<int>(MicroTileLen); b += 2, at.y -= TILE_HEIGHT) {
+			for (int half = 0; half < 2; half++) {
+				const LevelCelBlock block { micros.mt[b + half] };
+				if (block.hasValue())
+					RenderTile(out, lightmap, at + Displacement { half * HalfTileWidth, 0 }, pDungeonCels.get(), block, MaskType::Solid, tbl);
+			}
+		}
+	}
+	// Roofs and arches of town buildings are separate sprites.
+	if (pSpecialCels && IsAnyOf(leveltype, DTYPE_TOWN, DTYPE_FOREST) && !InDesertRegion()) {
+		for (size_t i = 0; i < pieces.size(); i++) {
+			const uint8_t special = TownSpecialForPiece(pieces[i]);
+			if (special == 0 || special > pSpecialCels->numSprites())
+				continue;
+			if (hueTables != nullptr)
+				ClxDrawTRN(out, base + Offsets[i], (*pSpecialCels)[special - 1], tbl);
+			else
+				ClxDraw(out, base + Offsets[i], (*pSpecialCels)[special - 1]);
+		}
+	}
+}
+
+/** Draws a tile scaled to fit a box: flat ground fills the width, tall trees and walls shrink to fit. */
+void DrawTilePicture(const Surface &out, Rectangle box, int tile, int hue)
+{
+	// Full-size drawing first, into a scratch surface tall enough for the tallest pieces.
+	static std::optional<OwnedSurface> scratch;
+	const int height = static_cast<int>(MicroTileLen / 2) * TILE_HEIGHT + 48;
+	if (!scratch || scratch->h() != height)
+		scratch.emplace(2 * TILE_WIDTH, height);
+	const Surface &s = *scratch;
+	for (int y = 0; y < s.h(); y++)
+		std::memset(s.at(0, y), 0, s.w());
+	RenderMegaTile(s, { TILE_WIDTH / 2, s.h() - 1 - TILE_HEIGHT }, tile, hue);
+
+	int x0 = s.w(), y0 = s.h(), x1 = -1, y1 = -1;
+	for (int y = 0; y < s.h(); y++) {
+		const uint8_t *row = s.at(0, y);
+		for (int x = 0; x < s.w(); x++) {
+			if (row[x] != 0) {
+				x0 = std::min(x0, x), x1 = std::max(x1, x);
+				y0 = std::min(y0, y), y1 = std::max(y1, y);
+			}
+		}
+	}
+	if (x1 < 0) {
+		DrawString(out, "(empty)", { box.position + Displacement { 0, box.size.height / 2 - 6 }, { box.size.width, 12 } }, { .flags = UiFlags::ColorWhite | UiFlags::AlignCenter });
+		return;
+	}
+	const int bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+	const float scale = std::min({ static_cast<float>(box.size.width) / s.w(), static_cast<float>(box.size.width) / bw, static_cast<float>(box.size.height) / bh });
+	const int dw = std::max(1, static_cast<int>(bw * scale)), dh = std::max(1, static_cast<int>(bh * scale));
+	// Centred across, standing on the bottom of the box like it stands on the ground.
+	const Point to { box.position.x + (box.size.width - dw) / 2, box.position.y + box.size.height - dh };
+	for (int y = 0; y < dh; y++) {
+		const uint8_t *row = s.at(0, y0 + std::min(bh - 1, static_cast<int>(y / scale)));
+		for (int x = 0; x < dw; x++) {
+			const uint8_t color = row[x0 + std::min(bw - 1, static_cast<int>(x / scale))];
+			if (color != 0)
+				out.SetPixel(to + Displacement { x, y }, color);
+		}
+	}
+}
+
+void Frame(const Surface &out, Rectangle r, uint8_t color, int thickness)
+{
+	for (int i = 0; i < thickness; i++) {
+		DrawHorizontalLine(out, r.position + Displacement { 0, i }, r.size.width, color);
+		DrawHorizontalLine(out, r.position + Displacement { 0, r.size.height - 1 - i }, r.size.width, color);
+		DrawVerticalLine(out, r.position + Displacement { i, 0 }, r.size.height, color);
+		DrawVerticalLine(out, r.position + Displacement { r.size.width - 1 - i, 0 }, r.size.height, color);
+	}
+}
+
+std::string HueLabel(int steps)
+{
+	if (steps == 0)
+		return "hue: normal";
+	return StrCat("hue ", steps > 0 ? "+" : "", steps * TileHueStepDegrees, " deg");
+}
+
 void DrawTilePicker(const Surface &out)
 {
-	const Rectangle panel = PaletteRect();
-	DrawHalfTransparentRectTo(out, panel.position.x, panel.position.y, panel.size.width, panel.size.height);
-	DrawHalfTransparentRectTo(out, panel.position.x, panel.position.y, panel.size.width, panel.size.height);
-	DrawString(out, PaletteTitle(), { panel.position + Displacement { 0, 5 }, { panel.size.width, 12 } }, { .flags = UiFlags::ColorWhitegold | UiFlags::AlignCenter | UiFlags::KerningFitSpacing });
+	const Rectangle r = PickerRect();
+	DrawHalfTransparentRectTo(out, r.position.x, r.position.y, r.size.width, r.size.height);
+	DrawHalfTransparentRectTo(out, r.position.x, r.position.y, r.size.width, r.size.height);
+	DrawHalfTransparentRectTo(out, r.position.x, r.position.y, r.size.width, r.size.height);
+	const int hovered = PickerTileAt(MousePosition);
+	const std::string hoverNote = !PickerHasPreview() && hovered != 0 && hovered != S.pickerTile ? StrCat("  (#", hovered, ")") : std::string {};
+	DrawString(out, StrCat("Tile picker   chosen #", S.pickerTile, hoverNote, "   ", HueLabel(S.hueShift)), { r.position + Displacement { 0, 5 }, { r.size.width, 12 } },
+	    { .flags = UiFlags::ColorWhitegold | UiFlags::AlignCenter | UiFlags::KerningFitSpacing });
+	const bool narrow = PickerButton(0).size.width < 80;
+	for (int i = 0; i < static_cast<int>(PickerButtonLabels.size()); i++)
+		Button(out, PickerButton(i), narrow ? PickerButtonShortLabels[i] : PickerButtonLabels[i], false);
 
-	// Draw scrollable tile list on the left
-	const int listWidth = 60;
-	const int previewWidth = panel.size.width - listWidth - 8;
-	const int itemHeight = 14;
-	const int itemsPerScreen = (panel.size.height - 24) / itemHeight;
-	const int startY = panel.position.y + 24;
-
-	// Draw tile number list
-	int firstTile = std::max(0, S.paletteScroll);
-	for (int i = 0; i < itemsPerScreen && firstTile + i < 128; i++) {
-		const uint16_t tile = firstTile + i + 1;
-		const int y = startY + i * itemHeight;
-		const Rectangle rect = { { panel.position.x + 2, y }, { listWidth - 4, itemHeight - 1 } };
-
-		// Highlight selected tile
-		if (tile == S.pickerTile)
-			FillRect(out, rect.position.x, rect.position.y, rect.size.width, rect.size.height, PAL16_YELLOW + 12);
-		else if (rect.contains(MousePosition))
-			FillRect(out, rect.position.x, rect.position.y, rect.size.width, rect.size.height, PAL16_GRAY + 13);
-
-		DrawString(out, StrCat(tile), { rect.position + Displacement { 2, 1 }, { listWidth - 8, itemHeight } }, { .flags = UiFlags::ColorWhite | UiFlags::KerningFitSpacing });
+	const int count = PickerTileCount();
+	if (count == 0) {
+		DrawString(out, "No tiles loaded here.", { PickerGridRect().position + Displacement { 0, 20 }, { PickerGridRect().size.width, 12 } }, { .flags = UiFlags::ColorWhite | UiFlags::AlignCenter });
+		return;
 	}
 
-	// Draw large preview of selected tile on the right
-	const int previewX = panel.position.x + listWidth + 4;
-	const int previewY = startY;
-	const int previewH = panel.size.height - 28;
-	FillRect(out, previewX, previewY, previewWidth, previewH, PAL16_GRAY + 3);
+	const int first = S.pickerScroll * PickerColumns() + 1;
+	const int last = std::min(count, first + PickerVisibleRows() * PickerColumns() - 1);
+	for (int tile = first; tile <= last; tile++) {
+		const Rectangle cell = PickerCellRect(tile);
+		FillRect(out, cell.position.x, cell.position.y, cell.size.width, cell.size.height, 0);
+		DrawTilePicture(out, { cell.position + Displacement { 3, 3 }, { cell.size.width - 6, cell.size.height - 6 } }, tile, S.hueShift);
+		if (tile == S.pickerTile)
+			Frame(out, cell, PAL16_YELLOW + 2, 2);
+		else if (tile == hovered)
+			Frame(out, cell, PAL16_GRAY + 2, 1);
+		DrawString(out, StrCat(tile), { cell.position + Displacement { 3, 2 }, { cell.size.width - 6, 12 } }, { .flags = (tile == S.pickerTile ? UiFlags::ColorWhitegold : UiFlags::ColorWhite) | UiFlags::KerningFitSpacing });
+	}
 
-	// Draw the selected tile number large and clear
-	DrawString(out, StrCat("Tile #", S.pickerTile), { { previewX + 4, previewY + 4 }, { previewWidth - 8, 12 } }, { .flags = UiFlags::ColorWhitegold | UiFlags::KerningFitSpacing });
-	DrawString(out, "(Use Up/Down or Click)", { { previewX + 4, previewY + 20 }, { previewWidth - 8, 10 } }, { .flags = UiFlags::ColorGold | UiFlags::KerningFitSpacing });
+	// Scroll bar.
+	const Rectangle grid = PickerGridRect();
+	const int rows = PickerRowCount(), shown = PickerVisibleRows();
+	if (rows > shown) {
+		const int track = grid.size.height;
+		const int thumb = std::max(12, track * shown / rows);
+		const int at = grid.position.y + (track - thumb) * S.pickerScroll / std::max(1, rows - shown);
+		const int x = r.position.x + r.size.width - PickerScrollBar - 2;
+		FillRect(out, x, grid.position.y, PickerScrollBar - 2, track, PAL16_GRAY + 13);
+		FillRect(out, x, at, PickerScrollBar - 2, thumb, PAL16_YELLOW + 6);
+	}
+
+	if (!PickerHasPreview())
+		return;
+	// Large picture of what is under the mouse (or the chosen tile).
+	const Rectangle preview = PickerPreviewRect();
+	const int shownTile = hovered != 0 ? hovered : S.pickerTile;
+	FillRect(out, preview.position.x, preview.position.y, preview.size.width, preview.size.height, 0);
+	Frame(out, preview, PAL16_YELLOW + 9, 1);
+	DrawString(out, StrCat("Tile #", shownTile, hovered != 0 && hovered != S.pickerTile ? "   (click to choose)" : "   (chosen)"),
+	    { preview.position + Displacement { 6, 4 }, { preview.size.width - 12, 12 } }, { .flags = UiFlags::ColorWhitegold | UiFlags::KerningFitSpacing });
+	DrawString(out, preview.size.width >= 360 ? "Wheel: scroll   Ctrl+wheel: size   Middle-drag: scroll" : "Wheel: scroll   Ctrl+wheel: size",
+	    { preview.position + Displacement { 6, preview.size.height - 16 }, { preview.size.width - 12, 12 } }, { .flags = UiFlags::ColorWhite | UiFlags::KerningFitSpacing });
+	DrawTilePicture(out, { preview.position + Displacement { 8, 20 }, { preview.size.width - 16, preview.size.height - 40 } }, shownTile, S.hueShift);
 }
 
 void DrawInterface(const Surface &out)
@@ -1093,7 +1369,7 @@ void DrawInterface(const Surface &out)
 		Button(out, ToolButton(n + 1), S.grid ? "G Grid: on" : "G Grid: off", false);
 	Button(out, ToolButton(n + (S.kind == Kind::Tristram ? 1 : 2)), "Ctrl+Z Undo", false);
 
-	if (S.tool == Tool::Paint && S.showTilePicker)
+	if (PickerShown())
 		DrawTilePicker(out);
 	else
 		DrawPalette(out);
@@ -1108,7 +1384,7 @@ void DrawInterface(const Surface &out)
 		status = S.message;
 	DrawString(out, status, { { 8, y + 3 }, { gnScreenWidth - 16, 12 } }, { .flags = SDL_GetTicks() < S.messageUntil ? UiFlags::ColorGold : UiFlags::ColorWhite });
 	if (SDL_GetTicks() >= S.messageUntil && gnScreenWidth >= 900)
-		DrawString(out, "WASD/arrows: move   Ctrl+S: save   P: test", { { 8, y + 3 }, { gnScreenWidth - 16, 12 } }, { .flags = UiFlags::ColorWhite | UiFlags::AlignRight });
+		DrawString(out, "WASD/arrows or middle-drag: move   Ctrl+S: save   P: test", { { 8, y + 3 }, { gnScreenWidth - 16, 12 } }, { .flags = UiFlags::ColorWhite | UiFlags::AlignRight });
 
 	if (S.linkPortal >= 0 && S.linkPortal < static_cast<int>(S.map.portals.size()))
 		DrawLinkDialog(out);
@@ -1128,6 +1404,8 @@ bool OnInterface(Point p)
 		if (ToolButton(i).contains(p))
 			return true;
 	}
+	if (PickerShown())
+		return PickerRect().contains(p) || p.y >= gnViewportHeight - 18;
 	if (PaletteRect().contains(p))
 		return true;
 	return p.y >= gnViewportHeight - 18;
@@ -1150,6 +1428,7 @@ void Undo()
 	S.map.spawners = s.spawners;
 	S.map.bosses = s.bosses;
 	S.map.objects = s.objects;
+	S.map.hues = s.hues;
 	S.dirty = true;
 	Rebuild();
 }
@@ -1305,6 +1584,28 @@ void SelectTool(int index)
 	ScrollPalette(PaletteSelected() - PaletteVisibleRows() / 2);
 }
 
+void ClickPicker(Point p)
+{
+	for (int i = 0; i < static_cast<int>(PickerButtonLabels.size()); i++) {
+		if (!PickerButton(i).contains(p))
+			continue;
+		if (i == 0)
+			ShiftHue(-1);
+		else if (i == 1)
+			ShiftHue(1);
+		else if (i == 2)
+			S.hueShift = 0;
+		else
+			S.showTilePicker = false;
+		return;
+	}
+	if (const int tile = PickerTileAt(p); tile != 0) {
+		S.pickerTile = static_cast<uint16_t>(tile);
+		S.brush = -1;
+		Say(StrCat("Tile #", tile, " chosen. Drag on the map to paint it (the outline shows it in place)."));
+	}
+}
+
 void MouseDown(Point p, bool right)
 {
 	for (int i = 0; i < 3; i++) {
@@ -1336,52 +1637,24 @@ void MouseDown(Point p, bool right)
 			Undo();
 		return;
 	}
-	if (PaletteRect().contains(p)) {
+	if (PickerShown()) {
+		if (PickerRect().contains(p)) {
+			ClickPicker(p);
+			return;
+		}
+	} else if (PaletteRect().contains(p)) {
 		if (PaletteTitleRect().contains(p)) {
 			if (S.tool == Tool::Spawner)
 				S.packSize = std::clamp(S.packSize + (right ? -1 : 1), 1, 20);
 			return;
 		}
-		// Tile picker click handling - simple scrollable list
-		if (S.showTilePicker) {
-			const Rectangle panel = PaletteRect();
-			const int listWidth = 60;
-			const int itemHeight = 14;
-			const int itemsPerScreen = (panel.size.height - 24) / itemHeight;
-			const int startY = panel.position.y + 24;
-
-			// Check if click is in the tile list area
-			if (p.x >= panel.position.x && p.x < panel.position.x + listWidth) {
-				// Clicked in the tile list
-				int firstTile = std::max(0, S.paletteScroll);
-				int clickedIndex = (p.y - startY) / itemHeight;
-				if (clickedIndex >= 0 && clickedIndex < itemsPerScreen) {
-					uint16_t clickedTile = firstTile + clickedIndex + 1;
-					if (clickedTile <= 127) {
-						S.pickerTile = clickedTile;
-						// Scroll to keep selection visible
-						if (clickedTile - 1 < S.paletteScroll)
-							ScrollPalette(clickedTile - 1 - S.paletteScroll);
-						else if (clickedTile - 1 >= S.paletteScroll + itemsPerScreen)
-							ScrollPalette(clickedTile - 1 - S.paletteScroll - itemsPerScreen + 1);
-						return;
-					}
-				}
-			}
-
-			// Up/Down keys or scrolling to change tile
-			if (right)
-				S.pickerTile = std::max(1, static_cast<int>(S.pickerTile) - 1);
-			else
-				S.pickerTile = std::min(127, S.pickerTile + 1);
-			return;
-		}
-
 		const int rows = static_cast<int>(PaletteRows().size());
 		for (int i = 0; i < rows; i++) {
 			if (PaletteRowShown(i) && PaletteRowRect(i).contains(p))
 				SelectPalette(i);
 		}
+		if (S.tool == Tool::Paint && S.showTilePicker)
+			OpenTilePicker();
 		return;
 	}
 	if (OnInterface(p))
@@ -1403,9 +1676,14 @@ void MouseDown(Point p, bool right)
 		if (!InMap(piece))
 			break;
 		if (right) {
-			S.pickedTile = TownTile(piece);
-			S.brush = -1;
-			Say(StrCat("Picked up tile #", S.pickedTile, ". Drag to paint with it."));
+			if (TownTile(piece) != 0) {
+				S.pickerTile = TownTile(piece);
+				S.hueShift = TownHue(piece);
+				S.brush = -1;
+				if (S.showTilePicker)
+					ShowPickerTile();
+				Say(StrCat("Picked up tile #", S.pickerTile, " (", HueLabel(S.hueShift), "). Drag to paint with it."));
+			}
 		} else {
 			S.dragging = true;
 			S.dragStart = piece;
@@ -1673,6 +1951,12 @@ bool IsMapEditing()
 	return S.running && S.editing && OnEditorLevel();
 }
 
+namespace {
+bool HandleKey(SDL_Scancode sc);
+void PanCamera(Displacement delta);
+void PanPicker(Displacement delta);
+} // namespace
+
 void MapEditorTick()
 {
 	if (!S.running || MyPlayer == nullptr)
@@ -1762,6 +2046,58 @@ void MapEditorTick()
 					SelectTool(n[1] - 1);
 				else if (w[0] == "dialog")
 					OpenLinkDialog(static_cast<int>(S.map.portals.size()) - 1);
+				else if (w[0] == "picker")
+					OpenTilePicker();
+				else if (w[0] == "pickertile" && n.size() >= 2) {
+					S.pickerTile = static_cast<uint16_t>(std::clamp(n[1], 1, std::max(1, PickerTileCount())));
+					S.brush = -1;
+					ShowPickerTile();
+				} else if (w[0] == "hue" && n.size() >= 2)
+					S.hueShift = std::clamp(n[1], -MaxTileHueSteps, MaxTileHueSteps);
+				else if (w[0] == "mouse" && n.size() >= 3) {
+					ControlMode = ControlTypes::KeyboardAndMouse; // a real mouse would switch to it
+					MousePosition = { n[1], n[2] };
+				}
+				else if (w[0] == "hovertile" && n.size() >= 2) {
+					const Rectangle cell = PickerCellRect(n[1]);
+					ControlMode = ControlTypes::KeyboardAndMouse;
+					MousePosition = cell.position + Displacement { cell.size.width / 2, cell.size.height / 2 };
+				} else if (w[0] == "mousepiece" && n.size() >= 3) {
+					// Put the mouse over a map piece (the camera is centred on it first).
+					S.camera = { 16 + 2 * n[1] + 1, 16 + 2 * n[2] + 1 };
+					ControlMode = ControlTypes::KeyboardAndMouse;
+					MousePosition = { gnScreenWidth / 2, gnViewportHeight / 2 };
+				} else if (w[0] == "scrollpicker" && n.size() >= 2)
+					ScrollPicker(n[1]);
+				else if (w[0] == "zoom" && n.size() >= 2) {
+					S.pickerZoom = std::clamp(n[1], 1, 3);
+					ShowPickerTile();
+				} else if (w[0] == "closepicker")
+					S.showTilePicker = false;
+				else if (w[0] == "clicktile" && n.size() >= 2) {
+					const Rectangle cell = PickerCellRect(n[1]);
+					ControlMode = ControlTypes::KeyboardAndMouse;
+					MousePosition = cell.position + Displacement { cell.size.width / 2, cell.size.height / 2 };
+					MouseDown(MousePosition, false);
+				} else if (w[0] == "click" || w[0] == "rclick")
+					MouseDown(MousePosition, w[0] == "rclick");
+				else if (w[0] == "release")
+					MouseUp();
+				else if (w[0] == "key" && n.size() >= 2)
+					HandleKey(static_cast<SDL_Scancode>(n[1]));
+				else if (w[0] == "pan" && n.size() >= 3)
+					PanCamera({ n[1], n[2] });
+				else if (w[0] == "panpicker" && n.size() >= 2)
+					PanPicker({ 0, n[1] });
+				else if (w[0] == "undo")
+					Undo();
+				else if (w[0] == "state")
+				{
+					const Point at = PieceAt(cursPosition);
+					const bool in = InMap(at);
+					LogInfo("EDITORSTATE tile {} brush {} hue {} picker {} scroll {} zoom {} cam {},{} cursorPiece {},{} tileThere {} hueThere {} undo {}", S.pickerTile, S.brush, S.hueShift, S.showTilePicker, S.pickerScroll, S.pickerZoom, S.camera.x, S.camera.y,
+					    at.x, at.y, in ? TownTile(at) : 0, in ? TownHue(at) : 0, S.undo.size());
+				}
 				LogInfo("EDITORSCRIPT {}", cmds[step - 1]);
 			}
 		}
@@ -1777,8 +2113,141 @@ void MapEditorTick()
 	}
 }
 
+namespace {
+
+/** Puts back what the paint preview covered. */
+void RestoreGhost()
+{
+	for (auto it = S.ghost.rbegin(); it != S.ghost.rend(); ++it) {
+		dPiece[it->tile.x][it->tile.y] = it->piece;
+		dTileHue[it->tile.x][it->tile.y] = it->hue;
+		dSpecial[it->tile.x][it->tile.y] = it->special;
+	}
+	S.ghost.clear();
+}
+
+/** Lays what painting would lay (the hovered piece, or the whole dragged area) into the level for this frame's drawing. */
+void PlaceGhost()
+{
+	if (!S.editing || S.tool != Tool::Paint || S.linkPortal >= 0 || S.panning || !IsAnyOf(S.kind, Kind::Town, Kind::Wilds))
+		return;
+	if (OnInterface(MousePosition) || PickerTileCount() == 0)
+		return;
+	const Point hover = PieceAt(cursPosition);
+	if (!InMap(hover))
+		return;
+	const Point from = S.dragging ? S.dragStart : hover;
+	const int x0 = std::max(0, std::min(from.x, hover.x)), x1 = std::min(S.map.width - 1, std::max(from.x, hover.x));
+	const int y0 = std::max(0, std::min(from.y, hover.y)), y1 = std::min(S.map.height - 1, std::max(from.y, hover.y));
+	const bool townRoofs = !InDesertRegion();
+	for (int y = y0; y <= y1; y++) {
+		for (int x = x0; x <= x1; x++) {
+			const int tile = PaintTileAt({ x, y });
+			if (tile <= 0 || tile > PickerTileCount())
+				continue;
+			const MegaTile mega = pMegaTiles[tile - 1];
+			const std::array<uint16_t, 4> pieces { Swap16LE(mega.micro1), Swap16LE(mega.micro2), Swap16LE(mega.micro3), Swap16LE(mega.micro4) };
+			for (int i = 0; i < 4; i++) {
+				const Point world { 16 + 2 * x + i % 2, 16 + 2 * y + i / 2 };
+				S.ghost.push_back({ world, dPiece[world.x][world.y], dTileHue[world.x][world.y], dSpecial[world.x][world.y] });
+				dPiece[world.x][world.y] = pieces[i];
+				dTileHue[world.x][world.y] = static_cast<int8_t>(S.hueShift);
+				if (townRoofs)
+					dSpecial[world.x][world.y] = static_cast<int8_t>(TownSpecialForPiece(pieces[i]));
+			}
+		}
+	}
+}
+
+/** Middle-drag over the map: the map follows the mouse. */
+void PanCamera(Displacement delta)
+{
+	S.panRemainder += delta;
+	// A world tile step moves the view by (32, 16) pixels per x and (-32, 16) per y.
+	const float fx = -(S.panRemainder.deltaX / 32.0f + S.panRemainder.deltaY / 16.0f) / 2.0f;
+	const float fy = -(S.panRemainder.deltaY / 16.0f - S.panRemainder.deltaX / 32.0f) / 2.0f;
+	const int cx = static_cast<int>(fx), cy = static_cast<int>(fy);
+	if (cx == 0 && cy == 0)
+		return;
+	S.camera.x = std::clamp(S.camera.x + cx, 10, MAXDUNX - 10);
+	S.camera.y = std::clamp(S.camera.y + cy, 10, MAXDUNY - 10);
+	S.panRemainder -= Displacement { -(cx - cy) * 32, -(cx + cy) * 16 };
+}
+
+/** Middle-drag over the picker: the pictures follow the mouse. */
+void PanPicker(Displacement delta)
+{
+	S.panRemainder += delta;
+	const int stride = PickerCell() + PickerGap;
+	const int rows = S.panRemainder.deltaY / stride;
+	if (rows != 0) {
+		ScrollPicker(-rows);
+		S.panRemainder.deltaY -= rows * stride;
+	}
+}
+
+bool HandleKey(SDL_Scancode sc)
+{
+	const bool ctrl = (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
+	if (sc == SDL_SCANCODE_P) {
+		ToggleTest();
+		return true;
+	}
+	if (!S.editing) {
+		if (sc == SDL_SCANCODE_G) {
+			S.god = !S.god;
+			return true;
+		}
+		return false;
+	}
+	if (S.tool == Tool::Paint && S.linkPortal < 0 && IsAnyOf(S.kind, Kind::Town, Kind::Wilds)) {
+		if (sc == SDL_SCANCODE_T) {
+			if (S.showTilePicker)
+				S.showTilePicker = false;
+			else
+				OpenTilePicker();
+			return true;
+		}
+		if (S.showTilePicker) {
+			switch (sc) {
+			case SDL_SCANCODE_F: ShiftHue(-1); return true;
+			case SDL_SCANCODE_G: ShiftHue(1); return true;
+			case SDL_SCANCODE_PAGEUP: ScrollPicker(-PickerVisibleRows()); return true;
+			case SDL_SCANCODE_PAGEDOWN: ScrollPicker(PickerVisibleRows()); return true;
+			case SDL_SCANCODE_ESCAPE: S.showTilePicker = false; return true;
+			default: break;
+			}
+		}
+	}
+	if (ctrl && sc == SDL_SCANCODE_S) {
+		SaveMap();
+	} else if (ctrl && sc == SDL_SCANCODE_Z) {
+		Undo();
+	} else if (sc == SDL_SCANCODE_G) {
+		S.grid = !S.grid;
+	} else if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9) {
+		SelectTool(sc - SDL_SCANCODE_1);
+	} else if (sc == SDL_SCANCODE_PAGEUP) {
+		ScrollPalette(-PaletteVisibleRows());
+	} else if (sc == SDL_SCANCODE_PAGEDOWN) {
+		ScrollPalette(PaletteVisibleRows());
+	} else if (sc == SDL_SCANCODE_EQUALS || sc == SDL_SCANCODE_KP_PLUS) {
+		S.packSize = std::min(S.packSize + 1, 20);
+	} else if (sc == SDL_SCANCODE_MINUS || sc == SDL_SCANCODE_KP_MINUS) {
+		S.packSize = std::max(S.packSize - 1, 1);
+	} else if (sc == SDL_SCANCODE_ESCAPE && S.linkPortal >= 0) {
+		S.linkPortal = -1;
+	} else if (sc == SDL_SCANCODE_ESCAPE) {
+		return false; // the game menu (save and quit from there, or use Exit)
+	}
+	return true; // no game hotkeys while editing
+}
+
+} // namespace
+
 void MapEditorBeforeDraw()
 {
+	RestoreGhost();
 	if (!IsMapEditing())
 		return;
 	// Free camera.
@@ -1807,6 +2276,8 @@ void MapEditorBeforeDraw()
 	// Dragging markers.
 	if (S.movingEntry >= 0 && S.movingEntry < static_cast<int>(S.map.entries.size()))
 		S.map.entries[S.movingEntry].tile = cursPosition;
+	if (OnEditorLevel())
+		PlaceGhost();
 }
 
 bool MapEditorHandleEvent(const SDL_Event &event)
@@ -1814,112 +2285,68 @@ bool MapEditorHandleEvent(const SDL_Event &event)
 	if (!S.running || !OnEditorLevel())
 		return false;
 	switch (event.type) {
-	case SDL_EVENT_MOUSE_BUTTON_DOWN:
-		if (event.button.button == 2 && S.editing && S.showTilePicker) {  // 2 = middle mouse button
-			// Middle mouse to drag tile picker
-			S.pickerDragging = true;
-			S.pickerDragStart = MousePosition;
+	case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+		// The game only updates MousePosition after this handler, so use the event's own position.
+		const Point at { SDLC_EventButtonIntX(event), SDLC_EventButtonIntY(event) };
+		if (event.button.button == 2) { // middle button: drag the picker or the map
+			if (!S.editing)
+				return false;
+			S.panning = true;
+			S.panningPicker = PickerShown() && PickerRect().contains(at);
+			S.panLast = at;
+			S.panRemainder = {};
 			return true;
 		}
 		if (event.button.button != SDL_BUTTON_LEFT && event.button.button != SDL_BUTTON_RIGHT)
 			return S.editing;
-		if (!S.editing && !TopButton(1).contains(MousePosition) && !TopButton(0).contains(MousePosition) && !TopButton(2).contains(MousePosition))
+		if (!S.editing && !TopButton(1).contains(at) && !TopButton(0).contains(at) && !TopButton(2).contains(at))
 			return false; // play-testing: the game gets the click
-		MouseDown(MousePosition, event.button.button == SDL_BUTTON_RIGHT);
+		MouseDown(at, event.button.button == SDL_BUTTON_RIGHT);
 		return true;
+	}
 	case SDL_EVENT_MOUSE_BUTTON_UP:
-		if (S.pickerDragging) {
-			S.pickerDragging = false;
-			return true;
+		if (event.button.button == 2) {
+			const bool was = S.panning;
+			S.panning = false;
+			return was || S.editing;
 		}
 		if (!S.editing)
 			return false;
 		MouseUp();
 		return true;
-	case SDL_EVENT_KEY_DOWN: {
-		const SDL_Scancode sc = SDLC_EventScancode(event);
-		const bool ctrl = (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
-		if (sc == SDL_SCANCODE_P) {
-			ToggleTest();
-			return true;
+	case SDL_EVENT_MOUSE_MOTION:
+		if (S.panning) {
+			const Point at { SDLC_EventMotionIntX(event), SDLC_EventMotionIntY(event) };
+			const Displacement delta = at - S.panLast;
+			S.panLast = at;
+			if (S.panningPicker)
+				PanPicker(delta);
+			else
+				PanCamera(delta);
 		}
-		if (!S.editing) {
-			if (sc == SDL_SCANCODE_G) {
-				S.god = !S.god;
-				return true;
-			}
-			return false;
-		}
-		// Tile picker controls
-		if (S.tool == Tool::Paint && S.showTilePicker) {
-			if (sc == SDL_SCANCODE_UP) {
-				S.pickerTile = std::max(1, static_cast<int>(S.pickerTile) - 1);
-				// Scroll list to keep selection visible
-				const int itemHeight = 14;
-				const int itemsPerScreen = (PaletteRect().size.height - 24) / itemHeight;
-				if (S.pickerTile - 1 < S.paletteScroll)
-					ScrollPalette(S.pickerTile - 1 - S.paletteScroll);
-				return true;
-			} else if (sc == SDL_SCANCODE_DOWN) {
-				S.pickerTile = std::min(127, S.pickerTile + 1);
-				// Scroll list to keep selection visible
-				const int itemHeight = 14;
-				const int itemsPerScreen = (PaletteRect().size.height - 24) / itemHeight;
-				if (S.pickerTile - 1 >= S.paletteScroll + itemsPerScreen)
-					ScrollPalette(S.pickerTile - 1 - S.paletteScroll - itemsPerScreen + 1);
-				return true;
-			} else if (sc == SDL_SCANCODE_F) {
-				S.hueShift = std::max(S.hueShift - 5, -30);
-				return true;
-			} else if (sc == SDL_SCANCODE_G) {
-				S.hueShift = std::min(S.hueShift + 5, 30);
-				return true;
-			}
-		}
-		if (ctrl && sc == SDL_SCANCODE_S) {
-			SaveMap();
-		} else if (ctrl && sc == SDL_SCANCODE_Z) {
-			Undo();
-		} else if (sc == SDL_SCANCODE_G && !(S.tool == Tool::Paint && S.showTilePicker)) {
-			S.grid = !S.grid;
-		} else if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9) {
-			SelectTool(sc - SDL_SCANCODE_1);
-		} else if (sc == SDL_SCANCODE_PAGEUP) {
-			ScrollPalette(-PaletteVisibleRows());
-		} else if (sc == SDL_SCANCODE_PAGEDOWN) {
-			ScrollPalette(PaletteVisibleRows());
-		} else if (sc == SDL_SCANCODE_EQUALS || sc == SDL_SCANCODE_KP_PLUS) {
-			S.packSize = std::min(S.packSize + 1, 20);
-		} else if (sc == SDL_SCANCODE_MINUS || sc == SDL_SCANCODE_KP_MINUS) {
-			S.packSize = std::max(S.packSize - 1, 1);
-		} else if (sc == SDL_SCANCODE_ESCAPE && S.linkPortal >= 0) {
-			S.linkPortal = -1;
-		} else if (sc == SDL_SCANCODE_ESCAPE) {
-			return false; // the game menu (save and quit from there, or use Exit)
-		}
-		return true; // no game hotkeys while editing
-	}
+		return false; // let the game track the mouse
+	case SDL_EVENT_KEY_DOWN:
+		return HandleKey(SDLC_EventScancode(event));
 	case SDL_EVENT_KEY_UP:
 		return S.editing;
-	case SDL_EVENT_MOUSE_WHEEL:
+	case SDL_EVENT_MOUSE_WHEEL: {
 		if (!S.editing)
 			return false;
-		if (S.showTilePicker) {
-			// Zoom the tile picker
-			S.pickerZoom = std::clamp(S.pickerZoom + (event.wheel.y > 0 ? 1 : -1), 1, 4);
+		const int wheel = SDLC_EventWheelIntY(event);
+		if (wheel == 0)
+			return true;
+		if (PickerShown() && PickerRect().contains(MousePosition)) {
+			if ((SDL_GetModState() & SDL_KMOD_CTRL) != 0) {
+				S.pickerZoom = std::clamp(S.pickerZoom + (wheel > 0 ? 1 : -1), 1, 3);
+				ShowPickerTile();
+			} else {
+				ScrollPicker(wheel > 0 ? -1 : 1);
+			}
 			return true;
 		}
-		ScrollPalette(event.wheel.y > 0 ? -3 : 3);
+		ScrollPalette(wheel > 0 ? -3 : 3);
 		return true;
-	case SDL_EVENT_MOUSE_MOTION:
-		if (S.pickerDragging && S.showTilePicker) {
-			// Pan the tile picker with middle mouse drag
-			const auto delta = MousePosition - S.pickerDragStart;
-			S.pickerPan = S.pickerPan + delta;
-			S.pickerDragStart = MousePosition;
-			return true;
-		}
-		return false;
+	}
 	default:
 		return false;
 	}
@@ -1927,6 +2354,7 @@ bool MapEditorHandleEvent(const SDL_Event &event)
 
 void DrawMapEditor(const Surface &out)
 {
+	RestoreGhost(); // the world is drawn; the preview was only for that
 	if (!S.running || !OnEditorLevel())
 		return;
 	if (S.editing)

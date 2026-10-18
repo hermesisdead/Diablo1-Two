@@ -84,6 +84,7 @@ set(libdevilutionx_SRCS
   engine/render/scrollrt.cpp
   engine/render/color_overlay.cpp
   engine/render/dungeon_mood.cpp
+  engine/render/tile_hue.cpp
   custom_maps/campaign.cpp
   custom_maps/campaign_quests.cpp
   custom_maps/custom_map.cpp

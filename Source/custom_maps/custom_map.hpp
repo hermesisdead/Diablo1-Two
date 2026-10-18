@@ -76,6 +76,7 @@ struct CustomMap {
 	int width = 40;  // in map pieces (2x2 world tiles each)
 	int height = 40;
 	std::vector<uint16_t> tiles;    // width * height piece ids, 0 = solid rock
+	std::vector<int8_t> hues;       // width * height hue shifts in TileHueStepDegrees steps (town-tiled styles), 0 = as drawn
 	std::vector<uint16_t> monsters; // (2 * width) * (2 * height) .dun monster ids, 0 = none
 	std::vector<uint16_t> objects;  // (2 * width) * (2 * height) .dun object ids, 0 = none
 	std::vector<MapEntryPoint> entries;

@@ -167,37 +167,8 @@ void InitTownPieces()
 {
 	for (int y = 0; y < MAXDUNY; y++) {
 		for (int x = 0; x < MAXDUNX; x++) {
-			if (dPiece[x][y] == 359) {
-				dSpecial[x][y] = 1;
-			} else if (dPiece[x][y] == 357) {
-				dSpecial[x][y] = 2;
-			} else if (dPiece[x][y] == 128) {
-				dSpecial[x][y] = 6;
-			} else if (dPiece[x][y] == 129) {
-				dSpecial[x][y] = 7;
-			} else if (dPiece[x][y] == 127) {
-				dSpecial[x][y] = 8;
-			} else if (dPiece[x][y] == 116) {
-				dSpecial[x][y] = 9;
-			} else if (dPiece[x][y] == 156) {
-				dSpecial[x][y] = 10;
-			} else if (dPiece[x][y] == 157) {
-				dSpecial[x][y] = 11;
-			} else if (dPiece[x][y] == 155) {
-				dSpecial[x][y] = 12;
-			} else if (dPiece[x][y] == 161) {
-				dSpecial[x][y] = 13;
-			} else if (dPiece[x][y] == 159) {
-				dSpecial[x][y] = 14;
-			} else if (dPiece[x][y] == 213) {
-				dSpecial[x][y] = 15;
-			} else if (dPiece[x][y] == 211) {
-				dSpecial[x][y] = 16;
-			} else if (dPiece[x][y] == 216) {
-				dSpecial[x][y] = 17;
-			} else if (dPiece[x][y] == 215) {
-				dSpecial[x][y] = 18;
-			}
+			if (const uint8_t special = TownSpecialForPiece(dPiece[x][y]); special != 0)
+				dSpecial[x][y] = special;
 		}
 	}
 }
@@ -270,6 +241,28 @@ void DrlgTPass3()
 }
 
 } // namespace
+
+uint8_t TownSpecialForPiece(uint16_t piece)
+{
+	switch (piece) {
+	case 359: return 1;
+	case 357: return 2;
+	case 128: return 6;
+	case 129: return 7;
+	case 127: return 8;
+	case 116: return 9;
+	case 156: return 10;
+	case 157: return 11;
+	case 155: return 12;
+	case 161: return 13;
+	case 159: return 14;
+	case 213: return 15;
+	case 211: return 16;
+	case 216: return 17;
+	case 215: return 18;
+	default: return 0;
+	}
+}
 
 bool OpensHive(Point position)
 {

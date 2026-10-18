@@ -55,6 +55,7 @@
 #include "nthread.h"
 #include "engine/render/color_overlay.hpp"
 #include "engine/render/dungeon_mood.hpp"
+#include "engine/render/tile_hue.hpp"
 #include "custom_maps/map_editor.hpp"
 #include "custom_maps/campaign_quests.hpp"
 #include "engine/render/gore_fx.hpp"
@@ -565,6 +566,10 @@ void DrawCell(const Surface &out, const Lightmap lightmap, Point tilePosition, P
 	const MICROS *pMap = &DPieceMicros[levelPieceId];
 
 	const uint8_t *tbl = LightTables[lightTableIndex].data();
+	// Painted maps can shift a tile's colours around the colour wheel.
+	const HueLightTableSet *hueTables = GetTileHueLightTables(dTileHue[tilePosition.x][tilePosition.y]);
+	if (hueTables != nullptr)
+		tbl = (*hueTables)[lightTableIndex].data();
 	const uint8_t *foliageTbl = tbl;
 #ifdef _DEBUG
 	int walkpathIdx = -1;
@@ -621,7 +626,8 @@ void DrawCell(const Surface &out, const Lightmap lightmap, Point tilePosition, P
 
 	// Create a special lightmap buffer to bleed light up walls
 	uint8_t lightmapBuffer[TILE_WIDTH * TILE_HEIGHT];
-	const Lightmap bleedLightmap = Lightmap::bleedUp(*GetOptions().Graphics.perPixelLighting, lightmap, targetBufferPosition, lightmapBuffer);
+	const Lightmap bleedSource = Lightmap::bleedUp(*GetOptions().Graphics.perPixelLighting, lightmap, targetBufferPosition, lightmapBuffer);
+	const Lightmap bleedLightmap = hueTables != nullptr ? bleedSource.withLightTables(*hueTables) : bleedSource;
 
 	// If the first micro tile is a floor tile, it may be followed
 	// by foliage which should be rendered now.
@@ -700,18 +706,23 @@ void DrawFloorTile(const Surface &out, const Lightmap &lightmap, Point tilePosit
 		tbl = GetPauseTRN();
 #endif
 
+	const HueLightTableSet *hueTables = GetTileHueLightTables(dTileHue[tilePosition.x][tilePosition.y]);
+	if (hueTables != nullptr)
+		tbl = (*hueTables)[lightTableIndex].data();
+	const Lightmap tileLightmap = hueTables != nullptr ? lightmap.withLightTables(*hueTables) : lightmap;
+
 	const uint16_t levelPieceId = dPiece[tilePosition.x][tilePosition.y];
 	{
 		const LevelCelBlock levelCelBlock { DPieceMicros[levelPieceId].mt[0] };
 		if (levelCelBlock.hasValue()) {
-			RenderTileFrame(out, lightmap, targetBufferPosition, TileType::LeftTriangle,
+			RenderTileFrame(out, tileLightmap, targetBufferPosition, TileType::LeftTriangle,
 			    GetDunFrame(pDungeonCels.get(), levelCelBlock.frame()), DunFrameTriangleHeight, MaskType::Solid, tbl);
 		}
 	}
 	{
 		const LevelCelBlock levelCelBlock { DPieceMicros[levelPieceId].mt[1] };
 		if (levelCelBlock.hasValue()) {
-			RenderTileFrame(out, lightmap, targetBufferPosition + RightFrameDisplacement, TileType::RightTriangle,
+			RenderTileFrame(out, tileLightmap, targetBufferPosition + RightFrameDisplacement, TileType::RightTriangle,
 			    GetDunFrame(pDungeonCels.get(), levelCelBlock.frame()), DunFrameTriangleHeight, MaskType::Solid, tbl);
 		}
 	}
@@ -953,8 +964,13 @@ void DrawDungeon(const Surface &out, const Lightmap &lightmap, Point tilePositio
 		// This could probably have been better solved by sprites in screen space.
 		if (tilePosition.x > 0 && tilePosition.y > 0 && targetBufferPosition.y > TILE_HEIGHT) {
 			const int8_t bArch = dSpecial[tilePosition.x - 1][tilePosition.y - 1] - 1;
-			if (bArch >= 0)
-				ClxDraw(out, targetBufferPosition + Displacement { 0, -TILE_HEIGHT }, (*pSpecialCels)[bArch]);
+			if (bArch >= 0) {
+				const Point at = targetBufferPosition + Displacement { 0, -TILE_HEIGHT };
+				if (const int8_t hue = dTileHue[tilePosition.x - 1][tilePosition.y - 1]; hue != 0)
+					ClxDrawTRN(out, at, (*pSpecialCels)[bArch], GetTileHueTable(hue, 0));
+				else
+					ClxDraw(out, at, (*pSpecialCels)[bArch]);
+			}
 		}
 	}
 }
@@ -1927,6 +1943,7 @@ void DrawAndBlit()
 	nthread_UpdateProgressToNextGameTick();
 
 	this_sdl_thread::yield();
+	RefreshTileHueTables();
 	MapEditorBeforeDraw();
 	DrawView(out, ViewPosition);
 	DrawActionWorldOverlay(out);
