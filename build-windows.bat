@@ -21,6 +21,9 @@ rem    build-windows.bat debug     Debug build (enables the dev/debug hooks)
 rem    build-windows.bat clean     Delete the build folder first, then build
 rem ===========================================================================
 setlocal EnableExtensions EnableDelayedExpansion
+rem Git never stops to ask "Unlink of file ... failed. Should I try again? (y/n)"
+rem (a file Git is tidying away is open elsewhere): it answers no and goes on.
+set "GIT_ASK_YESNO=false"
 
 set "OUT_DIR=%~dp0"
 if "%OUT_DIR:~-1%"=="\" set "OUT_DIR=%OUT_DIR:~0,-1%"
@@ -50,7 +53,7 @@ if exist "%OUT_DIR%\CMakeLists.txt" (
     rem (skipped quietly if there are local edits or no network).
     where git >nul 2>nul && if exist "%OUT_DIR%\.git" (
         echo Updating this checkout ...
-        git -C "%OUT_DIR%" pull --ff-only || echo [WARN] Could not update, building what is here.
+        git -C "%OUT_DIR%" -c gc.auto=0 pull --ff-only || echo [WARN] Could not update, building what is here.
     )
 ) else (
     set "SRC_DIR=%OUT_DIR%\source"
@@ -63,7 +66,7 @@ if exist "%OUT_DIR%\CMakeLists.txt" (
         git clone --branch %REPO_BRANCH% --recurse-submodules "%REPO_URL%" "!SRC_DIR!" || goto fail
     ) else (
         echo Updating existing clone in !SRC_DIR! ...
-        git -C "!SRC_DIR!" pull --ff-only
+        git -C "!SRC_DIR!" -c gc.auto=0 pull --ff-only
     )
 )
 set "BUILD_DIR=%SRC_DIR%\build-windows-%BUILD_TYPE%"
