@@ -99,6 +99,10 @@ struct CustomMap {
 	std::array<std::vector<int8_t>, MapDecorLayerCount> decorHues;
 	std::vector<uint8_t> fences;     // (2 * width) * (2 * height) FenceKind per world tile
 	std::vector<MapAnimal> animals;  // town-tiled maps
+	// Outer wilds: a town's walk-out area (or, on the wilds, the town it surrounds). Walking off this
+	// map's `outerSide` edge leads there; side 0 is the north-east edge, then clockwise (see MapSideName).
+	std::string outer;
+	int outerSide = 0;
 	std::vector<uint16_t> monsters; // (2 * width) * (2 * height) .dun monster ids, 0 = none
 	std::vector<uint16_t> objects;  // (2 * width) * (2 * height) .dun object ids, 0 = none
 	std::vector<MapEntryPoint> entries;
@@ -146,6 +150,17 @@ std::expected<void, std::string> WriteTristramLayer(const CustomMap &layer);
 
 /** @brief The custom map being played (or edited), if any. */
 const CustomMap *ActiveCustomMap();
+/** @brief Name of a map edge: 0 north-east (the y-min edge), 1 south-east, 2 south-west, 3 north-west. */
+[[nodiscard]] std::string_view MapSideName(int side);
+/** @brief Whether a world tile is on a map's edge (within `depth` tiles of it). */
+[[nodiscard]] bool OnMapSide(const CustomMap &map, int side, Point tile, int depth);
+/** @brief Walking onto this tile leaves the map for its outer wilds (or back to its town): where to. */
+[[nodiscard]] std::optional<MapLink> OuterEdgeLink(const CustomMap &map, Point tile);
+/** @brief Arrival given as a position ("@x,y", used between a town and its outer wilds). */
+[[nodiscard]] /** @brief Test hook (debug builds): walks the hero toward the map's outer wilds edge. */
+void DevWalkToOuterEdge(const CustomMap &map);
+std::optional<Point> ParseArrivalTile(std::string_view entry);
+
 /** @brief Weather the current level's hand-made map asks for (a DungeonMoodName), empty for the usual changing weather. */
 [[nodiscard]] std::string CurrentMapWeather();
 /** @brief Makes a map the active one; the hero arrives at the named entry point (or the first). */

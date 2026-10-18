@@ -223,9 +223,19 @@ struct Session {
 	int boss = 0;       // index in PlaceableBosses()
 	int paletteScroll = 0;
 
-	// Link dialog for a portal or door.
+	// Link dialog for a portal or door: first where it leads, then (if there is a choice) where it arrives.
 	int linkPortal = -1;
 	std::vector<std::string> mapList;
+	bool linkIsNew = false; // cancelling takes the just-placed door away again
+	int linkPage = 0;       // 0 destinations, 1 arrival points
+	int linkTarget = -1;    // page 1: index in linkTargets, or -2 for Tristram
+	int linkScroll = 0;
+	struct LinkTarget {
+		std::string name;
+		std::string style;
+		std::vector<std::string> entries;
+	};
+	std::vector<LinkTarget> linkTargets;
 
 	std::string message;
 	uint32_t messageUntil = 0;
@@ -741,12 +751,46 @@ Rectangle TopButton(int index)
 
 Rectangle ToolButton(int index)
 {
-	return { { 4, TopBarHeight + 6 + index * (ToolHeight + 4) }, { ToolWidth, ToolHeight } };
+	// A second column when the first would run into the status line (small screens).
+	const int perColumn = std::max(1, (gnViewportHeight - 18 - 2 - (TopBarHeight + 6)) / (ToolHeight + 4));
+	const int column = index / perColumn, row = index % perColumn;
+	return { { 4 + column * (ToolWidth + 4), TopBarHeight + 6 + row * (ToolHeight + 4) }, { ToolWidth, ToolHeight } };
 }
 
 int ToolButtonCount()
 {
-	return static_cast<int>(ToolsFor(S.kind).size()) + (S.kind == Kind::Tristram ? 2 : 4);
+	const int base = static_cast<int>(ToolsFor(S.kind).size()) + (S.kind == Kind::Tristram ? 2 : 4);
+	if (S.kind == Kind::Town)
+		return base + (S.map.outer.empty() ? 1 : 2);
+	if (S.kind == Kind::Wilds && !S.map.outer.empty())
+		return base + 1;
+	return base;
+}
+
+/** Town: the outer wilds switch (off, then each edge in turn), under the weather button. */
+int OuterToggleIndex()
+{
+	return S.kind == Kind::Town ? static_cast<int>(ToolsFor(S.kind).size()) + 4 : -1;
+}
+
+/** Jumps between a town and its outer wilds in the editor. */
+int OuterGoIndex()
+{
+	if (S.map.outer.empty())
+		return -1;
+	if (S.kind == Kind::Town)
+		return static_cast<int>(ToolsFor(S.kind).size()) + 5;
+	return S.kind == Kind::Wilds ? static_cast<int>(ToolsFor(S.kind).size()) + 4 : -1;
+}
+
+std::string_view SideShort(int side)
+{
+	switch (side) {
+	case 0: return "NE";
+	case 1: return "SE";
+	case 2: return "SW";
+	default: return "NW";
+	}
 }
 
 /** The weather button sits under Undo (not for Tristram's own layer). */
@@ -1346,34 +1390,129 @@ std::string PaintingLabel()
 	}
 }
 
-constexpr int DialogWidth = 320;
-constexpr int DialogRow = 18;
+constexpr int DialogWidth = 400;
+constexpr int DialogRow = 20;
 
-int DialogRowCount()
+/** A row of the link dialog. */
+struct LinkRow {
+	enum class Kind : uint8_t {
+		Tristram,
+		Dungeon,
+		Map,      // index in linkTargets
+		NewWilds,
+		Nowhere,
+		Arrival,  // page 1: index in the target's arrival points, -1 for Tristram's usual spot
+	};
+	Kind kind;
+	int index;
+	std::string label;
+	std::string note; // right-aligned, dimmer
+};
+
+std::vector<std::string> TristramEntries();
+
+std::vector<LinkRow> LinkRows()
 {
-	return 5 + static_cast<int>(S.mapList.size());
+	std::vector<LinkRow> rows;
+	if (S.linkPage == 1) {
+		if (S.linkTarget == -2) {
+			rows.push_back({ LinkRow::Kind::Arrival, -1, "Tristram's usual arrival spot", "" });
+			const std::vector<std::string> entries = TristramEntries();
+			for (size_t i = 0; i < entries.size(); i++)
+				rows.push_back({ LinkRow::Kind::Arrival, static_cast<int>(i), entries[i], "arrival point" });
+		} else if (S.linkTarget >= 0 && S.linkTarget < static_cast<int>(S.linkTargets.size())) {
+			const Session::LinkTarget &target = S.linkTargets[S.linkTarget];
+			for (size_t i = 0; i < target.entries.size(); i++)
+				rows.push_back({ LinkRow::Kind::Arrival, static_cast<int>(i), target.entries[i], i == 0 ? "first arrival point" : "arrival point" });
+		}
+		return rows;
+	}
+	rows.push_back({ LinkRow::Kind::Tristram, 0, "Tristram", "town" });
+	const MapLink &l = S.map.portals[S.linkPortal].to;
+	rows.push_back({ LinkRow::Kind::Dungeon, 0, StrCat("Dungeon level ", l.kind == MapLinkKind::Dungeon ? l.level : 1), "" });
+	for (size_t i = 0; i < S.linkTargets.size(); i++)
+		rows.push_back({ LinkRow::Kind::Map, static_cast<int>(i), S.linkTargets[i].name, S.linkTargets[i].style });
+	rows.push_back({ LinkRow::Kind::NewWilds, 0, "New wilds area", "made now, with a way back" });
+	rows.push_back({ LinkRow::Kind::Nowhere, 0, "Nowhere", "just decoration" });
+	return rows;
+}
+
+int DialogVisibleRows()
+{
+	return std::max(4, (gnViewportHeight - TopBarHeight - 150) / DialogRow);
 }
 
 Rectangle DialogRect()
 {
-	const int h = 30 + DialogRowCount() * DialogRow + 8;
+	const int shown = std::min(static_cast<int>(LinkRows().size()), DialogVisibleRows());
+	const int h = 50 + shown * DialogRow + 34;
 	return { { (gnScreenWidth - DialogWidth) / 2, std::max(TopBarHeight + 10, (gnViewportHeight - h) / 2) }, { DialogWidth, h } };
 }
 
-Rectangle DialogRowRect(int row)
+/** Screen row of a list row, if scrolled into view. */
+std::optional<Rectangle> DialogRowRect(int row)
 {
+	const int shown = row - S.linkScroll;
+	if (shown < 0 || shown >= DialogVisibleRows())
+		return std::nullopt;
 	const Rectangle d = DialogRect();
-	return { d.position + Displacement { 10, 28 + row * DialogRow }, { DialogWidth - 20, DialogRow - 2 } };
+	return Rectangle { d.position + Displacement { 10, 48 + shown * DialogRow }, { DialogWidth - 20, DialogRow - 2 } };
 }
 
-void OpenLinkDialog(int portal)
+/** The dungeon row's level buttons. */
+Rectangle DialogLevelButton(Rectangle row, bool up)
+{
+	return { { row.position.x + row.size.width - (up ? 26 : 54), row.position.y + 1 }, { 24, row.size.height - 2 } };
+}
+
+/** Bottom button: Cancel (or Close) on the first page, Back on the second. */
+Rectangle DialogFooterButton()
+{
+	const Rectangle d = DialogRect();
+	return { { d.position.x + d.size.width / 2 - 50, d.position.y + d.size.height - 28 }, { 100, 20 } };
+}
+
+void ScrollDialog(int rows)
+{
+	S.linkScroll = std::clamp(S.linkScroll + rows, 0, std::max(0, static_cast<int>(LinkRows().size()) - DialogVisibleRows()));
+}
+
+void OpenLinkDialog(int portal, bool isNew = false)
 {
 	S.linkPortal = portal;
+	S.linkIsNew = isNew;
+	S.linkPage = 0;
+	S.linkTarget = -1;
+	S.linkScroll = 0;
 	S.mapList.clear();
+	S.linkTargets.clear();
 	for (std::string &name : ListCustomMaps()) {
-		if (S.kind == Kind::Tristram || name != S.map.name || S.kind == Kind::Dungeon)
-			S.mapList.push_back(std::move(name));
+		if (S.kind != Kind::Tristram && name == S.map.name && S.kind != Kind::Dungeon)
+			continue;
+		Session::LinkTarget target { name, "", {} };
+		if (name == S.map.name) {
+			target.style = std::string(MapStyleName(S.map.style));
+			for (const MapEntryPoint &e : S.map.entries)
+				target.entries.push_back(e.name);
+		} else if (std::expected<CustomMap, std::string> other = ReadCustomMap(name); other.has_value()) {
+			target.style = std::string(MapStyleName(other->style));
+			for (const MapEntryPoint &e : other->entries)
+				target.entries.push_back(e.name);
+		}
+		S.mapList.push_back(name);
+		S.linkTargets.push_back(std::move(target));
 	}
+}
+
+/** Closes the link dialog; cancelling a just-placed door or portal takes it away again. */
+void CloseLinkDialog(bool cancelled)
+{
+	if (cancelled && S.linkIsNew && S.linkPortal >= 0 && S.linkPortal < static_cast<int>(S.map.portals.size())) {
+		S.map.portals.erase(S.map.portals.begin() + S.linkPortal);
+		Say("Cancelled: nothing placed.");
+	}
+	S.linkPortal = -1;
+	S.linkIsNew = false;
 }
 
 /** Names of Tristram's added arrival points. */
@@ -1496,6 +1635,36 @@ void DrawWorldOverlay(const Surface &out)
 			PieceOutline(view, pr, o, o + Displacement { size.width - 1, size.height - 1 }, PAL16_YELLOW + 2);
 		}
 	}
+	if (!S.map.outer.empty() && S.kind != Kind::Tristram) {
+		// The edge that leads to the outer wilds (or back to the town).
+		const float x0 = 16, y0 = 16, x1 = 16.0f + 2 * S.map.width, y1 = 16.0f + 2 * S.map.height;
+		std::array<float, 4> e {};
+		switch (S.map.outerSide) {
+		case 0: e = { x0, y0, x1, y0 }; break;
+		case 1: e = { x1, y0, x1, y1 }; break;
+		case 2: e = { x0, y1, x1, y1 }; break;
+		default: e = { x0, y0, x0, y1 }; break;
+		}
+		const std::optional<Point> a = Screen(pr, e[0], e[1]), b = Screen(pr, e[2], e[3]);
+		if (a && b) {
+			for (int t = -1; t <= 1; t++)
+				Line(view, *a + Displacement { 0, t }, *b + Displacement { 0, t }, PAL16_BLUE + 2);
+			// Label the part of the edge nearest the middle of the view, kept on screen.
+			const float dx = static_cast<float>(b->x - a->x), dy = static_cast<float>(b->y - a->y);
+			const float len = std::max(1.0f, dx * dx + dy * dy);
+			const float t = std::clamp(((view.w() / 2 - a->x) * dx + (view.h() / 2 - a->y) * dy) / len, 0.0f, 1.0f);
+			const std::string label = StrCat(S.kind == Kind::Town ? "Walk out to " : "Walk back to ", S.map.outer);
+			const int w = static_cast<int>(GetLineWidth(label)) + 10;
+			const Point near { a->x + static_cast<int>(t * dx), a->y + static_cast<int>(t * dy) };
+			const bool seen = near.x >= 0 && near.y >= 0 && near.x < view.w() && near.y < view.h();
+			const int lx = std::clamp(a->x + static_cast<int>(t * dx) - w / 2, 2 * ToolWidth + 16, std::max(2 * ToolWidth + 16, view.w() - PaletteWidth - w - 8));
+			const int ly = std::clamp(a->y + static_cast<int>(t * dy) - 20, TopBarHeight + 4, std::max(TopBarHeight + 4, view.h() - 40));
+			if (seen) {
+				DrawHalfTransparentRectTo(view, lx, ly, w, 15);
+				DrawString(view, label, { { lx + 5, ly + 1 }, { w - 10, 12 } }, { .flags = UiFlags::ColorBlue });
+			}
+		}
+	}
 	for (const MapEntryPoint &e : S.map.entries)
 		Marker(view, pr, e.tile, PAL16_BLUE + 2, StrCat("Arrive: ", e.name), UiFlags::ColorBlue);
 	for (const MapPortal &p : S.map.portals)
@@ -1526,30 +1695,68 @@ void DrawWorldOverlay(const Surface &out)
 		Marker(view, pr, chest, PAL16_YELLOW + 2, StrCat("Chest ", chest.x, ",", chest.y), UiFlags::ColorGold);
 }
 
+void Frame(const Surface &out, Rectangle r, uint8_t color, int thickness);
+
+std::string LinkDescription(const MapLink &l)
+{
+	switch (l.kind) {
+	case MapLinkKind::Town: return StrCat("Tristram", l.entry.empty() ? "" : StrCat(", arriving at ", l.entry));
+	case MapLinkKind::Map: return StrCat(l.map, l.entry.empty() ? "" : StrCat(", arriving at ", l.entry));
+	case MapLinkKind::Dungeon: return StrCat("dungeon level ", l.level);
+	default: return "nowhere yet";
+	}
+}
+
 void DrawLinkDialog(const Surface &out)
 {
 	const Rectangle d = DialogRect();
-	DrawHalfTransparentRectTo(out, d.position.x, d.position.y, d.size.width, d.size.height);
-	DrawHalfTransparentRectTo(out, d.position.x, d.position.y, d.size.width, d.size.height);
+	for (int i = 0; i < 3; i++)
+		DrawHalfTransparentRectTo(out, d.position.x, d.position.y, d.size.width, d.size.height);
+	Frame(out, d, PAL16_YELLOW + 9, 1);
 	const MapPortal &portal = S.map.portals[S.linkPortal];
-	DrawString(out, StrCat("Where does this ", portal.door ? "door" : "portal", " lead?"), { d.position + Displacement { 0, 8 }, { d.size.width, 12 } }, { .flags = UiFlags::ColorWhitegold | UiFlags::AlignCenter });
-	auto row = [&](int index, std::string_view text, bool selected) {
-		const Rectangle r = DialogRowRect(index);
-		if (r.contains(MousePosition) || selected)
-			FillRect(out, r.position.x, r.position.y, r.size.width, r.size.height, selected ? PAL16_YELLOW + 12 : PAL16_GRAY + 13);
-		DrawString(out, text, { r.position + Displacement { 6, 2 }, { r.size.width - 12, 12 } }, { .flags = selected ? UiFlags::ColorWhitegold : UiFlags::ColorWhite });
-	};
+	const std::string what = portal.door ? "door" : "portal";
+	std::string title;
+	if (S.linkPage == 1)
+		title = StrCat("Arrive where in ", S.linkTarget == -2 ? std::string("Tristram") : S.linkTargets[S.linkTarget].name, "?");
+	else
+		title = StrCat("Where does this ", what, " lead?");
+	DrawString(out, title, { d.position + Displacement { 0, 8 }, { d.size.width, 12 } }, { .flags = UiFlags::ColorWhitegold | UiFlags::AlignCenter });
+	DrawString(out, S.linkPage == 1 ? std::string("Choose where the hero comes out.") : StrCat("Now: ", LinkDescription(portal.to)),
+	    { d.position + Displacement { 0, 26 }, { d.size.width, 12 } }, { .flags = UiFlags::ColorGold | UiFlags::AlignCenter | UiFlags::KerningFitSpacing });
+
+	const std::vector<LinkRow> rows = LinkRows();
 	const MapLink &l = portal.to;
-	row(0, "Nowhere (decoration only)", l.kind == MapLinkKind::None);
-	const bool town = l.kind == MapLinkKind::Town;
-	row(1, StrCat("Tristram", town && !l.entry.empty() ? StrCat("   arriving at ", l.entry, " (click: next)") : "   (click again: its arrival points)"), town);
-	row(2, StrCat("Dungeon level ", l.level, "   (click +1, right-click -1)"), l.kind == MapLinkKind::Dungeon);
-	row(3, "New wilds area (made now, with a way back)", false);
-	for (size_t i = 0; i < S.mapList.size(); i++) {
-		const bool selected = l.kind == MapLinkKind::Map && l.map == S.mapList[i];
-		row(4 + static_cast<int>(i), StrCat("Map: ", S.mapList[i], selected && !l.entry.empty() ? StrCat("   arriving at ", l.entry, " (click: next)") : ""), selected);
+	for (int i = 0; i < static_cast<int>(rows.size()); i++) {
+		const std::optional<Rectangle> r = DialogRowRect(i);
+		if (!r)
+			continue;
+		const LinkRow &row = rows[i];
+		bool selected = false;
+		switch (row.kind) {
+		case LinkRow::Kind::Tristram: selected = l.kind == MapLinkKind::Town; break;
+		case LinkRow::Kind::Dungeon: selected = l.kind == MapLinkKind::Dungeon; break;
+		case LinkRow::Kind::Map: selected = l.kind == MapLinkKind::Map && l.map == S.linkTargets[row.index].name; break;
+		case LinkRow::Kind::Nowhere: selected = l.kind == MapLinkKind::None; break;
+		case LinkRow::Kind::Arrival: {
+			const bool sameTarget = S.linkTarget == -2 ? l.kind == MapLinkKind::Town : (l.kind == MapLinkKind::Map && l.map == S.linkTargets[S.linkTarget].name);
+			selected = sameTarget && (row.index < 0 ? l.entry.empty() : l.entry == row.label);
+			break;
+		}
+		default: break;
+		}
+		if (selected || r->contains(MousePosition))
+			FillRect(out, r->position.x, r->position.y, r->size.width, r->size.height, selected ? PAL16_YELLOW + 12 : PAL16_GRAY + 13);
+		DrawString(out, row.label, { r->position + Displacement { 8, 3 }, { r->size.width - 16, 12 } }, { .flags = selected ? UiFlags::ColorWhitegold : UiFlags::ColorWhite });
+		if (row.kind == LinkRow::Kind::Dungeon) {
+			Button(out, DialogLevelButton(*r, false), "-", false);
+			Button(out, DialogLevelButton(*r, true), "+", false);
+		} else if (!row.note.empty()) {
+			DrawString(out, row.note, { r->position + Displacement { 8, 3 }, { r->size.width - 16, 12 } }, { .flags = UiFlags::ColorGold | UiFlags::AlignRight | UiFlags::KerningFitSpacing });
+		}
 	}
-	row(DialogRowCount() - 1, "Done", false);
+	if (static_cast<int>(rows.size()) > DialogVisibleRows())
+		DrawString(out, "(wheel: more)", { d.position + Displacement { 10, d.size.height - 24 }, { 100, 12 } }, { .flags = UiFlags::ColorGold });
+	Button(out, DialogFooterButton(), S.linkPage == 1 ? "Back" : (S.linkIsNew ? "Cancel" : "Close"), false);
 }
 
 void DrawPalette(const Surface &out)
@@ -1994,6 +2201,10 @@ void DrawInterface(const Surface &out)
 	Button(out, ToolButton(n + (S.kind == Kind::Tristram ? 1 : 2)), "Ctrl+Z Undo", false);
 	if (WeatherButtonIndex() >= 0)
 		Button(out, ToolButton(WeatherButtonIndex()), StrCat("Weather: ", WeatherTitle(S.map.weather)), S.weatherMenu);
+	if (OuterToggleIndex() >= 0)
+		Button(out, ToolButton(OuterToggleIndex()), S.map.outer.empty() ? std::string("Outer wilds: off") : StrCat("Outer wilds: ", SideShort(S.map.outerSide)), !S.map.outer.empty());
+	if (OuterGoIndex() >= 0)
+		Button(out, ToolButton(OuterGoIndex()), S.kind == Kind::Town ? "To outer wilds" : "Back to town", false);
 
 	if (PickerShown())
 		DrawTilePicker(out);
@@ -2176,55 +2387,201 @@ void MakeWildsBeyond(MapPortal &portal)
 	Say(StrCat("Made ", name, " (with a door back here). Shape it with:  editor ", name));
 }
 
+/** Sets where the door leads, says so and closes the dialog. */
+void ChooseLink(const MapLink &link)
+{
+	MapPortal &portal = S.map.portals[S.linkPortal];
+	if (!S.linkIsNew)
+		PushUndo();
+	portal.to = link;
+	S.dirty = true;
+	Say(StrCat(portal.door ? "Door" : "Portal", " leads to ", LinkDescription(link), "."));
+	S.linkIsNew = false;
+	S.linkPortal = -1;
+}
+
+/** Town: switches the outer wilds off (-1) or on along an edge, making the wilds map the first time. */
+void SetOuterWilds(int side)
+{
+	if (S.kind != Kind::Town)
+		return;
+	if (side < 0) {
+		if (!S.map.outer.empty()) {
+			if (std::expected<CustomMap, std::string> wilds = ReadCustomMap(S.map.outer); wilds.has_value()) {
+				wilds->outer.clear();
+				(void)WriteCustomMap(*wilds);
+			}
+			Say(StrCat("Outer wilds off: the town's edge is closed (", S.map.outer, " is kept as a map)."));
+		}
+		S.map.outer.clear();
+		S.dirty = true;
+		Rebuild();
+		SaveMap();
+		return;
+	}
+	std::string name = S.map.outer;
+	if (name.empty()) {
+		std::string base = S.map.name;
+		if (base.size() > 24)
+			base.resize(24);
+		for (int n = 1; n < 100; n++) {
+			name = n == 1 ? StrCat(base, "_outer") : StrCat(base, "_outer", n);
+			if (!CustomMapExists(name))
+				break;
+		}
+	}
+	const int wildsSide = (side + 2) % 4;
+	CustomMap wilds;
+	bool clearEdge = false;
+	if (std::expected<CustomMap, std::string> existing = ReadCustomMap(name); existing.has_value()) {
+		wilds = std::move(*existing);
+		clearEdge = wilds.outerSide != wildsSide || wilds.outer.empty();
+	} else {
+		wilds.name = name;
+		wilds.style = DTYPE_FOREST;
+		wilds.Resize(40, 40);
+		FillMeadow(wilds);
+		wilds.entries.push_back({ "start", { 16 + 2 * 20, 16 + 2 * 20 } });
+		wilds.outerSide = wildsSide;
+		// A few packs fitting the hero's level, kept away from the town's edge.
+		for (const Point piece : { Point { 10, 10 }, Point { 29, 9 }, Point { 12, 28 }, Point { 28, 27 }, Point { 8, 20 }, Point { 31, 19 } }) {
+			const Point tile { 16 + 2 * piece.x, 16 + 2 * piece.y };
+			if (!OnMapSide(wilds, wildsSide, tile, 22))
+				wilds.spawners.push_back({ tile, std::string(AutoMonster), 4 });
+		}
+		clearEdge = true;
+	}
+	wilds.outer = S.map.name;
+	wilds.outerSide = wildsSide;
+	if (clearEdge) {
+		// The edge facing the town is open ground (the meadow's woods only ring its other edges).
+		const std::vector<uint16_t> &grass = GroundBrushes()[0].tiles;
+		const std::vector<uint16_t> &trees = GroundBrushes()[7].tiles;
+		for (int y = 0; y < wilds.height; y++) {
+			for (int x = 0; x < wilds.width; x++) {
+				uint16_t &t = wilds.tiles[static_cast<size_t>(y) * wilds.width + x];
+				if (OnMapSide(wilds, wildsSide, { 16 + 2 * x, 16 + 2 * y }, 6) && std::find(trees.begin(), trees.end(), t) != trees.end())
+					t = grass[(static_cast<uint32_t>(x) * 73856093u ^ static_cast<uint32_t>(y) * 19349663u) % grass.size()];
+			}
+		}
+	}
+	if (std::expected<void, std::string> r = WriteCustomMap(wilds); !r.has_value()) {
+		Say(StrCat("Could not make ", name, ": ", r.error()));
+		return;
+	}
+	S.map.outer = name;
+	S.map.outerSide = side;
+	S.dirty = true;
+	Rebuild();
+	SaveMap();
+	Say(StrCat("Outer wilds on: walking off the ", MapSideName(side), " edge leads to ", name, ". Monsters stay out there. Build it with \"To outer wilds\"."));
+}
+
+/** Saves this map and opens another in the editor. */
+void SwitchEditorMap(const std::string &name)
+{
+	if (S.dirty)
+		SaveMap();
+	std::expected<CustomMap, std::string> map = ReadCustomMap(name);
+	if (!map.has_value()) {
+		Say(map.error());
+		return;
+	}
+	S.map = std::move(*map);
+	S.kind = S.map.style == DTYPE_TOWN ? Kind::Town : (S.map.style == DTYPE_FOREST ? Kind::Wilds : Kind::Dungeon);
+	S.undo.clear();
+	S.dirty = false;
+	S.tool = ToolsFor(S.kind).front();
+	S.showTilePicker = false;
+	S.weatherMenu = false;
+	S.linkPortal = -1;
+	S.paletteScroll = 0;
+	// Look at the edge shared with the town (or the middle).
+	S.camera = { 16 + S.map.width, 16 + S.map.height };
+	if (!S.map.outer.empty()) {
+		switch (S.map.outerSide) {
+		case 0: S.camera.y = 16 + 3; break;
+		case 1: S.camera.x = 16 + 2 * S.map.width - 3; break;
+		case 2: S.camera.y = 16 + 2 * S.map.height - 3; break;
+		default: S.camera.x = 16 + 3; break;
+		}
+	}
+	LoadMapLevel(true);
+	Say(StrCat("Editing ", name, "."));
+}
+
 bool ClickDialog(Point p, bool right)
 {
 	MapPortal &portal = S.map.portals[S.linkPortal];
-	for (int row = 0; row < DialogRowCount(); row++) {
-		if (!DialogRowRect(row).contains(p))
-			continue;
-		PushUndo();
-		MapLink &l = portal.to;
-		if (row == 0) {
-			l = {};
-		} else if (row == 1) {
-			// Tristram; clicking again steps through its added arrival points.
-			const std::vector<std::string> entries = TristramEntries();
-			std::string entry;
-			if (l.kind == MapLinkKind::Town && !entries.empty()) {
-				auto it = std::find(entries.begin(), entries.end(), l.entry);
-				entry = it == entries.end() ? entries.front() : (it + 1 == entries.end() ? std::string {} : *(it + 1));
-			}
-			l = { MapLinkKind::Town, "", entry, 1 };
-		} else if (row == 2) {
-			const int level = l.kind == MapLinkKind::Dungeon ? l.level + (right ? -1 : 1) : 1;
-			l = { MapLinkKind::Dungeon, "", "", std::clamp(level, 1, 16) };
-		} else if (row == 3) {
-			MakeWildsBeyond(portal);
-		} else if (row == DialogRowCount() - 1) {
-			S.linkPortal = -1;
+	if (DialogFooterButton().contains(p)) {
+		if (S.linkPage == 1) {
+			S.linkPage = 0;
+			S.linkScroll = 0;
 		} else {
-			const std::string &name = S.mapList[row - 4];
-			std::vector<std::string> entries;
-			if (name == S.map.name) {
-				for (const MapEntryPoint &e : S.map.entries)
-					entries.push_back(e.name);
-			} else if (std::expected<CustomMap, std::string> other = ReadCustomMap(name); other.has_value()) {
-				for (const MapEntryPoint &e : other->entries)
-					entries.push_back(e.name);
-			}
-			std::string entry = entries.empty() ? "" : entries.front();
-			if (l.kind == MapLinkKind::Map && l.map == name && !entries.empty()) {
-				// Clicking the chosen map again picks its next arrival point.
-				auto it = std::find(entries.begin(), entries.end(), l.entry);
-				entry = (it == entries.end() || it + 1 == entries.end()) ? entries.front() : *(it + 1);
-			}
-			l = { MapLinkKind::Map, name, entry, 1 };
+			CloseLinkDialog(true);
 		}
 		return true;
 	}
-	if (!DialogRect().contains(p))
-		S.linkPortal = -1;
-	return true;
+	const std::vector<LinkRow> rows = LinkRows();
+	for (int i = 0; i < static_cast<int>(rows.size()); i++) {
+		const std::optional<Rectangle> r = DialogRowRect(i);
+		if (!r || !r->contains(p))
+			continue;
+		const LinkRow &row = rows[i];
+		switch (row.kind) {
+		case LinkRow::Kind::Tristram:
+			if (TristramEntries().empty()) {
+				ChooseLink({ MapLinkKind::Town, "", "", 1 });
+			} else {
+				S.linkPage = 1;
+				S.linkTarget = -2;
+				S.linkScroll = 0;
+			}
+			break;
+		case LinkRow::Kind::Dungeon: {
+			const int level = portal.to.kind == MapLinkKind::Dungeon ? portal.to.level : 1;
+			if (DialogLevelButton(*r, false).contains(p) || DialogLevelButton(*r, true).contains(p) || right) {
+				// Change the level without leaving the list.
+				const bool up = DialogLevelButton(*r, true).contains(p);
+				portal.to = { MapLinkKind::Dungeon, "", "", std::clamp(level + (up ? 1 : -1), 1, 16) };
+				S.dirty = true;
+			} else {
+				ChooseLink({ MapLinkKind::Dungeon, "", "", level });
+			}
+			break;
+		}
+		case LinkRow::Kind::Map: {
+			const Session::LinkTarget &target = S.linkTargets[row.index];
+			if (target.entries.size() >= 2) {
+				S.linkPage = 1;
+				S.linkTarget = row.index;
+				S.linkScroll = 0;
+			} else {
+				ChooseLink({ MapLinkKind::Map, target.name, target.entries.empty() ? std::string {} : target.entries.front(), 1 });
+			}
+			break;
+		}
+		case LinkRow::Kind::NewWilds:
+			if (S.linkIsNew)
+				S.linkIsNew = false; // keep the door: the wilds is made for it
+			else
+				PushUndo();
+			MakeWildsBeyond(portal);
+			S.linkPortal = -1;
+			break;
+		case LinkRow::Kind::Nowhere:
+			ChooseLink({});
+			break;
+		case LinkRow::Kind::Arrival:
+			if (S.linkTarget == -2)
+				ChooseLink({ MapLinkKind::Town, "", row.index < 0 ? std::string {} : row.label, 1 });
+			else
+				ChooseLink({ MapLinkKind::Map, S.linkTargets[S.linkTarget].name, row.label, 1 });
+			break;
+		}
+		return true;
+	}
+	return true; // the dialog keeps the clicks while it is open
 }
 
 void SelectTool(int index)
@@ -2497,6 +2854,17 @@ void MouseDown(Point p, bool right)
 			S.weatherMenu = !S.weatherMenu;
 			return;
 		}
+		if (i == OuterToggleIndex()) {
+			// Off, then each edge in turn (right-click goes back the other way).
+			const int current = S.map.outer.empty() ? -1 : S.map.outerSide;
+			const int next = right ? (current < 0 ? 3 : current - 1) : (current >= 3 ? -1 : current + 1);
+			SetOuterWilds(next);
+			return;
+		}
+		if (i == OuterGoIndex()) {
+			SwitchEditorMap(S.map.outer);
+			return;
+		}
 		if (i < n)
 			SelectTool(i);
 		else if (S.kind != Kind::Tristram && i == n + 1)
@@ -2715,7 +3083,7 @@ void MouseDown(Point p, bool right)
 			portal.tile = tile;
 			portal.door = S.tool == Tool::Door;
 			S.map.portals.push_back(portal);
-			OpenLinkDialog(static_cast<int>(S.map.portals.size()) - 1);
+			OpenLinkDialog(static_cast<int>(S.map.portals.size()) - 1, true);
 		}
 		break;
 	}
@@ -2860,6 +3228,17 @@ bool IsMapEditing()
 	return S.running && S.editing && OnEditorLevel();
 }
 
+bool MapEditorRunning()
+{
+	return S.running;
+}
+
+void MapEditorNotice(std::string text)
+{
+	if (S.running)
+		Say(std::move(text));
+}
+
 std::optional<std::string> EditorMapWeather()
 {
 	if (!S.running || S.kind == Kind::Tristram || !OnEditorLevel())
@@ -2964,6 +3343,33 @@ void MapEditorTick()
 					SelectTool(n[1] - 1);
 				else if (w[0] == "dialog")
 					OpenLinkDialog(static_cast<int>(S.map.portals.size()) - 1);
+				else if (w[0] == "placedoor" && n.size() >= 3) {
+					// As if the Door tool clicked a tile: the door goes down and the dialog asks where it leads.
+					PushUndo();
+					MapPortal portal;
+					portal.tile = { n[1], n[2] };
+					portal.door = true;
+					S.map.portals.push_back(portal);
+					OpenLinkDialog(static_cast<int>(S.map.portals.size()) - 1, true);
+				} else if ((w[0] == "linkrow" || w[0] == "linkminus" || w[0] == "linkplus") && n.size() >= 2 && S.linkPortal >= 0) {
+					if (const std::optional<Rectangle> r = DialogRowRect(n[1]); r) {
+						ControlMode = ControlTypes::KeyboardAndMouse;
+						MousePosition = w[0] == "linkrow" ? r->position + Displacement { 30, 8 } : DialogLevelButton(*r, w[0] == "linkplus").position + Displacement { 5, 5 };
+						MouseDown(MousePosition, false);
+					}
+				} else if (w[0] == "outer" && n.size() >= 2) {
+					SetOuterWilds(n[1]);
+				} else if (w[0] == "goouter") {
+					SwitchEditorMap(S.map.outer);
+				} else if (w[0] == "linkfooter" && S.linkPortal >= 0) {
+					MousePosition = DialogFooterButton().position + Displacement { 10, 8 };
+					MouseDown(MousePosition, false);
+				} else if (w[0] == "portals") {
+					std::string all;
+					for (const MapPortal &pp : S.map.portals)
+						all += StrCat(pp.tile.x, ",", pp.tile.y, "->", LinkDescription(pp.to), "; ");
+					LogInfo("EDITORPORTALS {}", all);
+				}
 				else if (w[0] == "picker")
 					OpenTilePicker();
 				else if (w[0] == "pickertile" && n.size() >= 2) {
@@ -3326,7 +3732,10 @@ bool HandleKey(SDL_Scancode sc)
 	} else if (sc == SDL_SCANCODE_MINUS || sc == SDL_SCANCODE_KP_MINUS) {
 		S.packSize = std::max(S.packSize - 1, 1);
 	} else if (sc == SDL_SCANCODE_ESCAPE && S.linkPortal >= 0) {
-		S.linkPortal = -1;
+		if (S.linkPage == 1)
+			S.linkPage = 0;
+		else
+			CloseLinkDialog(true);
 	} else if (sc == SDL_SCANCODE_ESCAPE) {
 		return false; // the game menu (save and quit from there, or use Exit)
 	}
@@ -3431,6 +3840,10 @@ bool MapEditorHandleEvent(const SDL_Event &event)
 		const int wheel = SDLC_EventWheelIntY(event);
 		if (wheel == 0)
 			return true;
+		if (S.linkPortal >= 0) {
+			ScrollDialog(wheel > 0 ? -1 : 1);
+			return true;
+		}
 		if (PickerShown() && PickerRect().contains(MousePosition)) {
 			if ((SDL_GetModState() & SDL_KMOD_CTRL) != 0) {
 				S.pickerZoom = std::clamp(S.pickerZoom + (wheel > 0 ? 1 : -1), 1, 3);

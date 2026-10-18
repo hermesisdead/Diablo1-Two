@@ -36,6 +36,10 @@ void StartQueuedMapEditor();
 [[nodiscard]] bool IsMapEditorSession();
 /** @brief The map is being edited (not play-tested): no hero, monsters still. */
 [[nodiscard]] bool IsMapEditing();
+/** @brief The map editor is open (editing or play-testing its map). */
+[[nodiscard]] bool MapEditorRunning();
+/** @brief A message on the editor's status line. */
+void MapEditorNotice(std::string text);
 /** @brief The weather chosen for the map being edited or play-tested (empty: changing), nullopt when not in the editor. */
 [[nodiscard]] std::optional<std::string> EditorMapWeather();
 

@@ -392,6 +392,11 @@ void FinishTownLinks()
 		for (const MapPortal &p : layer->portals)
 			Links.push_back({ ResolveTristramPosition(p.tile), p.door, p.to });
 	}
+	if (PendingArrival && ParseArrivalTile(PendingEntry)) {
+		// Back from the outer wilds: at the matching spot of the town's edge.
+		PendingArrival = false;
+		ViewPosition = NearestOpenTile(*ParseArrivalTile(PendingEntry));
+	}
 	if (PendingArrival) {
 		PendingArrival = false;
 		const MapEntryPoint *found = nullptr;
@@ -410,7 +415,9 @@ void FinishTownLinks()
 
 void UpdateTownLinks()
 {
-	if (leveltype != DTYPE_TOWN || setlevel || currlevel != 0 || Links.empty() || MyPlayer == nullptr || IsMapEditing())
+	const CustomMap *townMap = InCustomTown() ? CurrentCustomTownMap() : nullptr;
+	const bool hasOuter = townMap != nullptr && !townMap->outer.empty();
+	if (leveltype != DTYPE_TOWN || setlevel || currlevel != 0 || (Links.empty() && !hasOuter) || MyPlayer == nullptr || IsMapEditing())
 		return;
 	Player &player = *MyPlayer;
 	if (!LinksPlaced) {
@@ -441,6 +448,8 @@ void UpdateTownLinks()
 		}
 	}
 #endif
+	if (hasOuter)
+		DevWalkToOuterEdge(*townMap);
 	if (player._pLvlChanging || player._pmode != PM_STAND)
 		return;
 	const Point tile = player.position.tile;
@@ -451,6 +460,15 @@ void UpdateTownLinks()
 		if (link.tile == tile && link.to.kind != MapLinkKind::None) {
 			FollowMapLink(link.to);
 			return;
+		}
+	}
+	// Walking out of town into its outer wilds.
+	if (hasOuter) {
+		if (const std::optional<MapLink> out = OuterEdgeLink(*townMap, tile); out) {
+			if (MapEditorRunning())
+				MapEditorNotice(StrCat("The hero would walk out to ", townMap->outer, " here (not while editing)."));
+			else
+				FollowMapLink(*out);
 		}
 	}
 }

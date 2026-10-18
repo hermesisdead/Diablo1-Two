@@ -24,9 +24,11 @@
 #include "levels/drlg_l3.h"
 #include "levels/drlg_l4.h"
 #include "levels/gendung.h"
+#include "levels/tile_properties.hpp"
 #include "levels/town.h"
 #include "levels/trigs.h"
 #include "missiles.h"
+#include "msg.h"
 #include "objects.h"
 #include "player.h"
 #include "utils/endian_read.hpp"
@@ -162,6 +164,8 @@ std::string BuildMeta(const CustomMap &map)
 		out += StrCat("boss=", b.tile.x, ",", b.tile.y, ",", b.name, ",", b.minions, "\n");
 	for (const MapAnimal &a : map.animals)
 		out += StrCat("animal=", a.tile.x, ",", a.tile.y, ",", a.kind, "\n");
+	if (!map.outer.empty())
+		out += StrCat("outer=", map.outer, ",", map.outerSide, "\n");
 	return out;
 }
 
@@ -202,6 +206,9 @@ void ParseMeta(std::string_view text, CustomMap &map)
 			map.npcs.push_back({ std::string(f[0]), { ToInt(f[1]), ToInt(f[2]) }, std::clamp(ToInt(f[3]), 0, 7) });
 		} else if (key == "spawner" && f.size() >= 4) {
 			map.spawners.push_back({ { ToInt(f[0]), ToInt(f[1]) }, std::string(f[2]), std::clamp(ToInt(f[3], 4), 1, 20) });
+		} else if (key == "outer" && f.size() >= 2) {
+			map.outer = std::string(f[0]);
+			map.outerSide = std::clamp(ToInt(f[1]), 0, 3);
 		} else if (key == "animal" && f.size() >= 3) {
 			map.animals.push_back({ { ToInt(f[0]), ToInt(f[1]) }, std::string(f[2]) });
 		} else if (key == "boss" && f.size() >= 3) {
@@ -535,10 +542,106 @@ void ClearActiveCustomMap()
 	ActiveEntry.clear();
 }
 
+std::string_view MapSideName(int side)
+{
+	switch (side) {
+	case 0: return "north-east";
+	case 1: return "south-east";
+	case 2: return "south-west";
+	default: return "north-west";
+	}
+}
+
+bool OnMapSide(const CustomMap &map, int side, Point tile, int depth)
+{
+	const int x0 = 16, y0 = 16, x1 = 16 + 2 * map.width - 1, y1 = 16 + 2 * map.height - 1;
+	if (tile.x < x0 || tile.x > x1 || tile.y < y0 || tile.y > y1)
+		return false;
+	switch (side) {
+	case 0: return tile.y < y0 + depth;
+	case 1: return tile.x > x1 - depth;
+	case 2: return tile.y > y1 - depth;
+	default: return tile.x < x0 + depth;
+	}
+}
+
+std::optional<MapLink> OuterEdgeLink(const CustomMap &map, Point tile)
+{
+	if (map.outer.empty() || !OnMapSide(map, map.outerSide, tile, 2))
+		return std::nullopt;
+	std::expected<CustomMap, std::string> other = ReadCustomMap(map.outer);
+	if (!other.has_value())
+		return std::nullopt;
+	// Come out at the same place along the matching edge of the other map, a few steps in.
+	const bool alongX = map.outerSide == 0 || map.outerSide == 2;
+	const int along = alongX ? tile.x - 16 : tile.y - 16;
+	const int ox1 = 16 + 2 * other->width - 1, oy1 = 16 + 2 * other->height - 1;
+	constexpr int Depth = 4;
+	Point at;
+	switch ((map.outerSide + 2) % 4) {
+	case 0: at = { std::clamp(16 + along, 16, ox1), 16 + Depth }; break;
+	case 1: at = { ox1 - Depth, std::clamp(16 + along, 16, oy1) }; break;
+	case 2: at = { std::clamp(16 + along, 16, ox1), oy1 - Depth }; break;
+	default: at = { 16 + Depth, std::clamp(16 + along, 16, oy1) }; break;
+	}
+	return MapLink { MapLinkKind::Map, map.outer, StrCat("@", at.x, ",", at.y), 1 };
+}
+
+void DevWalkToOuterEdge(const CustomMap &map)
+{
+#ifdef _DEBUG
+	// Test hook: DEVILUTIONX_DEV_WALKEDGE = walk the hero straight at the edge leading to the outer wilds (or back).
+	if (std::getenv("DEVILUTIONX_DEV_WALKEDGE") == nullptr || map.outer.empty() || MyPlayer == nullptr)
+		return;
+	static int tick = 0;
+	Player &player = *MyPlayer;
+	if (player._pLvlChanging || player._pmode != PM_STAND || ++tick % 30 != 0)
+		return;
+	Point step = player.position.tile;
+	switch (map.outerSide) {
+	case 0: step.y = std::max(16, step.y - 8); break;
+	case 1: step.x = std::min(16 + 2 * map.width - 1, step.x + 8); break;
+	case 2: step.y = std::min(16 + 2 * map.height - 1, step.y + 8); break;
+	default: step.x = std::max(16, step.x - 8); break;
+	}
+	LogInfo("WALKEDGE {} at {},{}", map.name, player.position.tile.x, player.position.tile.y);
+	NetSendCmdLoc(MyPlayerId, true, CMD_WALKXY, step);
+#else
+	(void)map;
+#endif
+}
+
+std::optional<Point> ParseArrivalTile(std::string_view entry)
+{
+	if (entry.size() < 4 || entry[0] != '@')
+		return std::nullopt;
+	const size_t comma = entry.find(',');
+	if (comma == std::string_view::npos)
+		return std::nullopt;
+	const ParseIntResult<int> x = ParseInt<int>(entry.substr(1, comma - 1));
+	const ParseIntResult<int> y = ParseInt<int>(entry.substr(comma + 1));
+	if (!x.has_value() || !y.has_value())
+		return std::nullopt;
+	return Point { *x, *y };
+}
+
 Point ActiveCustomMapArrival()
 {
 	if (!Active)
 		return { 16 + 20, 16 + 20 };
+	if (const std::optional<Point> at = ParseArrivalTile(ActiveEntry); at) {
+		// From the town next door: the nearest open ground to that spot.
+		for (int r = 0; r <= 8; r++) {
+			for (int dy = -r; dy <= r; dy++) {
+				for (int dx = -r; dx <= r; dx++) {
+					const Point t = *at + Displacement { dx, dy };
+					if (std::max(std::abs(dx), std::abs(dy)) == r && InDungeonBounds(t) && IsTileWalkable(t))
+						return t;
+				}
+			}
+		}
+		return *at;
+	}
 	if (const MapEntryPoint *e = Active->FindEntry(ActiveEntry); e != nullptr)
 		return e->tile;
 	// No entry point: the middle of the map.
@@ -689,6 +792,7 @@ void UpdateCustomMapPortals()
 				AddMissile(portal.tile, portal.tile, Direction::South, MissileID::RedPortal, TARGET_MONSTERS, player.getId(), 0, 0);
 		}
 	}
+	DevWalkToOuterEdge(*Active);
 	if (player._pLvlChanging || player._pmode != PM_STAND)
 		return;
 	const Point tile = player.position.tile;
@@ -700,6 +804,13 @@ void UpdateCustomMapPortals()
 			FollowMapLink(portal.to);
 			return;
 		}
+	}
+	// Walking off the edge that borders its town.
+	if (const std::optional<MapLink> back = OuterEdgeLink(*Active, tile); back) {
+		if (MapEditorRunning())
+			MapEditorNotice(StrCat("The hero would walk back to ", Active->outer, " here (not while editing)."));
+		else
+			FollowMapLink(*back);
 	}
 }
 
