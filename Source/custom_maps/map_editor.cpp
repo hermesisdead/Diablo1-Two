@@ -29,6 +29,7 @@
 #include "engine/render/primitive_render.hpp"
 #include "engine/render/text_render.hpp"
 #include "engine/render/tile_hue.hpp"
+#include "engine/render/scrollrt.h"
 #include "engine/render/world_projector.hpp"
 #include "engine/surface.hpp"
 #include "gamemenu.h"
@@ -42,6 +43,7 @@
 #include "levels/town.h"
 #include "lighting.h"
 #include "menu.h"
+#include "options.h"
 #include "pfile.h"
 #include "player.h"
 #include "utils/endian_swap.hpp"
@@ -662,8 +664,8 @@ std::string_view ToolHint(Tool tool)
 	case Tool::Stamp: return "Click to place the chosen piece of Tristram (centred on the cursor).";
 	case Tool::Copy: return "Drag over an area to copy it, then click to paste it anywhere.";
 	case Tool::Npc: return "Click to place the chosen townsperson (or move them). Right-click removes.";
-	case Tool::Spawner: return "Click to place a pack (click one to change it). Right-click removes. Wheel: scroll list.";
-	case Tool::Boss: return "Click to place the chosen boss with its minions. Right-click removes. Wheel: scroll list.";
+	case Tool::Spawner: return "Click to place a pack (click one to change it). Right-click removes. Wheel over the list scrolls it.";
+	case Tool::Boss: return "Click to place the chosen boss with its minions. Right-click removes. Wheel over the list scrolls it.";
 	case Tool::Chest: return "Click to place a chest (quests can hide an item in it). Right-click removes.";
 	default: return "";
 	}
@@ -1384,7 +1386,7 @@ void DrawInterface(const Surface &out)
 		status = S.message;
 	DrawString(out, status, { { 8, y + 3 }, { gnScreenWidth - 16, 12 } }, { .flags = SDL_GetTicks() < S.messageUntil ? UiFlags::ColorGold : UiFlags::ColorWhite });
 	if (SDL_GetTicks() >= S.messageUntil && gnScreenWidth >= 900)
-		DrawString(out, "WASD/arrows or middle-drag: move   Ctrl+S: save   P: test", { { 8, y + 3 }, { gnScreenWidth - 16, 12 } }, { .flags = UiFlags::ColorWhite | UiFlags::AlignRight });
+		DrawString(out, "WASD or middle-drag: move   Wheel/Z: zoom   Ctrl+S: save   P: test", { { 8, y + 3 }, { gnScreenWidth - 16, 12 } }, { .flags = UiFlags::ColorWhite | UiFlags::AlignRight });
 
 	if (S.linkPortal >= 0 && S.linkPortal < static_cast<int>(S.map.portals.size()))
 		DrawLinkDialog(out);
@@ -1953,6 +1955,7 @@ bool IsMapEditing()
 
 namespace {
 bool HandleKey(SDL_Scancode sc);
+void SetMapZoom(bool on);
 void PanCamera(Displacement delta);
 void PanPicker(Displacement delta);
 } // namespace
@@ -2091,6 +2094,8 @@ void MapEditorTick()
 					PanPicker({ 0, n[1] });
 				else if (w[0] == "undo")
 					Undo();
+				else if (w[0] == "mapzoom" && n.size() >= 2)
+					SetMapZoom(n[1] != 0);
 				else if (w[0] == "state")
 				{
 					const Point at = PieceAt(cursPosition);
@@ -2159,19 +2164,31 @@ void PlaceGhost()
 	}
 }
 
+/** Close-up view of the map (the game's 2x zoom). */
+void SetMapZoom(bool on)
+{
+	if (*GetOptions().Graphics.zoom == on)
+		return;
+	GetOptions().Graphics.zoom.SetValue(on);
+	CalcViewportGeometry();
+	Say(on ? "Zoomed in (Z, or wheel down over the map, to zoom back out)." : "Zoomed out.");
+}
+
 /** Middle-drag over the map: the map follows the mouse. */
 void PanCamera(Displacement delta)
 {
-	S.panRemainder += delta;
+	// Kept in half world pixels: zoomed in, one screen pixel is half a world pixel.
+	const int zoom = *GetOptions().Graphics.zoom ? 2 : 1;
+	S.panRemainder += Displacement { delta.deltaX * 2 / zoom, delta.deltaY * 2 / zoom };
 	// A world tile step moves the view by (32, 16) pixels per x and (-32, 16) per y.
-	const float fx = -(S.panRemainder.deltaX / 32.0f + S.panRemainder.deltaY / 16.0f) / 2.0f;
-	const float fy = -(S.panRemainder.deltaY / 16.0f - S.panRemainder.deltaX / 32.0f) / 2.0f;
+	const float fx = -(S.panRemainder.deltaX / 64.0f + S.panRemainder.deltaY / 32.0f) / 2.0f;
+	const float fy = -(S.panRemainder.deltaY / 32.0f - S.panRemainder.deltaX / 64.0f) / 2.0f;
 	const int cx = static_cast<int>(fx), cy = static_cast<int>(fy);
 	if (cx == 0 && cy == 0)
 		return;
 	S.camera.x = std::clamp(S.camera.x + cx, 10, MAXDUNX - 10);
 	S.camera.y = std::clamp(S.camera.y + cy, 10, MAXDUNY - 10);
-	S.panRemainder -= Displacement { -(cx - cy) * 32, -(cx + cy) * 16 };
+	S.panRemainder -= Displacement { -(cx - cy) * 64, -(cx + cy) * 32 };
 }
 
 /** Middle-drag over the picker: the pictures follow the mouse. */
@@ -2223,6 +2240,8 @@ bool HandleKey(SDL_Scancode sc)
 		SaveMap();
 	} else if (ctrl && sc == SDL_SCANCODE_Z) {
 		Undo();
+	} else if (sc == SDL_SCANCODE_Z) {
+		SetMapZoom(!*GetOptions().Graphics.zoom);
 	} else if (sc == SDL_SCANCODE_G) {
 		S.grid = !S.grid;
 	} else if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9) {
@@ -2342,6 +2361,10 @@ bool MapEditorHandleEvent(const SDL_Event &event)
 			} else {
 				ScrollPicker(wheel > 0 ? -1 : 1);
 			}
+			return true;
+		}
+		if (!OnInterface(MousePosition)) {
+			SetMapZoom(wheel > 0); // over the map: wheel up comes closer, wheel down backs out
 			return true;
 		}
 		ScrollPalette(wheel > 0 ? -3 : 3);
