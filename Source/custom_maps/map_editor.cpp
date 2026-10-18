@@ -25,7 +25,10 @@
 #include "engine/light_tables.hpp"
 #include "engine/load_file.hpp"
 #include "engine/palette.h"
+#include "custom_maps/file_dialog.hpp"
+#include "engine/events.hpp"
 #include "engine/rectangle.hpp"
+#include "engine/sound.h"
 #include "engine/render/clx_render.hpp"
 #include "engine/render/dungeon_mood.hpp"
 #include "engine/render/dun_render.hpp"
@@ -185,6 +188,9 @@ struct Session {
 	uint32_t deleteUntil = 0;
 
 	bool weatherMenu = false; // the weather list is open
+	bool musicPanel = false;  // the map's music is being chosen
+	int musicScroll = 0;
+	std::vector<std::string> musicLibrary; // songs uploaded to the campaign
 
 	int fenceKind = 0; // Fence tool: 0 fence, 1 gate, 2 remove
 	int animal = 0;    // Animals tool: index in AnimalKinds()
@@ -759,7 +765,7 @@ Rectangle ToolButton(int index)
 
 int ToolButtonCount()
 {
-	const int base = static_cast<int>(ToolsFor(S.kind).size()) + (S.kind == Kind::Tristram ? 2 : 4);
+	const int base = static_cast<int>(ToolsFor(S.kind).size()) + (S.kind == Kind::Tristram ? 2 : 5);
 	if (S.kind == Kind::Town)
 		return base + (S.map.outer.empty() ? 1 : 2);
 	if (S.kind == Kind::Wilds && !S.map.outer.empty())
@@ -767,10 +773,16 @@ int ToolButtonCount()
 	return base;
 }
 
+/** The map's music (not in Tristram), under the weather button. */
+int MusicButtonIndex()
+{
+	return S.kind == Kind::Tristram ? -1 : static_cast<int>(ToolsFor(S.kind).size()) + 4;
+}
+
 /** Town: the outer wilds switch (off, then each edge in turn), under the weather button. */
 int OuterToggleIndex()
 {
-	return S.kind == Kind::Town ? static_cast<int>(ToolsFor(S.kind).size()) + 4 : -1;
+	return S.kind == Kind::Town ? static_cast<int>(ToolsFor(S.kind).size()) + 5 : -1;
 }
 
 /** Jumps between a town and its outer wilds in the editor. */
@@ -779,8 +791,8 @@ int OuterGoIndex()
 	if (S.map.outer.empty())
 		return -1;
 	if (S.kind == Kind::Town)
-		return static_cast<int>(ToolsFor(S.kind).size()) + 5;
-	return S.kind == Kind::Wilds ? static_cast<int>(ToolsFor(S.kind).size()) + 4 : -1;
+		return static_cast<int>(ToolsFor(S.kind).size()) + 6;
+	return S.kind == Kind::Wilds ? static_cast<int>(ToolsFor(S.kind).size()) + 5 : -1;
 }
 
 std::string_view SideShort(int side)
@@ -2168,6 +2180,289 @@ void DrawNamingDialog(const Surface &out)
 	    { .flags = (S.replaceAsked ? UiFlags::ColorRed : UiFlags::ColorGold) | UiFlags::AlignCenter });
 }
 
+// --- Music --------------------------------------------------------------------------------------
+
+constexpr int MusicPanelWidth = 420;
+constexpr int MusicRow = 20;
+
+/** A row of the music panel. */
+struct MusicRowInfo {
+	enum class Kind : uint8_t {
+		Song,    // a song of the map's playlist (index into S.map.music)
+		Fade,    // the crossfade length
+		Heading, // "Uploaded songs"
+		Library, // an uploaded song not in the playlist (index into S.musicLibrary)
+		Note,    // a line of text
+	};
+	Kind kind;
+	int index;
+	std::string label;
+};
+
+std::vector<MusicRowInfo> MusicRows()
+{
+	std::vector<MusicRowInfo> rows;
+	if (S.map.music.empty())
+		rows.push_back({ MusicRowInfo::Kind::Note, -1, "No songs: the usual music of this kind of place." });
+	for (int i = 0; i < static_cast<int>(S.map.music.size()); i++)
+		rows.push_back({ MusicRowInfo::Kind::Song, i, StrCat(i + 1, ". ", S.map.music[i]) });
+	if (S.map.music.size() > 1)
+		rows.push_back({ MusicRowInfo::Kind::Fade, -1, StrCat("Crossfade: ", S.map.musicFade, S.map.musicFade == 1 ? " second" : " seconds") });
+	std::vector<int> unused;
+	for (int i = 0; i < static_cast<int>(S.musicLibrary.size()); i++) {
+		if (std::find(S.map.music.begin(), S.map.music.end(), S.musicLibrary[i]) == S.map.music.end())
+			unused.push_back(i);
+	}
+	if (!unused.empty()) {
+		rows.push_back({ MusicRowInfo::Kind::Heading, -1, "Uploaded before (click Add to use here too):" });
+		for (const int i : unused)
+			rows.push_back({ MusicRowInfo::Kind::Library, i, S.musicLibrary[i] });
+	}
+	return rows;
+}
+
+int MusicVisibleRows()
+{
+	return std::max(3, (gnViewportHeight - TopBarHeight - 40 - 100) / MusicRow);
+}
+
+Rectangle MusicPanelRect()
+{
+	const int shown = std::min(static_cast<int>(MusicRows().size()), MusicVisibleRows());
+	const int h = 50 + shown * MusicRow + 66;
+	const int w = std::min(MusicPanelWidth, gnScreenWidth - 8);
+	return { { (gnScreenWidth - w) / 2, std::max(TopBarHeight + 6, (gnViewportHeight - h) / 2) }, { w, h } };
+}
+
+std::optional<Rectangle> MusicRowRect(int row)
+{
+	const int shown = row - S.musicScroll;
+	if (shown < 0 || shown >= MusicVisibleRows())
+		return std::nullopt;
+	const Rectangle d = MusicPanelRect();
+	return Rectangle { { d.position.x + 10, d.position.y + 46 + shown * MusicRow }, { d.size.width - 20, MusicRow - 2 } };
+}
+
+/** Small buttons at a row's right end, `slot` 0 the rightmost. */
+Rectangle MusicRowButton(Rectangle row, int slot, int width = 26)
+{
+	return { { row.position.x + row.size.width - (slot + 1) * (width + 2), row.position.y + 1 }, { width, row.size.height - 2 } };
+}
+
+/** Footer: 0 upload songs, 1 done. */
+Rectangle MusicFooterButton(int which)
+{
+	const Rectangle d = MusicPanelRect();
+	const int y = d.position.y + d.size.height - 28;
+	if (which == 0)
+		return { { d.position.x + 10, y }, { 170, 20 } };
+	return { { d.position.x + d.size.width - 90, y }, { 80, 20 } };
+}
+
+void ScrollMusicPanel(int rows)
+{
+	S.musicScroll = std::clamp(S.musicScroll + rows, 0, std::max(0, static_cast<int>(MusicRows().size()) - MusicVisibleRows()));
+}
+
+std::string MusicButtonLabel()
+{
+	if (S.map.music.empty())
+		return "Music: usual";
+	return StrCat("Music: ", S.map.music.size(), S.map.music.size() == 1 ? " song" : " songs");
+}
+
+/** Plays the map's songs now (from `startAt`), as the game will. */
+void ApplyEditorMusic(std::optional<size_t> startAt = std::nullopt)
+{
+	music_crossfade_to(GetLevelMusic(leveltype), MapMusicFiles(S.map), S.map.musicFade * 1000, startAt);
+}
+
+void OpenMusicPanel()
+{
+	S.musicPanel = true;
+	S.musicScroll = 0;
+	S.weatherMenu = false;
+	S.musicLibrary = ListCampaignMusic();
+}
+
+void CloseMusicPanel()
+{
+	S.musicPanel = false;
+	ApplyEditorMusic(); // back from a song being tried
+}
+
+/** Copies songs from the player's computer into the campaign and adds them to this map's playlist. */
+void AddSongFiles(const std::vector<std::string> &files)
+{
+	if (S.kind == Kind::Tristram || files.empty())
+		return;
+	int added = 0;
+	std::optional<size_t> first;
+	std::string problem;
+	PushUndo();
+	for (const std::string &file : files) {
+		std::expected<std::string, std::string> song = ImportCampaignSong(file);
+		if (!song.has_value()) {
+			problem = song.error();
+			LogWarn("Music upload: {}", song.error());
+			continue;
+		}
+		auto it = std::find(S.map.music.begin(), S.map.music.end(), *song);
+		if (it == S.map.music.end()) {
+			S.map.music.push_back(*song);
+			it = S.map.music.end() - 1;
+			added++;
+		}
+		if (!first)
+			first = static_cast<size_t>(it - S.map.music.begin());
+	}
+	S.musicLibrary = ListCampaignMusic();
+	if (added > 0)
+		S.dirty = true;
+	if (first)
+		ApplyEditorMusic(first);
+	if (!problem.empty())
+		Say(added > 0 ? StrCat("Added ", added, added == 1 ? " song. " : " songs. ", problem) : problem);
+	else if (added > 0)
+		Say(StrCat("Added ", added, added == 1 ? " song" : " songs", " to ", S.map.name, S.map.music.size() > 1 ? ": they play in turn, crossfading." : ": it loops."));
+	else if (first)
+		Say("That song is already on this map.");
+}
+
+void UploadSongs()
+{
+	const std::optional<std::vector<std::string>> files = ChooseFilesToOpen(StrCat("Choose music for ", S.map.name), { "ogg", "mp3", "wav" });
+	if (!files) {
+		Say("This system has no file chooser: drag music files onto the game window instead.");
+		return;
+	}
+	if (files->empty())
+		return; // cancelled
+	AddSongFiles(*files);
+}
+
+void DrawMusicPanel(const Surface &out)
+{
+	const Rectangle d = MusicPanelRect();
+	for (int i = 0; i < 3; i++)
+		DrawHalfTransparentRectTo(out, d.position.x, d.position.y, d.size.width, d.size.height);
+	Frame(out, d, PAL16_YELLOW + 9, 1);
+	DrawString(out, StrCat("Music of ", S.map.name), { d.position + Displacement { 0, 8 }, { d.size.width, 12 } }, { .flags = UiFlags::ColorWhitegold | UiFlags::AlignCenter });
+	const std::string sub = S.map.music.size() > 1 ? std::string("The songs play in turn, each crossfading into the next.")
+	    : (S.map.music.size() == 1 ? std::string("One song: it loops. Add more to crossfade between them.") : std::string("Upload .ogg, .mp3 or .wav songs from your computer."));
+	DrawString(out, sub, { d.position + Displacement { 0, 26 }, { d.size.width, 12 } }, { .flags = UiFlags::ColorGold | UiFlags::AlignCenter | UiFlags::KerningFitSpacing });
+	const std::vector<MusicRowInfo> rows = MusicRows();
+	const size_t playing = music_playlist_position();
+	for (int i = 0; i < static_cast<int>(rows.size()); i++) {
+		const std::optional<Rectangle> r = MusicRowRect(i);
+		if (!r)
+			continue;
+		const MusicRowInfo &row = rows[i];
+		int buttons = 0;
+		switch (row.kind) {
+		case MusicRowInfo::Kind::Song: {
+			const bool now = static_cast<size_t>(row.index) == playing && S.map.music.size() > 1;
+			FillRect(out, r->position.x, r->position.y, r->size.width, r->size.height, now ? PAL16_YELLOW + 12 : PAL16_GRAY + 13);
+			Button(out, MusicRowButton(*r, 0), "x", false);
+			Button(out, MusicRowButton(*r, 1), "dn", false);
+			Button(out, MusicRowButton(*r, 2), "up", false);
+			Button(out, MusicRowButton(*r, 3, 36), "play", false);
+			buttons = 3 * 28 + 38;
+			break;
+		}
+		case MusicRowInfo::Kind::Fade:
+			Button(out, MusicRowButton(*r, 0), "+", false);
+			Button(out, MusicRowButton(*r, 1), "-", false);
+			buttons = 2 * 28;
+			break;
+		case MusicRowInfo::Kind::Library:
+			if (r->contains(MousePosition))
+				FillRect(out, r->position.x, r->position.y, r->size.width, r->size.height, PAL16_GRAY + 13);
+			Button(out, MusicRowButton(*r, 0, 40), "Add", false);
+			Button(out, MusicRowButton(*r, 1, 40), "try", false);
+			buttons = 2 * 42;
+			break;
+		default: break;
+		}
+		const UiFlags color = row.kind == MusicRowInfo::Kind::Heading ? UiFlags::ColorGold : (row.kind == MusicRowInfo::Kind::Note ? UiFlags::ColorGold : UiFlags::ColorWhite);
+		DrawString(out, row.label, { r->position + Displacement { 6, 3 }, { r->size.width - 12 - buttons, 12 } }, { .flags = color | UiFlags::KerningFitSpacing });
+	}
+	if (static_cast<int>(rows.size()) > MusicVisibleRows())
+		DrawString(out, "(wheel: more)", { d.position + Displacement { 0, 8 }, { d.size.width - 10, 12 } }, { .flags = UiFlags::ColorGold | UiFlags::AlignRight });
+	DrawString(out, "Upload, or drag music files from your computer onto this window.", { d.position + Displacement { 0, d.size.height - 48 }, { d.size.width, 12 } },
+	    { .flags = UiFlags::ColorGold | UiFlags::AlignCenter | UiFlags::KerningFitSpacing });
+	Button(out, MusicFooterButton(0), "Upload songs...", false);
+	Button(out, MusicFooterButton(1), "Done", false);
+}
+
+void ClickMusicPanel(Point p, bool right)
+{
+	(void)right;
+	if (MusicFooterButton(0).contains(p)) {
+		UploadSongs();
+		return;
+	}
+	if (MusicFooterButton(1).contains(p) || !MusicPanelRect().contains(p)) {
+		CloseMusicPanel();
+		return;
+	}
+	const std::vector<MusicRowInfo> rows = MusicRows();
+	for (int i = 0; i < static_cast<int>(rows.size()); i++) {
+		const std::optional<Rectangle> r = MusicRowRect(i);
+		if (!r || !r->contains(p))
+			continue;
+		const MusicRowInfo &row = rows[i];
+		switch (row.kind) {
+		case MusicRowInfo::Kind::Song: {
+			const int k = row.index;
+			if (MusicRowButton(*r, 0).contains(p)) {
+				PushUndo();
+				S.map.music.erase(S.map.music.begin() + k);
+				S.dirty = true;
+				ApplyEditorMusic();
+				ScrollMusicPanel(0);
+				Say(S.map.music.empty() ? std::string("No songs: this map plays its usual music.") : std::string("Song taken off this map (it stays uploaded)."));
+			} else if (MusicRowButton(*r, 1).contains(p) || MusicRowButton(*r, 2).contains(p)) {
+				const int to = k + (MusicRowButton(*r, 1).contains(p) ? 1 : -1);
+				if (to >= 0 && to < static_cast<int>(S.map.music.size())) {
+					PushUndo();
+					std::swap(S.map.music[k], S.map.music[to]);
+					S.dirty = true;
+					ApplyEditorMusic(); // same songs, new order: carries on
+				}
+			} else {
+				ApplyEditorMusic(static_cast<size_t>(k)); // play from this song
+				Say(StrCat("Playing ", S.map.music[k], "."));
+			}
+			return;
+		}
+		case MusicRowInfo::Kind::Fade:
+			if (MusicRowButton(*r, 0).contains(p) || MusicRowButton(*r, 1).contains(p)) {
+				S.map.musicFade = std::clamp(S.map.musicFade + (MusicRowButton(*r, 0).contains(p) ? 1 : -1), 0, 20);
+				S.dirty = true;
+				ApplyEditorMusic();
+			}
+			return;
+		case MusicRowInfo::Kind::Library: {
+			const std::string song = S.musicLibrary[row.index];
+			if (MusicRowButton(*r, 0, 40).contains(p)) {
+				PushUndo();
+				S.map.music.push_back(song);
+				S.dirty = true;
+				ApplyEditorMusic(S.map.music.size() - 1);
+				Say(StrCat("Added ", song, "."));
+			} else {
+				// Try it (the map's own songs come back when the panel closes).
+				music_crossfade_to(GetLevelMusic(leveltype), { CampaignSongPath(song) }, 1500);
+				Say(StrCat("Trying ", song, ". Add puts it on this map."));
+			}
+			return;
+		}
+		default: return;
+		}
+	}
+}
+
 void DrawInterface(const Surface &out)
 {
 	// Top bar.
@@ -2201,6 +2496,8 @@ void DrawInterface(const Surface &out)
 	Button(out, ToolButton(n + (S.kind == Kind::Tristram ? 1 : 2)), "Ctrl+Z Undo", false);
 	if (WeatherButtonIndex() >= 0)
 		Button(out, ToolButton(WeatherButtonIndex()), StrCat("Weather: ", WeatherTitle(S.map.weather)), S.weatherMenu);
+	if (MusicButtonIndex() >= 0)
+		Button(out, ToolButton(MusicButtonIndex()), MusicButtonLabel(), S.musicPanel);
 	if (OuterToggleIndex() >= 0)
 		Button(out, ToolButton(OuterToggleIndex()), S.map.outer.empty() ? std::string("Outer wilds: off") : StrCat("Outer wilds: ", SideShort(S.map.outerSide)), !S.map.outer.empty());
 	if (OuterGoIndex() >= 0)
@@ -2225,6 +2522,8 @@ void DrawInterface(const Surface &out)
 
 	if (S.linkPortal >= 0 && S.linkPortal < static_cast<int>(S.map.portals.size()))
 		DrawLinkDialog(out);
+	else if (S.musicPanel)
+		DrawMusicPanel(out);
 	if (S.weatherMenu && WeatherButtonIndex() >= 0) {
 		const Rectangle m = WeatherMenuRect();
 		DrawHalfTransparentRectTo(out, m.position.x, m.position.y, m.size.width, m.size.height);
@@ -2254,7 +2553,7 @@ bool OnInterface(Point p)
 		return true;
 	if (!S.editing)
 		return false;
-	if (S.linkPortal >= 0)
+	if (S.linkPortal >= 0 || S.musicPanel)
 		return true;
 	for (int i = 0; i < ToolButtonCount(); i++) {
 		if (ToolButton(i).contains(p))
@@ -2427,6 +2726,9 @@ void SetOuterWilds(int side)
 		for (int n = 1; n < 100; n++) {
 			name = n == 1 ? StrCat(base, "_outer") : StrCat(base, "_outer", n);
 			if (!CustomMapExists(name))
+				break;
+			// This town's own outer wilds from before (switched off since): used again.
+			if (std::expected<CustomMap, std::string> before = ReadCustomMap(name); before.has_value() && before->style == DTYPE_FOREST && (before->outer.empty() || before->outer == S.map.name))
 				break;
 		}
 	}
@@ -2826,6 +3128,10 @@ void MouseDown(Point p, bool right)
 		ClickDialog(p, right);
 		return;
 	}
+	if (S.musicPanel) {
+		ClickMusicPanel(p, right);
+		return;
+	}
 	if (S.weatherMenu) {
 		if (WeatherMenuRect().contains(p)) {
 			const std::vector<std::string> choices = WeatherChoices();
@@ -2852,6 +3158,10 @@ void MouseDown(Point p, bool right)
 			continue;
 		if (i == WeatherButtonIndex()) {
 			S.weatherMenu = !S.weatherMenu;
+			return;
+		}
+		if (i == MusicButtonIndex()) {
+			OpenMusicPanel();
 			return;
 		}
 		if (i == OuterToggleIndex()) {
@@ -3190,6 +3500,7 @@ bool HasQueuedMapEditor()
 
 void StartQueuedMapEditor()
 {
+	(void)TakeDroppedFiles(); // nothing dropped before the editor opened
 	S.queued = false;
 	S.running = true;
 	S.travelled = false;
@@ -3239,6 +3550,13 @@ void MapEditorNotice(std::string text)
 		Say(std::move(text));
 }
 
+const CustomMap *EditorMusicMap()
+{
+	if (!S.running || S.kind == Kind::Tristram || !OnEditorLevel())
+		return nullptr;
+	return &S.map;
+}
+
 std::optional<std::string> EditorMapWeather()
 {
 	if (!S.running || S.kind == Kind::Tristram || !OnEditorLevel())
@@ -3262,6 +3580,16 @@ void MapEditorTick()
 		S.travelled = true;
 		LoadMapLevel(S.editing);
 		return;
+	}
+	if (std::vector<std::string> dropped = TakeDroppedFiles(); !dropped.empty()) {
+		// Files dragged onto the window: songs for this map.
+		if (S.editing && S.kind != Kind::Tristram && OnEditorLevel() && S.linkPortal < 0) {
+			if (!S.musicPanel)
+				OpenMusicPanel();
+			AddSongFiles(dropped);
+		} else if (S.editing) {
+			Say(S.kind == Kind::Tristram ? "Tristram keeps its own music." : "Close the open window first, then drop the songs again.");
+		}
 	}
 	Player &player = *MyPlayer;
 	if (!S.editing && S.god && player._pHitPoints > 0) {
@@ -3357,6 +3685,38 @@ void MapEditorTick()
 						MousePosition = w[0] == "linkrow" ? r->position + Displacement { 30, 8 } : DialogLevelButton(*r, w[0] == "linkplus").position + Displacement { 5, 5 };
 						MouseDown(MousePosition, false);
 					}
+				} else if (w[0] == "music") {
+					OpenMusicPanel();
+				} else if (w[0] == "musicadd" && w.size() >= 2) {
+					std::string_view rest = cmds[step - 1];
+					rest.remove_prefix(rest.find("musicadd") + 9);
+					std::vector<std::string> files;
+					for (std::string_view f : SplitByChar(rest, '|'))
+						files.emplace_back(f);
+					AddSongFiles(files);
+				} else if ((w[0] == "musicbtn" || w[0] == "musicwide") && n.size() >= 3 && S.musicPanel) {
+					if (const std::optional<Rectangle> r = MusicRowRect(n[1]); r) {
+						ControlMode = ControlTypes::KeyboardAndMouse;
+						MousePosition = MusicRowButton(*r, n[2], w[0] == "musicwide" ? 40 : (n[2] == 3 ? 36 : 26)).position + Displacement { 4, 4 };
+						MouseDown(MousePosition, false);
+					}
+				} else if (w[0] == "musicdone" && S.musicPanel) {
+					MouseDown(MusicFooterButton(1).position + Displacement { 4, 4 }, false);
+				} else if (w[0] == "dropfile" && w.size() >= 2) {
+#if !defined(USE_SDL3) && !defined(USE_SDL1)
+					// As if a file were dragged onto the window.
+					std::string_view rest = cmds[step - 1];
+					rest.remove_prefix(rest.find("dropfile") + 9);
+					SDL_Event drop {};
+					drop.type = SDL_DROPFILE;
+					drop.drop.file = SDL_strdup(std::string(rest).c_str());
+					SDL_PushEvent(&drop);
+#endif
+				} else if (w[0] == "musiclog") {
+					std::string all;
+					for (const std::string &song : S.map.music)
+						all += song + "; ";
+					LogInfo("EDITORMUSIC fade={} playing={} songs={}", S.map.musicFade, music_playlist_position(), all);
 				} else if (w[0] == "outer" && n.size() >= 2) {
 					SetOuterWilds(n[1]);
 				} else if (w[0] == "goouter") {
@@ -3681,6 +4041,11 @@ bool HandleKey(SDL_Scancode sc)
 		}
 		return false;
 	}
+	if (S.musicPanel) {
+		if (sc == SDL_SCANCODE_ESCAPE || sc == SDL_SCANCODE_RETURN)
+			CloseMusicPanel();
+		return true;
+	}
 	if (S.tool == Tool::Paint && S.linkPortal < 0 && IsAnyOf(S.kind, Kind::Town, Kind::Wilds)) {
 		if (sc == SDL_SCANCODE_ESCAPE && S.capturing) {
 			S.capturing = false;
@@ -3842,6 +4207,10 @@ bool MapEditorHandleEvent(const SDL_Event &event)
 			return true;
 		if (S.linkPortal >= 0) {
 			ScrollDialog(wheel > 0 ? -1 : 1);
+			return true;
+		}
+		if (S.musicPanel) {
+			ScrollMusicPanel(wheel > 0 ? -1 : 1);
 			return true;
 		}
 		if (PickerShown() && PickerRect().contains(MousePosition)) {

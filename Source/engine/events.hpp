@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 #ifdef USE_SDL3
 #include <SDL3/SDL_events.h>
@@ -24,6 +26,9 @@ extern EventHandler CurrentEventHandler;
 EventHandler SetEventHandler(EventHandler NewProc);
 
 bool FetchMessage(SDL_Event *event, uint16_t *modState);
+
+/** @brief Files dragged onto the game window since the last call (UTF-8 paths). */
+std::vector<std::string> TakeDroppedFiles();
 
 void HandleMessage(const SDL_Event &event, uint16_t modState);
 

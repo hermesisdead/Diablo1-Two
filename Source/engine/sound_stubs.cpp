@@ -18,6 +18,10 @@ void snd_deinit() { }
 void music_stop() { }
 void music_start(_music_id nTrack) { }
 void music_crossfade_to(_music_id nTrack, std::string_view file) { }
+void music_crossfade_to(_music_id nTrack, const std::vector<std::string> &playlist, int crossfadeMs, std::optional<size_t> startAt) { }
+void music_update() { }
+size_t music_playlist_position() { return 0; }
+bool music_file_plays(const std::string &path, std::string &error) { return true; }
 void sound_disable_music(bool disable) { }
 int sound_get_or_set_music_volume(int volume) { return 0; }
 int sound_get_or_set_sound_volume(int volume) { return 0; }

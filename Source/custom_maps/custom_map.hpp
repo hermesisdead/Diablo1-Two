@@ -111,7 +111,8 @@ struct CustomMap {
 	std::vector<MapSpawner> spawners; // not in towns
 	std::vector<MapBoss> bosses;      // not in towns
 	std::string weather; // mood name, empty for the level's usual roll
-	std::string music;   // song file in the campaign's music folder (.ogg or .wav, looped); empty: the style's usual music
+	std::vector<std::string> music; // songs in the campaign's music folder, played in turn and crossfaded (one loops); none: the style's usual music
+	int musicFade = 4;              // seconds each song crossfades into the next
 
 	// Editor layers (40 x 40, [y * 40 + x]): the painted floor plan the walls are built from, and
 	// pieces placed by hand on top of it (0 = none). Saved next to the map, ignored by the game.
@@ -156,10 +157,10 @@ const CustomMap *ActiveCustomMap();
 [[nodiscard]] bool OnMapSide(const CustomMap &map, int side, Point tile, int depth);
 /** @brief Walking onto this tile leaves the map for its outer wilds (or back to its town): where to. */
 [[nodiscard]] std::optional<MapLink> OuterEdgeLink(const CustomMap &map, Point tile);
-/** @brief Arrival given as a position ("@x,y", used between a town and its outer wilds). */
-[[nodiscard]] /** @brief Test hook (debug builds): walks the hero toward the map's outer wilds edge. */
+/** @brief Test hook (debug builds): walks the hero toward the map's outer wilds edge. */
 void DevWalkToOuterEdge(const CustomMap &map);
-std::optional<Point> ParseArrivalTile(std::string_view entry);
+/** @brief Arrival given as a position ("@x,y", used between a town and its outer wilds). */
+[[nodiscard]] std::optional<Point> ParseArrivalTile(std::string_view entry);
 
 /** @brief Weather the current level's hand-made map asks for (a DungeonMoodName), empty for the usual changing weather. */
 [[nodiscard]] std::string CurrentMapWeather();
@@ -186,10 +187,21 @@ void SetMapChest(CustomMap &map, Point tile, bool chest);
 
 /** @brief The campaign's folder of songs (ends with a separator); empty for Diablo: Original. */
 [[nodiscard]] std::string CampaignMusicDirectory();
-/** @brief Songs (.ogg, .wav) in the open campaign's music folder, by name. */
+/** @brief Songs (.ogg, .mp3, .wav) in the open campaign's music folder, by name. */
 [[nodiscard]] std::vector<std::string> ListCampaignMusic();
-/** @brief Full path of the song the level being played uses, or empty for its usual music. */
-[[nodiscard]] std::string CurrentLevelMusicFile();
+/** @brief Whether a file name is a song the game plays (.ogg, .mp3 or .wav). */
+[[nodiscard]] bool IsSongFile(std::string_view name);
+/**
+ * @brief Copies a song from anywhere (the player's computer) into the campaign's music folder.
+ * @return The song's name there (the same file again is not copied twice).
+ */
+[[nodiscard]] std::expected<std::string, std::string> ImportCampaignSong(const std::string &sourcePath);
+/** @brief Full path of an uploaded song. */
+[[nodiscard]] std::string CampaignSongPath(std::string_view song);
+/** @brief Full paths of the songs a map plays (those that exist). */
+[[nodiscard]] std::vector<std::string> MapMusicFiles(const CustomMap &map);
+/** @brief Plays the music of the level being played: its map's songs, or `track` (the style's usual music). */
+void PlayCurrentLevelMusic(uint8_t track);
 
 /** @brief Each game tick: the hero stepping onto a portal or door travels. */
 void UpdateCustomMapPortals();

@@ -95,6 +95,7 @@ set(libdevilutionx_SRCS
   custom_maps/custom_town.cpp
   custom_maps/map_monsters.cpp
   custom_maps/map_editor.cpp
+  custom_maps/file_dialog.cpp
   custom_maps/menu_console.cpp
   engine/render/gore_fx.cpp
   engine/render/spell_fx.cpp
@@ -1168,6 +1169,10 @@ file(GENERATE OUTPUT ${CONFIG_PATH} CONTENT
 if(DISCORD_INTEGRATION)
   target_compile_definitions(libdevilutionx PRIVATE DISCORD)
   target_link_libraries(libdevilutionx PRIVATE discord discord_game_sdk)
+endif()
+
+if(WIN32 AND NOT MSVC)
+  target_link_libraries(libdevilutionx PRIVATE comdlg32)
 endif()
 
 if(SCREEN_READER_INTEGRATION)

@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "engine/ambience_synth.hpp"
 #include "levels/gendung.h"
@@ -81,6 +82,18 @@ void music_start(_music_id nTrack);
  * @param file A song file (campaign music, .ogg or .wav) to play instead of the track, or empty.
  */
 void music_crossfade_to(_music_id nTrack, std::string_view file = {});
+/**
+ * @brief Plays songs in turn, each crossfading into the next over `crossfadeMs` (the last back into
+ * the first); one song loops; none: the track. The same playlist again carries on where it is.
+ * @param startAt Start (or jump) to this song.
+ */
+void music_crossfade_to(_music_id nTrack, const std::vector<std::string> &playlist, int crossfadeMs, std::optional<size_t> startAt = std::nullopt);
+/** @brief Each frame: moves a playlist on to its next song. */
+void music_update();
+/** @brief Index of the playlist song playing now. */
+[[nodiscard]] size_t music_playlist_position();
+/** @brief Whether a song file can be played (else why not). */
+[[nodiscard]] bool music_file_plays(const std::string &path, std::string &error);
 void sound_disable_music(bool disable);
 int sound_get_or_set_music_volume(int volume);
 int sound_get_or_set_sound_volume(int volume);

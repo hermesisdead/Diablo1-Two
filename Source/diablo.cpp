@@ -1204,6 +1204,7 @@ void RunGameLoop(interface_mode uMsg)
 			demo::RecordGameLoopResult(runGameLoop);
 
 		discord_manager::UpdateGame();
+		music_update();
 
 		if (!runGameLoop) {
 			if (processInput)
@@ -3463,7 +3464,7 @@ void LoadGameLevelStartMusic(_music_id neededTrack)
 {
 	// GetLevelMusic was asked before the level loaded; ask again now the level type is final.
 	neededTrack = GetLevelMusic(leveltype);
-	music_crossfade_to(neededTrack, CurrentLevelMusicFile());
+	PlayCurrentLevelMusic(neededTrack);
 
 	if (MinimizePaused) {
 		music_mute();

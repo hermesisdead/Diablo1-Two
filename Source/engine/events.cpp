@@ -1,6 +1,8 @@
 #include "engine/events.hpp"
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 #ifdef USE_SDL3
 #include <SDL3/SDL_error.h>
@@ -44,6 +46,9 @@ namespace devilution {
 
 namespace {
 
+/** Files dragged onto the game window, waiting to be taken. */
+std::vector<std::string> DroppedFiles;
+
 bool FalseAvail(const char *name, int value)
 {
 	LogVerbose("Unhandled SDL event: {} {}", name, value);
@@ -66,6 +71,22 @@ bool FetchMessage_Real(SDL_Event *event, uint16_t *modState)
 	HandleTouchEvent(&e, MousePosition);
 #elif !defined(USE_SDL1)
 	HandleTouchEvent(e);
+#endif
+
+#ifdef USE_SDL3
+	if (e.type == SDL_EVENT_DROP_FILE) {
+		if (e.drop.data != nullptr)
+			DroppedFiles.emplace_back(e.drop.data);
+		return true;
+	}
+#elif !defined(USE_SDL1)
+	if (e.type == SDL_DROPFILE) {
+		if (e.drop.file != nullptr) {
+			DroppedFiles.emplace_back(e.drop.file);
+			SDL_free(e.drop.file);
+		}
+		return true;
+	}
 #endif
 
 	if (e.type == SDL_EVENT_QUIT || IsCustomEvent(e.type)) {
@@ -191,6 +212,13 @@ bool FetchMessage_Real(SDL_Event *event, uint16_t *modState)
 } // namespace
 
 EventHandler CurrentEventHandler;
+
+std::vector<std::string> TakeDroppedFiles()
+{
+	std::vector<std::string> files;
+	files.swap(DroppedFiles);
+	return files;
+}
 
 EventHandler SetEventHandler(EventHandler eventHandler)
 {

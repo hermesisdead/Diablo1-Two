@@ -25,6 +25,8 @@
 
 namespace devilution {
 
+struct CustomMap;
+
 /** @brief A map editor session was asked for from the main menu (open or create `name`). */
 void QueueMapEditor(std::string_view name, dungeon_type style, bool startTesting);
 /** @brief The main menu should start the queued map editor session. */
@@ -40,6 +42,8 @@ void StartQueuedMapEditor();
 [[nodiscard]] bool MapEditorRunning();
 /** @brief A message on the editor's status line. */
 void MapEditorNotice(std::string text);
+/** @brief The map being edited or play-tested, for its music (nullptr when not in the editor). */
+[[nodiscard]] const CustomMap *EditorMusicMap();
 /** @brief The weather chosen for the map being edited or play-tested (empty: changing), nullopt when not in the editor. */
 [[nodiscard]] std::optional<std::string> EditorMapWeather();
 

@@ -59,6 +59,13 @@ SoundSample music;
 SoundSample musicFadingOut;
 /** File the current song was loaded from when it is not one of the game's tracks (campaign music). */
 std::string musicFile;
+/** Songs played in turn, each crossfading into the next (the last back into the first). */
+std::vector<std::string> musicPlaylist;
+size_t musicPlaylistIndex = 0;
+int musicPlaylistFadeMs = 0;
+/** When the current song started (SDL ticks) and how long it is (ms, 0: unknown). */
+uint64_t musicSongStarted = 0;
+int musicSongLength = 0;
 
 constexpr int MusicCrossfadeMs = 1800;
 
@@ -343,13 +350,26 @@ void music_stop()
 	music.Release();
 	musicFadingOut.Release();
 	musicFile.clear();
+	musicPlaylist.clear();
+	musicPlaylistIndex = 0;
 	sgnMusicTrack = NUM_MUSIC;
+}
+
+bool music_file_plays(const std::string &path, std::string &error)
+{
+	SoundSample probe;
+	if (std::expected<void, std::string> loaded = LoadAudioFile(path.c_str(), /*stream=*/true, probe); !loaded.has_value()) {
+		error = loaded.error();
+		return false;
+	}
+	probe.Release();
+	return true;
 }
 
 namespace {
 
 /** Loads and starts a song (a game track, or a file when `file` is set), looping, fading in over `fadeMs`. */
-bool StartSong(_music_id nTrack, const std::string &file, int fadeMs)
+bool StartSong(_music_id nTrack, const std::string &file, int fadeMs, int numIterations = 0)
 {
 	const char *trackPath;
 	if (!file.empty())
@@ -372,12 +392,31 @@ bool StartSong(_music_id nTrack, const std::string &file, int fadeMs)
 	}
 
 	music.SetVolume(*GetOptions().Audio.musicVolume, VOLUME_MIN, VOLUME_MAX);
-	if (!music.Play(/*numIterations=*/0, fadeMs)) {
+	if (!music.Play(numIterations, fadeMs)) {
 		LogError(LogCategory::Audio, "Aulib::Stream::play (from music_start): {}", SDL_GetError());
 		music.Release();
 		return false;
 	}
+	musicSongStarted = static_cast<uint64_t>(SDL_GetTicks());
+	musicSongLength = music.GetLength();
 	return true;
+}
+
+/** A playlist song: looped when it is the only one; otherwise once if its length is unknown (the next starts when it ends). */
+bool StartPlaylistSong(_music_id nTrack, int fadeMs)
+{
+	const bool several = musicPlaylist.size() > 1;
+	musicFile = musicPlaylist[musicPlaylistIndex];
+	LogVerbose(LogCategory::Audio, "Music: song {} of {}: {}", musicPlaylistIndex + 1, musicPlaylist.size(), musicFile);
+	if (StartSong(nTrack, musicFile, fadeMs, 0)) {
+		if (several && musicSongLength <= 0) {
+			// Unknown length: play it once and move on when it stops.
+			music.Release();
+			return StartSong(nTrack, musicFile, fadeMs, 1);
+		}
+		return true;
+	}
+	return false;
 }
 
 } // namespace
@@ -394,9 +433,24 @@ void music_start(_music_id nTrack)
 
 void music_crossfade_to(_music_id nTrack, std::string_view file)
 {
+	std::vector<std::string> playlist;
+	if (!file.empty())
+		playlist.emplace_back(file);
+	music_crossfade_to(nTrack, playlist, MusicCrossfadeMs);
+}
+
+void music_crossfade_to(_music_id nTrack, const std::vector<std::string> &playlist, int crossfadeMs, std::optional<size_t> startAt)
+{
 	assert(nTrack < NUM_MUSIC);
-	if (nTrack == sgnMusicTrack && file == musicFile && (music.IsLoaded() || !gbMusicOn))
-		return; // already playing
+	const bool samePlaylist = nTrack == sgnMusicTrack && playlist == musicPlaylist;
+	musicPlaylistFadeMs = std::clamp(crossfadeMs, 0, 30000);
+	if (samePlaylist && !startAt && (music.IsLoaded() || !gbMusicOn))
+		return; // already playing (the playlist carries on where it is)
+	if (samePlaylist && startAt && *startAt == musicPlaylistIndex && music.IsLoaded())
+		return;
+	musicPlaylist = playlist;
+	musicPlaylistIndex = startAt && *startAt < playlist.size() ? *startAt : 0;
+	const std::string file = playlist.empty() ? std::string {} : playlist[musicPlaylistIndex];
 	// The song playing now fades out while the new one fades in.
 	musicFadingOut.Release();
 	if (music.IsLoaded()) {
@@ -405,29 +459,77 @@ void music_crossfade_to(_music_id nTrack, std::string_view file)
 	}
 	const int fadeIn = musicFadingOut.IsLoaded() ? MusicCrossfadeMs : MusicCrossfadeMs / 2;
 	sgnMusicTrack = nTrack;
-	musicFile = std::string(file);
+	musicFile = file;
 	if (!gbMusicOn)
 		return;
-	if (!StartSong(nTrack, musicFile, fadeIn) && !musicFile.empty()) {
-		// A campaign song that does not load: the level's usual music instead.
-		musicFile.clear();
+	if (musicPlaylist.empty()) {
 		StartSong(nTrack, {}, fadeIn);
+		return;
 	}
+	for (size_t tries = 0; tries < musicPlaylist.size(); tries++) {
+		if (StartPlaylistSong(nTrack, fadeIn))
+			return;
+		musicPlaylistIndex = (musicPlaylistIndex + 1) % musicPlaylist.size();
+	}
+	// No song of the playlist loads: the level's usual music instead.
+	musicFile.clear();
+	musicPlaylist.clear();
+	StartSong(nTrack, {}, fadeIn);
+}
+
+void music_update()
+{
+	if (!gbMusicOn || musicPlaylist.size() < 2 || sgnMusicTrack == NUM_MUSIC)
+		return;
+	const uint64_t now = static_cast<uint64_t>(SDL_GetTicks());
+	bool next;
+	int fade = musicPlaylistFadeMs;
+	if (!music.IsLoaded()) {
+		next = true;
+	} else if (musicSongLength > 0) {
+		fade = std::min(fade, musicSongLength / 3);
+		next = now - musicSongStarted + static_cast<uint64_t>(fade) >= static_cast<uint64_t>(musicSongLength);
+	} else {
+		next = !music.IsPlaying();
+	}
+	if (!next)
+		return;
+	// Crossfade into the next song of the playlist.
+	musicFadingOut.Release();
+	if (music.IsLoaded()) {
+		music.Stop(fade);
+		musicFadingOut = std::move(music);
+	}
+	for (size_t tries = 0; tries < musicPlaylist.size(); tries++) {
+		musicPlaylistIndex = (musicPlaylistIndex + 1) % musicPlaylist.size();
+		if (StartPlaylistSong(sgnMusicTrack, std::max(fade, 1)))
+			return;
+	}
+	musicPlaylist.clear(); // nothing loads any more
+}
+
+size_t music_playlist_position()
+{
+	return musicPlaylistIndex;
 }
 
 void sound_disable_music(bool disable)
 {
 	if (disable) {
 		const _music_id track = sgnMusicTrack;
-		const std::string file = musicFile;
+		const std::vector<std::string> playlist = musicPlaylist;
+		const size_t at = musicPlaylistIndex;
 		music_stop();
 		sgnMusicTrack = track; // remembered for when music is turned back on
-		musicFile = file;
+		musicPlaylist = playlist;
+		musicPlaylistIndex = at;
 	} else if (sgnMusicTrack != NUM_MUSIC) {
 		const _music_id track = sgnMusicTrack;
-		const std::string file = musicFile;
+		const std::vector<std::string> playlist = musicPlaylist;
+		const size_t at = musicPlaylistIndex;
 		sgnMusicTrack = NUM_MUSIC;
-		music_crossfade_to(track, file);
+		musicPlaylist.clear();
+		music_crossfade_to(track, playlist, musicPlaylistFadeMs, at);
 	}
 }
 

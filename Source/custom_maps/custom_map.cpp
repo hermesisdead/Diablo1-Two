@@ -30,6 +30,7 @@
 #include "missiles.h"
 #include "msg.h"
 #include "objects.h"
+#include "engine/sound.h"
 #include "player.h"
 #include "utils/endian_read.hpp"
 #include "utils/file_util.h"
@@ -151,7 +152,9 @@ std::string BuildMeta(const CustomMap &map)
 	out += StrCat("name=", map.name, "\n");
 	out += StrCat("style=", MapStyleName(map.style), "\n");
 	out += StrCat("weather=", map.weather, "\n");
-	out += StrCat("music=", map.music, "\n");
+	for (const std::string &song : map.music)
+		out += StrCat("music=", song, "\n");
+	out += StrCat("musicfade=", map.musicFade, "\n");
 	for (const MapEntryPoint &e : map.entries)
 		out += StrCat("entry=", e.name, ",", e.tile.x, ",", e.tile.y, "\n");
 	for (const MapPortal &p : map.portals)
@@ -190,7 +193,10 @@ void ParseMeta(std::string_view text, CustomMap &map)
 		} else if (key == "weather") {
 			map.weather = std::string(value);
 		} else if (key == "music") {
-			map.music = std::string(value);
+			if (!value.empty())
+				map.music.emplace_back(value);
+		} else if (key == "musicfade") {
+			map.musicFade = std::clamp(ToInt(value), 0, 20);
 		} else if (key == "entry" && f.size() >= 3) {
 			map.entries.push_back({ std::string(f[0]), { ToInt(f[1]), ToInt(f[2]) } });
 		} else if (key == "portal" && f.size() >= 7) {
@@ -748,7 +754,92 @@ void SetMapChest(CustomMap &map, Point tile, bool chest)
 std::string CampaignMusicDirectory()
 {
 	const std::string campaign = ActiveCampaignDirectory();
-	return campaign.empty() ? std::string {} : StrCat(campaign, "music" DIRECTORY_SEPARATOR_STR);
+	if (campaign.empty()) // Diablo: Original's maps
+		return StrCat(paths::BasePath(), "mods" DIRECTORY_SEPARATOR_STR "custommaps" DIRECTORY_SEPARATOR_STR "music" DIRECTORY_SEPARATOR_STR);
+	return StrCat(campaign, "music" DIRECTORY_SEPARATOR_STR);
+}
+
+bool IsSongFile(std::string_view name)
+{
+	std::string lower(name);
+	std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return lower.size() > 4 && (lower.ends_with(".ogg") || lower.ends_with(".wav") || lower.ends_with(".mp3"));
+}
+
+std::expected<std::string, std::string> ImportCampaignSong(const std::string &sourcePath)
+{
+	// The file's own name, kept to letters, digits, spaces and a few marks.
+	const size_t slash = sourcePath.find_last_of("/\\");
+	const std::string file = slash == std::string::npos ? sourcePath : sourcePath.substr(slash + 1);
+	if (!IsSongFile(file))
+		return std::unexpected(StrCat(file, " is not a song the game can play (use .ogg, .mp3 or .wav)."));
+	const size_t dot = file.find_last_of('.');
+	std::string stem;
+	for (const char c : file.substr(0, dot)) {
+		const unsigned char u = static_cast<unsigned char>(c);
+		if (std::isalnum(u) != 0 || c == ' ' || c == '-' || c == '_' || c == '(' || c == ')')
+			stem.push_back(c);
+		else if (u < 0x80 && !stem.empty() && stem.back() != '_')
+			stem.push_back('_');
+	}
+	while (!stem.empty() && (stem.back() == ' ' || stem.back() == '_'))
+		stem.pop_back();
+	if (stem.size() > 48)
+		stem.resize(48);
+	if (stem.empty())
+		stem = "song";
+	std::string ext = file.substr(dot);
+	std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+	const std::expected<std::string, std::string> data = ReadWholeFile(sourcePath);
+	if (!data || data->empty())
+		return std::unexpected(StrCat("Cannot read ", sourcePath));
+	const std::string dir = CampaignMusicDirectory();
+	RecursivelyCreateDir(dir.c_str());
+	std::string name;
+	for (int n = 1; n < 1000; n++) {
+		name = n == 1 ? StrCat(stem, ext) : StrCat(stem, " (", n, ")", ext);
+		const std::string path = dir + name;
+		if (!FileExists(path.c_str()))
+			break;
+		if (const std::expected<std::string, std::string> there = ReadWholeFile(path); there && *there == *data)
+			return name; // already uploaded
+	}
+	const std::string path = dir + name;
+	FILE *f = OpenFile(path.c_str(), "wb");
+	if (f == nullptr)
+		return std::unexpected(StrCat("Cannot write ", path));
+	const bool ok = std::fwrite(data->data(), 1, data->size(), f) == data->size();
+	std::fclose(f);
+	if (!ok) {
+		RemoveFile(path.c_str());
+		return std::unexpected(StrCat("Cannot write ", path));
+	}
+	std::string why;
+	if (!music_file_plays(path, why)) {
+		RemoveFile(path.c_str());
+		return std::unexpected(StrCat(file, " does not play: ", why.substr(0, why.find('\n'))));
+	}
+	return name;
+}
+
+std::string CampaignSongPath(std::string_view song)
+{
+	return AbsolutePath(StrCat(CampaignMusicDirectory(), song));
+}
+
+std::vector<std::string> MapMusicFiles(const CustomMap &map)
+{
+	std::vector<std::string> files;
+	const std::string dir = CampaignMusicDirectory();
+	for (const std::string &song : map.music) {
+		if (song.empty() || song.find_first_of("/\\") != std::string::npos)
+			continue;
+		const std::string path = dir + song;
+		if (FileExists(path.c_str()))
+			files.push_back(AbsolutePath(path));
+	}
+	return files;
 }
 
 std::vector<std::string> ListCampaignMusic()
@@ -760,24 +851,27 @@ std::vector<std::string> ListCampaignMusic()
 	for (std::string &name : ListFiles(dir.c_str())) {
 		std::string lower = name;
 		std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-		if (lower.ends_with(".ogg") || lower.ends_with(".wav"))
+		if (IsSongFile(lower))
 			songs.push_back(std::move(name));
 	}
 	std::sort(songs.begin(), songs.end());
 	return songs;
 }
 
-std::string CurrentLevelMusicFile()
+void PlayCurrentLevelMusic(uint8_t track)
 {
 	const CustomMap *map = nullptr;
-	if (setlevel && setlvlnum == SL_CUSTOM)
+	if (const CustomMap *edited = EditorMusicMap(); edited != nullptr)
+		map = edited; // the map editor's map, with its latest songs
+	else if (setlevel && setlvlnum == SL_CUSTOM)
 		map = ActiveCustomMap();
 	else if (!setlevel && currlevel == 0 && InCustomTown())
 		map = CurrentCustomTownMap();
-	if (map == nullptr || map->music.empty() || map->music.find_first_of("/\\") != std::string::npos)
-		return {};
-	const std::string path = CampaignMusicDirectory() + map->music;
-	return FileExists(path.c_str()) ? AbsolutePath(path) : std::string {};
+	if (map == nullptr) {
+		music_crossfade_to(static_cast<_music_id>(track));
+		return;
+	}
+	music_crossfade_to(static_cast<_music_id>(track), MapMusicFiles(*map), map->musicFade * 1000);
 }
 
 void UpdateCustomMapPortals()

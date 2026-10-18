@@ -52,7 +52,7 @@ struct MapRow {
 	dungeon_type style;
 	std::string info;
 	bool town;
-	std::string music;
+	size_t songs;
 };
 
 /** A clickable area drawn this frame (immediate mode: rebuilt every frame). */
@@ -173,60 +173,9 @@ void RefreshMaps()
 			info = StrCat(map->spawners.size(), " packs, ", map->bosses.size(), " bosses");
 		else if (map->style == DTYPE_TOWN)
 			info = StrCat(map->npcs.size(), " townspeople");
-		Maps.push_back({ name, map->style, std::move(info), map->style == DTYPE_TOWN && !map->entries.empty(), map->music });
+		Maps.push_back({ name, map->style, std::move(info), map->style == DTYPE_TOWN && !map->entries.empty(), map->music.size() });
 	}
 	MapScroll = std::clamp(MapScroll, 0, std::max(0, static_cast<int>(Maps.size()) - RowsShown));
-}
-
-/** The song being previewed in the menu, and the menu's own track to go back to. */
-bool Previewing = false;
-_music_id PreviewReturnTrack = TMUSIC_INTRO;
-
-void PreviewSong(const std::string &song)
-{
-	if (!Previewing) {
-		PreviewReturnTrack = sgnMusicTrack < NUM_MUSIC ? sgnMusicTrack : TMUSIC_INTRO;
-		Previewing = true;
-	}
-	const std::string path = song.empty() ? std::string {} : CampaignMusicDirectory() + song;
-	music_crossfade_to(PreviewReturnTrack, path);
-}
-
-void EndPreview()
-{
-	if (!Previewing)
-		return;
-	Previewing = false;
-	music_crossfade_to(PreviewReturnTrack);
-}
-
-/** Next (or previous) song for a map: its style's usual music, then each song in the campaign. */
-void CycleMapMusic(const std::string &mapName, bool back)
-{
-	std::expected<CustomMap, std::string> map = ReadCustomMap(mapName);
-	if (!map.has_value())
-		return;
-	std::vector<std::string> choices { "" };
-	for (std::string &song : ListCampaignMusic())
-		choices.push_back(std::move(song));
-	if (choices.size() == 1) {
-		Notice = StrCat("No songs yet: put .ogg or .wav files in ", CampaignMusicDirectory());
-		return;
-	}
-	auto it = std::find(choices.begin(), choices.end(), map->music);
-	int i = it == choices.end() ? 0 : static_cast<int>(it - choices.begin());
-	i = (i + (back ? -1 : 1) + static_cast<int>(choices.size())) % static_cast<int>(choices.size());
-	map->music = choices[i];
-	if (std::expected<void, std::string> r = WriteCustomMap(*map); !r.has_value()) {
-		Notice = r.error();
-		return;
-	}
-	for (MapRow &row : Maps) {
-		if (row.name == mapName)
-			row.music = map->music;
-	}
-	PreviewSong(map->music);
-	Notice = map->music.empty() ? StrCat(mapName, ": its usual music.") : StrCat(mapName, ": ", map->music, " (loops; playing it now)");
 }
 
 void SaveEditing()
@@ -255,7 +204,6 @@ void UseTownPalette(bool on);
 void LaunchEditor(std::string_view map, dungeon_type style, bool play)
 {
 	UseTownPalette(false);
-	Previewing = false; // the game starts its own music
 	StopTyping(true);
 	QueueMapEditor(map, style, play);
 	WantsEditor = true;
@@ -407,7 +355,7 @@ void DrawCampaignsScreen(const Surface &out, Point o)
 		Current = Screen::NewCampaign;
 		StartTyping(NewTitle, 32, false, [] { CreateCampaign(); });
 	});
-	Button(out, { o + Displacement { 400, 400 }, { 200, 28 } }, "Close  (`)", [](bool) { StopTyping(true); EndPreview(); Open = false; UseTownPalette(false); });
+	Button(out, { o + Displacement { 400, 400 }, { 200, 28 } }, "Close  (`)", [](bool) { StopTyping(true); Open = false; UseTownPalette(false); });
 }
 
 void CreateCampaign()
@@ -490,14 +438,14 @@ void DrawCampaignScreen(const Surface &out, Point o)
 		Text(out, StyleLabel(m.style), o + Displacement { 190, y + 5 }, 70, UiFlags::ColorUiGold);
 		const std::string name = m.name;
 		const dungeon_type style = m.style;
-		Button(out, { o + Displacement { 266, y }, { 174, 22 } }, m.music.empty() ? std::string("Music: usual") : StrCat("Music: ", m.music), [name](bool right) { CycleMapMusic(name, right); });
+		Text(out, m.songs == 0 ? std::string("Music: usual") : StrCat("Music: ", m.songs, m.songs == 1 ? " song" : " songs"), o + Displacement { 272, y + 5 }, 168, UiFlags::ColorUiSilver);
 		Button(out, { o + Displacement { 446, y }, { 74, 22 } }, "Edit", [name, style](bool) { LaunchEditor(name, style, false); });
 		Button(out, { o + Displacement { 526, y }, { 74, 22 } }, "Play", [name, style](bool) { LaunchEditor(name, style, true); });
 	}
 	if (static_cast<int>(Maps.size()) > RowsShown)
 		Text(out, "(mouse wheel: more maps)", o + Displacement { 40, 170 + RowsShown * 24 }, 300, UiFlags::ColorUiSilverDark);
 	if (!Maps.empty() && Notice.empty())
-		Text(out, StrCat("Songs (.ogg or .wav, looped): campaigns/", c.id, "/music"), o + Displacement { 40, 378 }, 560, UiFlags::ColorUiSilverDark);
+		Text(out, "Music: open a map in the editor and use its Music button.", o + Displacement { 40, 378 }, 560, UiFlags::ColorUiSilverDark);
 
 	Button(out, { o + Displacement { 40, 400 }, { 100, 28 } }, "New Map", [](bool) {
 		NewMapName.clear();
@@ -510,7 +458,6 @@ void DrawCampaignScreen(const Surface &out, Point o)
 	Button(out, { o + Displacement { 338, 400 }, { 150, 28 } }, "Portals in Tristram", [](bool) { LaunchEditor(TristramLayerName, DTYPE_TOWN, false); });
 	Button(out, { o + Displacement { 494, 400 }, { 106, 28 } }, "Back", [](bool) {
 		StopTyping(true);
-		EndPreview();
 		RefreshCampaigns();
 		Current = Screen::Campaigns;
 	});
@@ -1022,7 +969,6 @@ bool MenuConsoleHandleEvent(SDL_Event &event)
 		StopTyping(true);
 		Open = !Open;
 		if (!Open) {
-			EndPreview();
 			UseTownPalette(false);
 		}
 		if (Open) {
@@ -1106,7 +1052,6 @@ bool MenuConsoleHandleEvent(SDL_Event &event)
 			break;
 		case Screen::NewCampaign: Current = Screen::Campaigns; break;
 		case Screen::Campaign:
-			EndPreview();
 			RefreshCampaigns();
 			Current = Screen::Campaigns;
 			break;
