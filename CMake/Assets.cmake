@@ -228,6 +228,10 @@ set(devilutionx_assets
   towners/desert/packbags.cel
   towners/desert/priest.trn
   towners/desert/smith.trn
+  animals/chicken.anm
+  animals/goat.anm
+  animals/pig.anm
+  animals/sheep.anm
   ui_art/diablo.pal
   ui_art/creditsw.clx
   ui_art/dvl_but_sml.clx

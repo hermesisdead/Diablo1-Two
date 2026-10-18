@@ -4,7 +4,10 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <expected>
+#include <memory>
 #include <optional>
+#include <string>
 
 #include "custom_maps/custom_town.hpp"
 #include "custom_maps/map_editor.hpp"
@@ -13,11 +16,13 @@
 #include "engine/direction.hpp"
 #include "engine/light_tables.hpp"
 #include "engine/load_cel.hpp"
+#include "engine/load_file.hpp"
 #include "engine/palette.h"
 #include "engine/render/clx_render.hpp"
 #include "levels/dun_tile.hpp"
 #include "levels/gendung.h"
 #include "levels/tile_properties.hpp"
+#include "utils/str_cat.hpp"
 
 namespace devilution {
 
@@ -32,6 +37,7 @@ struct Kind {
 	float speed;       // tiles per second
 	int range;         // how far from home it strolls
 	float grazeChance; // when it stops: graze/peck/sniff rather than stand
+	float spriteScale = 1.0f; // size of its sprite sheet frames in the game
 };
 
 constexpr std::array<Kind, 8> Kinds { {
@@ -40,7 +46,7 @@ constexpr std::array<Kind, 8> Kinds { {
 	{ "sheep", "Sheep", 1.8f, 0.6f, 5, 0.7f },
 	{ "goat", "Goat", 1.75f, 0.8f, 6, 0.5f },
 	{ "pig", "Pig", 1.7f, 0.7f, 5, 0.6f },
-	{ "chicken", "Chicken", 1.35f, 1.3f, 4, 0.65f },
+	{ "chicken", "Chicken", 1.35f, 1.3f, 4, 0.65f, 0.65f },
 	{ "dog", "Dog", 1.65f, 1.7f, 8, 0.3f },
 	{ "cat", "Cat", 1.45f, 1.1f, 6, 0.4f },
 } };
@@ -539,6 +545,112 @@ void BlitAnimal(const Surface &out, Point feet, const Canvas &canvas, bool facin
 	}
 }
 
+// --- Sprite sheets ----------------------------------------------------------------------------
+// animals/<kind>.anm: "ANM1", directions (8, in Direction order), frames (4 idle then 4 walk),
+// then per frame: offset x, offset y (int16, top-left from the feet), width, height (uint16) and
+// width * height RGB pixels, 0,0,0 being see-through. Matched to the palette as drawn.
+
+struct SpriteFrame {
+	int ox = 0, oy = 0, width = 0, height = 0;
+	std::vector<uint8_t> rgb;
+};
+
+struct SpriteSet {
+	int directions = 0;
+	int frames = 0;
+	std::vector<SpriteFrame> all; // [direction * frames + frame]
+	const SpriteFrame &Get(int direction, int frame) const { return all[static_cast<size_t>(direction) * frames + frame]; }
+};
+
+const SpriteSet *AnimalSprites(int kind)
+{
+	static std::array<std::optional<SpriteSet>, Kinds.size()> sets;
+	static std::array<bool, Kinds.size()> tried {};
+	if (tried[kind])
+		return sets[kind] ? &*sets[kind] : nullptr;
+	tried[kind] = true;
+	size_t size = 0;
+	const std::string path = StrCat("animals\\", Kinds[kind].key, ".anm");
+	std::expected<std::unique_ptr<std::byte[]>, std::string> file = LoadFileInMemWithStatus<std::byte>(path.c_str(), &size);
+	if (!file.has_value() || size < 6)
+		return nullptr; // no sprites for this one: it is drawn instead
+	const auto *d = reinterpret_cast<const uint8_t *>(file->get());
+	if (std::memcmp(d, "ANM1", 4) != 0)
+		return nullptr;
+	SpriteSet set;
+	set.directions = d[4];
+	set.frames = d[5];
+	size_t at = 6;
+	auto i16 = [&](size_t p) { return static_cast<int16_t>(d[p] | (d[p + 1] << 8)); };
+	for (int i = 0; i < set.directions * set.frames; i++) {
+		if (at + 8 > size)
+			return nullptr;
+		SpriteFrame f;
+		f.ox = i16(at);
+		f.oy = i16(at + 2);
+		f.width = static_cast<uint16_t>(i16(at + 4));
+		f.height = static_cast<uint16_t>(i16(at + 6));
+		at += 8;
+		const size_t bytes = static_cast<size_t>(f.width) * f.height * 3;
+		if (at + bytes > size)
+			return nullptr;
+		f.rgb.assign(d + at, d + at + bytes);
+		at += bytes;
+		set.all.push_back(std::move(f));
+	}
+	if (set.directions != 8 || set.frames < 1)
+		return nullptr;
+	sets[kind] = std::move(set);
+	return &*sets[kind];
+}
+
+/** Draws a sprite frame, feet at `feet`, scaled, lit by a tile's light, over a soft shadow. */
+void BlitSprite(const Surface &out, Point feet, const SpriteFrame &f, float scale, int lightLevel)
+{
+	RefreshNearest();
+	lightLevel = std::clamp(lightLevel, 0, static_cast<int>(LightTables.size()) - 1);
+	const int width = std::max(1, static_cast<int>(static_cast<float>(f.width) * scale + 0.5f));
+	const int height = std::max(1, static_cast<int>(static_cast<float>(f.height) * scale + 0.5f));
+	const int left = static_cast<int>(static_cast<float>(f.ox) * scale), top = static_cast<int>(static_cast<float>(f.oy) * scale);
+	const float rx = static_cast<float>(width) * 0.42f, ry = rx * 0.32f;
+	const Point c = feet + Displacement { left + width / 2 + 2, 0 };
+	for (int y = static_cast<int>(-ry); y <= static_cast<int>(ry); y++) {
+		for (int x = static_cast<int>(-rx); x <= static_cast<int>(rx); x++) {
+			const float dd = (x * x) / (rx * rx) + (y * y) / (ry * ry);
+			const Point p = c + Displacement { x, y };
+			if (dd <= 1.0f && out.InBounds(p) && (dd < 0.6f || Grain(p.x, p.y) > (dd - 0.6f) * 5.0f - 1.0f)) {
+				const SDL_Color &g = logical_palette[*out.at(p.x, p.y)];
+				*out.at(p.x, p.y) = NearestIndex({ g.r * 0.45f, g.g * 0.45f, g.b * 0.45f });
+			}
+		}
+	}
+	const uint8_t *tbl = LightTables[lightLevel].data();
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			// Average the source pixels this one covers; mostly see-through stays see-through.
+			const int sx0 = static_cast<int>(static_cast<float>(x) / scale), sy0 = static_cast<int>(static_cast<float>(y) / scale);
+			const int sx1 = std::min(f.width, std::max(sx0 + 1, static_cast<int>(static_cast<float>(x + 1) / scale)));
+			const int sy1 = std::min(f.height, std::max(sy0 + 1, static_cast<int>(static_cast<float>(y + 1) / scale)));
+			int r = 0, g = 0, b = 0, solid = 0, total = 0;
+			for (int sy = sy0; sy < sy1; sy++) {
+				for (int sx = sx0; sx < sx1; sx++) {
+					const uint8_t *px = &f.rgb[(static_cast<size_t>(sy) * f.width + sx) * 3];
+					total++;
+					if (px[0] == 0 && px[1] == 0 && px[2] == 0)
+						continue;
+					r += px[0], g += px[1], b += px[2];
+					solid++;
+				}
+			}
+			if (solid == 0 || solid * 2 < total)
+				continue;
+			const Point p = feet + Displacement { left + x, top + y };
+			if (out.InBounds(p))
+				*out.at(p.x, p.y) = tbl[NearestIndex({ static_cast<float>(r) / solid, static_cast<float>(g) / solid, static_cast<float>(b) / solid })];
+		}
+	}
+}
+
 OptionalOwnedClxSpriteSheet CowSheet;
 
 std::optional<ClxSpriteList> CowSprites(Direction dir)
@@ -695,6 +807,8 @@ void UpdateAnimal(Animal &a, int self, float dt)
 	case State::Stand:
 	case State::Graze:
 		a.timer -= dt;
+		if (a.timer > 1.5f && a.Random01() < dt * 0.15f)
+			a.facing = static_cast<Direction>((static_cast<int>(a.facing) + (a.Random01() < 0.5f ? 1 : 7)) % 8); // looks about
 		if (a.timer <= 0) {
 			if (a.Random01() < 0.65f)
 				PickGoal(a);
@@ -758,6 +872,15 @@ void DrawOne(const Surface &out, const Animal &a, Point feet, int lightTableInde
 		}
 		return;
 	}
+	if (const SpriteSet *sprites = AnimalSprites(a.kind); sprites != nullptr) {
+		// Sprite sheets: idle frames first, then walk frames (half each when there are 8).
+		const int idleFrames = std::max(1, sprites->frames / 2), walkFrames = std::max(1, sprites->frames - idleFrames);
+		const bool walking = a.state == State::Walk && a.next != a.tile;
+		const int frame = walking ? idleFrames + static_cast<int>(a.animTime * 9.0f * std::max(0.6f, Kinds[a.kind].speed)) % walkFrames
+		                          : static_cast<int>(a.animTime * 3.0f) % idleFrames;
+		BlitSprite(out, feet, sprites->Get(static_cast<int>(a.facing) % sprites->directions, frame), Kinds[a.kind].spriteScale, lightTableIndex);
+		return;
+	}
 	BlitAnimal(out, feet, AnimalCanvas(a.kind, CurrentPose(a)), a.facingRight, lightTableIndex);
 }
 
@@ -796,7 +919,7 @@ void SetLevelAnimals(const std::vector<MapAnimal> &animals)
 		seed = seed * 747796405u + 2891336453u;
 		a.rng = seed ^ static_cast<uint32_t>(placed.tile.x) * 73856093u ^ static_cast<uint32_t>(placed.tile.y) * 19349663u;
 		a.facingRight = a.Random01() < 0.5f;
-		a.facing = a.facingRight ? Direction::SouthEast : Direction::SouthWest;
+		a.facing = static_cast<Direction>(a.RandomBetween(0, 7));
 		a.animTime = a.Random01() * 4.0f;
 		StopFor(a, a.Random01() * 4.0f);
 		Animals.push_back(a);
