@@ -1036,14 +1036,25 @@ void DrawTilePicker(const Surface &out)
 		const int x = startX + col * (tileSize + 4) + S.pickerPan.x;
 		const int y = startY + row * (tileSize + 4) + S.pickerPan.y;
 
-		// Draw tile rect
-		if (tile == S.pickerTile)
-			FillRect(out, x - 2, y - 2, tileSize + 4, tileSize + 4, PAL16_YELLOW + 12);
-		else
-			FillRect(out, x, y, tileSize, 1, PAL16_GRAY + 5);  // Top border
+		// Skip tiles outside the visible area
+		if (x + tileSize < panel.position.x || x > panel.position.x + panel.size.width ||
+		    y + tileSize < startY || y > startY + (PaletteVisibleRows() * PaletteRow))
+			continue;
 
-		// Draw tile number label
-		DrawString(out, StrCat(tile), { { x, y + tileSize - 8 }, { tileSize, 8 } }, { .flags = UiFlags::ColorWhite | UiFlags::AlignCenter });
+		// Draw tile preview box with a color based on tile number for visual distinction
+		const uint8_t tileColor = PAL16_GRAY + (tile % 8);  // Cycle through gray shades
+		FillRect(out, x, y, tileSize, tileSize, tileColor);
+
+		// Draw selection highlight with a gold border
+		if (tile == S.pickerTile) {
+			FillRect(out, x - 2, y - 2, tileSize + 4, 2, PAL16_YELLOW + 12);  // Top
+			FillRect(out, x - 2, y + tileSize, tileSize + 4, 2, PAL16_YELLOW + 12);  // Bottom
+			FillRect(out, x - 2, y, 2, tileSize, PAL16_YELLOW + 12);  // Left
+			FillRect(out, x + tileSize, y, 2, tileSize, PAL16_YELLOW + 12);  // Right
+		}
+
+		// Draw tile number label prominently
+		DrawString(out, StrCat(tile), { { x + 1, y + tileSize - 9 }, { tileSize - 2, 8 } }, { .flags = UiFlags::ColorWhite | UiFlags::AlignCenter });
 	}
 }
 
