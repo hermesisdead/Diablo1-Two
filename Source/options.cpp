@@ -812,6 +812,12 @@ GraphicsOptions::GraphicsOptions()
     , weatherEffects("Weather Effects", OptionEntryFlags::None, N_("Weather Effects"), N_("Shows weather and dungeon mood effects. Also in the weather panel (F8)."), true)
     , weatherIntensity("Weather Intensity", OptionEntryFlags::Invisible, "Weather Intensity", "Weather effect strength in percent (F8 weather panel).", 100)
     , coloredLighting("Coloured Lighting", OptionEntryFlags::None, N_("Coloured Lighting"), N_("Torches and candles glow warm, fire spells orange, lightning cold blue, portals blue. Needs Smooth Effects."), true)
+    , dayNightCycle("Day Night Cycle", OptionEntryFlags::None, N_("Day/Night Cycle"), N_("Tristram and the Darkwood turn from day to night and back. Lights and your hero's lantern glow at night. Also in the weather panel (F8)."), true)
+    , dayLength("Day Length", OptionEntryFlags::None, N_("Day Length"), N_("Real minutes for one full day and night."), 24, { 3, 6, 12, 24, 48, 96 })
+    , dawnHour("Dawn Hour", OptionEntryFlags::None, N_("Day Begins"), N_("Hour (24-hour clock) at which night turns to day."), 6, { 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 })
+    , duskHour("Dusk Hour", OptionEntryFlags::None, N_("Night Begins"), N_("Hour (24-hour clock) at which day turns to night."), 20, { 14, 15, 16, 17, 18, 19, 20, 21, 22, 23 })
+    , nightDarkness("Night Darkness", OptionEntryFlags::None, N_("Night Darkness"), N_("How dark the night gets, in percent."), 70, { 20, 30, 40, 50, 60, 70, 80, 90 })
+    , timeOfDay("Time Of Day", OptionEntryFlags::Invisible, "Time Of Day", "Minutes after midnight.", 9 * 60)
     , spellEffects("Spell Effects", OptionEntryFlags::None, N_("Spell Effects"), N_("Spells trail embers, sparks or motes, glow and light up their surroundings, and burst where they hit. Needs Smooth Effects."), true)
     , armorGlows("Armour Glows", OptionEntryFlags::None, N_("Armour Glows"), N_("Unique body armour, and magic armour with strong resistances, give the hero a glow in its colour. Needs Smooth Effects."), true)
     , gore("Gore", OptionEntryFlags::None, N_("Gore"), N_("Blood sprays when monsters are hit, bursts when they die and stains the floor. Monsters that drop a legendary item explode. Needs Smooth Effects."), true)
@@ -856,6 +862,12 @@ std::vector<OptionEntryBase *> GraphicsOptions::GetEntries()
 		&weatherEffects,
 		&weatherIntensity,
 		&coloredLighting,
+		&dayNightCycle,
+		&dayLength,
+		&dawnHour,
+		&duskHour,
+		&nightDarkness,
+		&timeOfDay,
 		&spellEffects,
 		&armorGlows,
 		&gore,

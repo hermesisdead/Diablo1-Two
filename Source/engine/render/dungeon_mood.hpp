@@ -73,4 +73,11 @@ void ChangeWeatherNow();
  */
 void DrawColoredLight(const Surface &out);
 
+/**
+ * @brief Day and night outdoors (see day_night.hpp): darkens and tints the scene, with pools of
+ * light around heroes, torches, fire and portals. Also moves the clock on, so call it every frame
+ * on every level, before DrawColoredLight and with the same surface.
+ */
+void DrawDayNight(const Surface &out);
+
 } // namespace devilution

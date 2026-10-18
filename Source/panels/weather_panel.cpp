@@ -9,6 +9,7 @@
 #include "engine/palette.h"
 #include "engine/rectangle.hpp"
 #include "engine/render/color_overlay.hpp"
+#include "engine/render/day_night.hpp"
 #include "engine/render/dungeon_mood.hpp"
 #include "engine/render/primitive_render.hpp"
 #include "engine/render/text_render.hpp"
@@ -25,7 +26,10 @@ bool WeatherPanelOpen = false;
 namespace {
 
 constexpr int PanelWidth = 300;
-constexpr int PanelHeight = 182;
+constexpr int PanelHeight = 338;
+/** Top of the day and night section. */
+constexpr int DayY = 168;
+constexpr int RowHeight = 20;
 constexpr int Margin = 14;
 constexpr int SliderY = 90;
 constexpr int SliderHeight = 10;
@@ -39,8 +43,30 @@ enum class Button {
 	ChangeNow,
 	Smooth,
 	ColouredLight,
+	DayNight,
+	SkipPhase,
 	Close,
 };
+
+/** The day and night settings stepped with - and + buttons. */
+enum class DayRow {
+	Dawn,
+	Dusk,
+	Darkness,
+	Length,
+	COUNT
+};
+
+OptionEntryListBase &RowOption(DayRow row)
+{
+	auto &graphics = GetOptions().Graphics;
+	switch (row) {
+	case DayRow::Dawn: return graphics.dawnHour;
+	case DayRow::Dusk: return graphics.duskHour;
+	case DayRow::Darkness: return graphics.nightDarkness;
+	default: return graphics.dayLength;
+	}
+}
 
 Point PanelOrigin()
 {
@@ -66,9 +92,51 @@ Rectangle ButtonRect(Button button)
 	case Button::ChangeNow: return { o + Displacement { Margin + half + 8, 116 }, { half, 18 } };
 	case Button::Smooth: return { o + Displacement { Margin, 140 }, { half, 18 } };
 	case Button::ColouredLight: return { o + Displacement { Margin + half + 8, 140 }, { half, 18 } };
+	case Button::DayNight: return { o + Displacement { Margin, DayY + 36 + 4 * RowHeight + 6 }, { half, 18 } };
+	case Button::SkipPhase: return { o + Displacement { Margin + half + 8, DayY + 36 + 4 * RowHeight + 6 }, { half, 18 } };
 	case Button::Close: return { o + Displacement { PanelWidth - 22, 6 }, { 16, 14 } };
 	}
 	return {};
+}
+
+/** The - (plus = false) or + button of a day and night row. */
+Rectangle StepRect(DayRow row, bool plus)
+{
+	const Point o = PanelOrigin();
+	const int y = DayY + 36 + static_cast<int>(row) * RowHeight;
+	const int x = PanelWidth - Margin - (plus ? 18 : 18 + 18 + 64);
+	return { o + Displacement { x, y }, { 18, 16 } };
+}
+
+std::string RowValue(DayRow row)
+{
+	auto &graphics = GetOptions().Graphics;
+	switch (row) {
+	case DayRow::Dawn: return ClockText(static_cast<float>(*graphics.dawnHour));
+	case DayRow::Dusk: return ClockText(static_cast<float>(*graphics.duskHour));
+	case DayRow::Darkness: return StrCat(*graphics.nightDarkness, "%");
+	default: return StrCat(*graphics.dayLength, " ", _("min"));
+	}
+}
+
+std::string_view RowLabel(DayRow row)
+{
+	switch (row) {
+	case DayRow::Dawn: return _("Day begins");
+	case DayRow::Dusk: return _("Night begins");
+	case DayRow::Darkness: return _("Night darkness");
+	default: return _("Length of a day");
+	}
+}
+
+void StepRow(DayRow row, bool plus)
+{
+	OptionEntryListBase &option = RowOption(row);
+	const size_t index = option.GetActiveListIndex();
+	if (plus && index + 1 < option.GetListSize())
+		option.SetActiveListIndex(index + 1);
+	else if (!plus && index > 0)
+		option.SetActiveListIndex(index - 1);
 }
 
 bool ChangeNowAvailable(const WeatherStatus &status)
@@ -196,6 +264,41 @@ void DrawWeatherPanel(const Surface &out)
 	const bool coloured = *GetOptions().Graphics.coloredLighting;
 	DrawButton(out, Button::ColouredLight, coloured ? _("Coloured light: On") : _("Coloured light: Off"), coloured, smooth && ColorOverlayAvailable());
 
+	// Day and night.
+	const bool cycle = DayNightEnabled();
+	DrawHorizontalLine(out, o + Displacement { Margin, DayY }, textWidth, PAL16_YELLOW + 10);
+	DrawString(out, _("Day & Night"), { o + Displacement { 0, DayY + 4 }, { PanelWidth, 12 } }, { .flags = UiFlags::ColorWhitegold | UiFlags::AlignCenter });
+	const float night = NightAmountAt(TimeOfDay());
+	std::string_view phase;
+	if (DuskGlow() > 0.25f && night < 0.9f)
+		phase = _("Dusk");
+	else if (DawnGlow() > 0.25f && night < 0.9f)
+		phase = _("Dawn");
+	else
+		phase = night >= 0.5f ? _("Night") : _("Day");
+	DrawString(out, StrCat(_("Time: "), ClockText(TimeOfDay()), " - ", phase, cycle ? "" : StrCat(" (", _("stopped"), ")")),
+	    { o + Displacement { Margin, DayY + 20 }, { textWidth, 12 } }, { .flags = UiFlags::ColorWhite });
+	for (int r = 0; r < static_cast<int>(DayRow::COUNT); r++) {
+		const DayRow row = static_cast<DayRow>(r);
+		const Rectangle minus = StepRect(row, false);
+		const Rectangle plus = StepRect(row, true);
+		DrawString(out, RowLabel(row), { Point { o.x + Margin, minus.position.y + 2 }, { textWidth, 12 } }, { .flags = UiFlags::ColorGold });
+		for (const Rectangle &b : { minus, plus }) {
+			const bool hover = b.contains(MousePosition);
+			FillRect(out, b.position.x, b.position.y, b.size.width, b.size.height, hover ? PAL16_GRAY + 12 : PAL16_GRAY + 14);
+			DrawHorizontalLine(out, b.position, b.size.width, PAL16_YELLOW + 9);
+			DrawHorizontalLine(out, b.position + Displacement { 0, b.size.height - 1 }, b.size.width, PAL16_YELLOW + 9);
+			DrawVerticalLine(out, b.position, b.size.height, PAL16_YELLOW + 9);
+			DrawVerticalLine(out, b.position + Displacement { b.size.width - 1, 0 }, b.size.height, PAL16_YELLOW + 9);
+		}
+		DrawString(out, "-", { minus.position + Displacement { 0, 2 }, minus.size }, { .flags = UiFlags::ColorWhite | UiFlags::AlignCenter });
+		DrawString(out, "+", { plus.position + Displacement { 0, 2 }, plus.size }, { .flags = UiFlags::ColorWhite | UiFlags::AlignCenter });
+		DrawString(out, RowValue(row), { Point { minus.position.x + minus.size.width, minus.position.y + 2 }, { plus.position.x - minus.position.x - minus.size.width, 12 } },
+		    { .flags = UiFlags::ColorWhitegold | UiFlags::AlignCenter });
+	}
+	DrawButton(out, Button::DayNight, cycle ? _("Day/night: On") : _("Day/night: Off"), cycle, true);
+	DrawButton(out, Button::SkipPhase, night >= 0.5f ? _("Skip to day") : _("Skip to night"), false, true);
+
 	DrawString(out, _("F8: close"), { o + Displacement { 0, PanelHeight - 18 }, { PanelWidth, 12 } }, { .flags = UiFlags::ColorWhite | UiFlags::AlignCenter });
 }
 
@@ -226,6 +329,17 @@ bool WeatherPanelMouseDown(Point mousePosition)
 	} else if (ButtonRect(Button::ColouredLight).contains(mousePosition)) {
 		if (*graphics.smoothEffects && ColorOverlayAvailable())
 			graphics.coloredLighting.SetValue(!*graphics.coloredLighting);
+	} else if (ButtonRect(Button::DayNight).contains(mousePosition)) {
+		graphics.dayNightCycle.SetValue(!*graphics.dayNightCycle);
+	} else if (ButtonRect(Button::SkipPhase).contains(mousePosition)) {
+		SkipToNextDayPhase();
+	} else {
+		for (int r = 0; r < static_cast<int>(DayRow::COUNT); r++) {
+			for (const bool plus : { false, true }) {
+				if (StepRect(static_cast<DayRow>(r), plus).contains(mousePosition))
+					StepRow(static_cast<DayRow>(r), plus);
+			}
+		}
 	}
 	return true; // clicks on the panel never reach the game world
 }

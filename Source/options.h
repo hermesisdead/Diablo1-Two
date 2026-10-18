@@ -587,6 +587,18 @@ struct GraphicsOptions : OptionCategoryBase {
 	OptionEntryInt<int> weatherIntensity;
 	/** @brief Torches, fire and spells cast coloured light (needs Smooth Effects). */
 	OptionEntryBoolean coloredLighting;
+	/** @brief Tristram and the Darkwood turn from day to night and back. */
+	OptionEntryBoolean dayNightCycle;
+	/** @brief Real minutes for one full day and night. */
+	OptionEntryInt<int> dayLength;
+	/** @brief Hour (0..23) at which night turns to day. */
+	OptionEntryInt<int> dawnHour;
+	/** @brief Hour (0..23) at which day turns to night. */
+	OptionEntryInt<int> duskHour;
+	/** @brief How dark the night gets, in percent. */
+	OptionEntryInt<int> nightDarkness;
+	/** @brief The clock, in minutes after midnight (kept between sessions). */
+	OptionEntryInt<int> timeOfDay;
 	/** @brief Particles, glow and light for spells (needs Smooth Effects). */
 	OptionEntryBoolean spellEffects;
 	/** @brief Magic and unique body armour glows on the hero (needs Smooth Effects). */

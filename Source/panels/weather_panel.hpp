@@ -2,7 +2,8 @@
  * @file panels/weather_panel.hpp
  *
  * Weather panel (F8): shows the current weather and when it turns, and sets weather intensity,
- * weather on/off, smooth effects and coloured lighting.
+ * weather on/off, smooth effects and coloured lighting; also the clock and the day and
+ * night settings (when day and night begin, how dark the night is, how long a day lasts).
  */
 #pragma once
 

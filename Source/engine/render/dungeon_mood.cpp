@@ -16,9 +16,11 @@
 #endif
 
 #include "custom_maps/custom_map.hpp"
+#include "engine/light_tables.hpp"
 #include "engine/lighting_defs.hpp"
 #include "engine/palette.h"
 #include "engine/render/color_overlay.hpp"
+#include "engine/render/day_night.hpp"
 #include "engine/render/orbit_view.hpp"
 #include "engine/render/scrollrt.h"
 #include "engine/render/world_projector.hpp"
@@ -346,7 +348,14 @@ std::vector<Weight> MoodTableFor(dungeon_type type, bool desert)
 
 std::vector<Weight> MoodTable()
 {
-	return MoodTableFor(leveltype, InDesertRegion());
+	std::vector<Weight> table = MoodTableFor(leveltype, InDesertRegion());
+	if (IsOutdoorLevel() && DayNightEnabled() && !InDesertRegion()) {
+		// Fireflies come out at night, and only then.
+		std::erase_if(table, [](const Weight &w) { return w.mood == DungeonMood::Fireflies; });
+		if (IsNightNow())
+			table.push_back({ DungeonMood::Fireflies, 18 });
+	}
+	return table;
 }
 
 /** Weather a hand-made map fixes for its level, if any. */
@@ -1485,40 +1494,140 @@ bool BuildTintField(TintField &field)
 
 } // namespace
 
-void DrawColoredLight(const Surface &out)
+namespace {
+
+/** Light multipliers sampled on a coarse grid of screen points (interpolated per pixel). */
+struct LightGrid {
+	static constexpr int Step = 8;
+	int w = 0, h = 0;
+	std::vector<float> m;
+
+	const float *At(int gx, int gy) const { return &m[(static_cast<size_t>(gy) * w + gx) * 3]; }
+
+	/** Bilinear multiplier at a pixel. */
+	void Pixel(int x, int y, float (&out)[3]) const
+	{
+		constexpr float Inv = 1.0f / Step;
+		const int gx = x / Step, gy = y / Step;
+		const float tx = (x - gx * Step) * Inv, ty = (y - gy * Step) * Inv;
+		const float *a = At(gx, gy);
+		const float *b = a + 3;
+		const float *c = a + w * 3;
+		const float *d = c + 3;
+		for (int k = 0; k < 3; k++) {
+			const float top = a[k] + (b[k] - a[k]) * tx;
+			const float bottom = c[k] + (d[k] - c[k]) * tx;
+			out[k] = top + (bottom - top) * ty;
+		}
+	}
+};
+
+/**
+ * Fills the grid with `sample(worldX, worldY, rgb)` for each grid point that shows ground.
+ * Returns false when every point stayed neutral (1, 1, 1).
+ */
+template <typename Sampler>
+bool BuildLightGrid(const Surface &out, LightGrid &grid, Sampler &&sample)
 {
-	if (!ColorOverlayRecording() || !*GetOptions().Graphics.coloredLighting || MyPlayer == nullptr || leveltype == DTYPE_TOWN)
-		return;
-	static TintField field;
-	const bool built = BuildTintField(field);
-	if (!built)
-		return;
 	const Projector pr(out);
-	// Sample on a coarse grid of screen points, then interpolate per pixel.
-	constexpr int Grid = 8;
-	const int gw = out.w() / Grid + 2, gh = out.h() / Grid + 2;
-	static std::vector<float> grid;
-	grid.assign(static_cast<size_t>(gw) * gh * 3, 1.0f);
+	grid.w = out.w() / LightGrid::Step + 2;
+	grid.h = out.h() / LightGrid::Step + 2;
+	grid.m.assign(static_cast<size_t>(grid.w) * grid.h * 3, 1.0f);
 	bool any = false;
-	for (int gy = 0; gy < gh; gy++) {
-		for (int gx = 0; gx < gw; gx++) {
-			const int sx = std::min(gx * Grid, out.w() - 1), sy = std::min(gy * Grid, out.h() - 1);
+	for (int gy = 0; gy < grid.h; gy++) {
+		for (int gx = 0; gx < grid.w; gx++) {
+			const int sx = std::min(gx * LightGrid::Step, out.w() - 1), sy = std::min(gy * LightGrid::Step, out.h() - 1);
 			float wx, wy;
 			if (pr.orbit) {
 				float h;
 				if (!OrbitScreenToWorld({ sx, sy }, wx, wy, h))
 					continue;
 			} else {
-				pr.Unproject(static_cast<float>(gx * Grid), static_cast<float>(gy * Grid), wx, wy);
+				pr.Unproject(static_cast<float>(gx * LightGrid::Step), static_cast<float>(gy * LightGrid::Step), wx, wy);
 			}
-			float *g = &grid[(static_cast<size_t>(gy) * gw + gx) * 3];
-			field.Sample(wx, wy, g[0], g[1], g[2]);
+			float *g = &grid.m[(static_cast<size_t>(gy) * grid.w + gx) * 3];
+			sample(wx, wy, g);
 			any = any || g[0] != 1.0f || g[1] != 1.0f || g[2] != 1.0f;
 		}
 	}
-	if (!any)
+	return any;
+}
+
+/** Multiplies the scene by the grid in full colour, over columns firstX..lastX. */
+void ApplyLightGrid(const Surface &out, const LightGrid &grid, int firstX, int lastX)
+{
+	for (int y = 0; y < out.h(); y++) {
+		for (int x = firstX; x < lastX; x++) {
+			float m[3];
+			grid.Pixel(x, y, m);
+			if (std::abs(m[0] - 1.0f) >= 0.004f || std::abs(m[1] - 1.0f) >= 0.004f || std::abs(m[2] - 1.0f) >= 0.004f)
+				ColorOverlayMulLight(x, y, m[0], m[1], m[2]);
+		}
+	}
+}
+
+/** Without the full-colour layer: darkens with the game's own light tables (no tint). */
+void ApplyLightGridPalette(const Surface &out, const LightGrid &grid)
+{
+	for (int y = 0; y < out.h(); y++) {
+		uint8_t *row = out.at(0, y);
+		const uint8_t *bayerRow = Bayer[y & 3];
+		for (int x = 0; x < out.w(); x++) {
+			float m[3];
+			grid.Pixel(x, y, m);
+			const float brightness = std::clamp((m[0] + m[1] + m[2]) / 3.0f, 0.0f, 1.0f);
+			// Each light level is a step of about 1/15; dither between neighbouring levels.
+			const float level = (1.0f - brightness) * 14.0f + (bayerRow[x & 3] + 0.5f) / 16.0f - 0.5f;
+			const int k = std::clamp(static_cast<int>(std::lround(level)), 0, static_cast<int>(LightsMax) - 1);
+			if (k > 0)
+				row[x] = LightTables[k][row[x]];
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------------------------
+// Day and night
+
+struct NightLight {
+	float x, y;
+	float radius;
+	float r, g, b; // colour of the lit ground (multiplier)
+};
+
+constexpr float Moonlight[3] = { 0.10f, 0.17f, 0.42f }; // the scene at full night and 100% darkness
+constexpr float Sunset[3] = { 1.14f, 0.84f, 0.62f };
+constexpr float Sunrise[3] = { 1.08f, 0.90f, 0.86f };
+constexpr float Lantern[3] = { 1.10f, 0.95f, 0.74f };
+
+void CollectNightLights(std::vector<NightLight> &lights)
+{
+	lights.clear();
+	// Every hero carries a lantern.
+	for (const Player &player : Players) {
+		if (!player.plractive || !player.isOnActiveLevel() || player._pHitPoints <= 0)
+			continue;
+		lights.push_back({ player.position.tile.x + 0.5f, player.position.tile.y + 0.5f, 7.5f, Lantern[0], Lantern[1], Lantern[2] });
+	}
+	// Torches, candles, fire spells and portals.
+	static std::vector<TintSource> sources;
+	sources.clear();
+	CollectTintSources(sources);
+	for (const TintSource &s : sources)
+		lights.push_back({ s.x, s.y, s.radius + 1.0f, s.r * 0.8f, s.g * 0.8f, s.b * 0.8f });
+}
+
+} // namespace
+
+void DrawColoredLight(const Surface &out)
+{
+	if (!ColorOverlayRecording() || !*GetOptions().Graphics.coloredLighting || MyPlayer == nullptr || leveltype == DTYPE_TOWN)
 		return;
-	constexpr float Inv = 1.0f / Grid;
+	static TintField field;
+	if (!BuildTintField(field))
+		return;
+	static LightGrid grid;
+	if (!BuildLightGrid(out, grid, [](float wx, float wy, float *g) { field.Sample(wx, wy, g[0], g[1], g[2]); }))
+		return;
 	int firstX = 0, lastX = out.w();
 #ifdef _DEBUG
 	// Split-screen comparison for captures: tint only the right half (or the left half with "L").
@@ -1529,28 +1638,62 @@ void DrawColoredLight(const Surface &out)
 			firstX = out.w() / 2;
 	}
 #endif
-	for (int y = 0; y < out.h(); y++) {
-		const int gy = y / Grid;
-		const float ty = (y - gy * Grid) * Inv;
-		for (int x = firstX; x < lastX; x++) {
-			const int gx = x / Grid;
-			const float tx = (x - gx * Grid) * Inv;
-			const float *a = &grid[(static_cast<size_t>(gy) * gw + gx) * 3];
-			const float *b = a + 3;
-			const float *c = a + gw * 3;
-			const float *d = c + 3;
-			float m[3];
-			bool neutral = true;
-			for (int k = 0; k < 3; k++) {
-				const float top = a[k] + (b[k] - a[k]) * tx;
-				const float bottom = c[k] + (d[k] - c[k]) * tx;
-				m[k] = top + (bottom - top) * ty;
-				neutral = neutral && std::abs(m[k] - 1.0f) < 0.004f;
-			}
-			if (!neutral)
-				ColorOverlayMulLight(x, y, m[0], m[1], m[2]);
-		}
+	ApplyLightGrid(out, grid, firstX, lastX);
+}
+
+void DrawDayNight(const Surface &out)
+{
+	AdvanceDayClock();
+	if (MyPlayer == nullptr || !IsOutdoorLevel() || out.w() <= 0 || out.h() <= 0)
+		return;
+	const float night = NightAmount();
+	const float dusk = DuskGlow();
+	const float dawn = DawnGlow();
+	if (night < 0.002f && dusk < 0.002f && dawn < 0.002f)
+		return;
+	const float dark = std::clamp(static_cast<float>(*GetOptions().Graphics.nightDarkness) / 100.0f, 0.0f, 0.95f);
+	float base[3];
+	for (int k = 0; k < 3; k++) {
+		base[k] = 1.0f + (Moonlight[k] - 1.0f) * dark * night;
+		base[k] *= 1.0f + (Sunset[k] - 1.0f) * dusk * 0.85f + (Sunrise[k] - 1.0f) * dawn * 0.7f;
 	}
+
+	static std::vector<NightLight> lights;
+	lights.clear();
+	if (night > 0.02f)
+		CollectNightLights(lights);
+
+	static LightGrid grid;
+	const bool any = BuildLightGrid(out, grid, [&](float wx, float wy, float *g) {
+		// Lights: how much of the spot they light (combined like overlapping pools) and their colour.
+		float unlit = 1.0f, cr = 0, cg = 0, cb = 0, total = 0;
+		for (const NightLight &l : lights) {
+			const float dx = wx - l.x, dy = wy - l.y;
+			const float d2 = dx * dx + dy * dy;
+			if (d2 >= l.radius * l.radius)
+				continue;
+			const float w = std::pow(1.0f - std::sqrt(d2) / l.radius, 1.15f);
+			unlit *= 1.0f - w;
+			cr += l.r * w;
+			cg += l.g * w;
+			cb += l.b * w;
+			total += w;
+		}
+		const float lit = (1.0f - unlit) * night;
+		if (lit <= 0.0f || total <= 0.0f) {
+			g[0] = base[0], g[1] = base[1], g[2] = base[2];
+			return;
+		}
+		const float pool[3] = { cr / total, cg / total, cb / total };
+		for (int k = 0; k < 3; k++)
+			g[k] = base[k] + (pool[k] - base[k]) * lit;
+	});
+	if (!any)
+		return;
+	if (ColorOverlayRecording())
+		ApplyLightGrid(out, grid, 0, out.w());
+	else
+		ApplyLightGridPalette(out, grid);
 }
 
 WeatherStatus GetWeatherStatus()

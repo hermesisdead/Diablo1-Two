@@ -1412,6 +1412,7 @@ void DrawView(const Surface &out, Point startPosition)
 		// Full-colour layer (smooth light, coloured light, weather) over the 3D view.
 		ColorOverlayBegin(orbitOut);
 		DrawOrbitView(orbitOut);
+		DrawDayNight(orbitOut);
 		DrawColoredLight(orbitOut);
 		DrawDungeonMood(orbitOut); // stays on while the map (Tab) is open
 		DrawGore(orbitOut);
@@ -1427,6 +1428,7 @@ void DrawView(const Surface &out, Point startPosition)
 	const Surface viewOut = out.subregionY(0, gnViewportHeight);
 	ColorOverlayBegin(viewOut);
 	DrawGame(out, startPosition, offset);
+	DrawDayNight(viewOut);
 	DrawColoredLight(viewOut);
 	DrawDungeonMood(viewOut); // stays on while the map (Tab) is open
 	DrawGore(viewOut);
