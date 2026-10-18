@@ -172,10 +172,13 @@ struct Session {
 	int clipHeight = 0;
 	int npc = 0;
 
-	// Tile variant selection and hue adjustment.
-	bool showVariants = false;    // showing tile variants submenu
-	int selectedVariant = -1;     // which variant is selected, -1 for all
-	int hueShift = 0;             // -30 to +30 (degrees)
+	// Tile picker panel.
+	bool showTilePicker = false;  // showing visual tile picker
+	uint16_t pickerTile = 1;      // current tile being previewed/selected
+	int pickerZoom = 2;           // zoom level of tile picker (32px per megatile)
+	Point pickerPan {};           // pan offset for tile picker
+	bool pickerDragging = false;  // dragging with middle mouse
+	Point pickerDragStart {};
 
 	// Monster tools.
 	int monster = 0;    // index in SpawnableMonsters()
@@ -357,21 +360,19 @@ uint16_t &TownTile(Point piece)
 /** Town: get the tile to paint (handles variant selection and hue shift). */
 uint16_t GetPaintTile()
 {
-	std::vector<uint16_t> choices;
-	if (S.brush < 0 || S.brush >= static_cast<int>(GroundBrushes().size()))
-		choices = { S.pickedTile };
-	else
-		choices = GroundBrushes()[S.brush].tiles;
+	if (S.showTilePicker)
+		return S.pickerTile;
 
-	if (choices.empty() || choices.front() == 0)
+	const auto &brushes = GroundBrushes();
+	if (S.brush < 0 || S.brush >= static_cast<int>(brushes.size()))
 		return 0;
 
-	// If a specific variant is selected, use only that one.
-	if (S.showVariants && S.selectedVariant >= 0 && S.selectedVariant < static_cast<int>(choices.size()))
-		return choices[S.selectedVariant];
+	const auto &choices = brushes[S.brush].tiles;
+	if (choices.empty())
+		return 0;
 
-	// Otherwise pick randomly from all choices.
-	return choices[0];  // Simplified: just use the first for now, can randomize later
+	// Use random tile from the brush.
+	return choices[0];
 }
 
 /** Town: fills a rectangle of megatiles with the current ground brush. */
@@ -381,22 +382,29 @@ void PaintGround(Point a, Point b)
 	const int y0 = std::max(0, std::min(a.y, b.y)), y1 = std::min(S.map.height - 1, std::max(a.y, b.y));
 	if (x0 > x1 || y0 > y1)
 		return;
+
 	std::vector<uint16_t> choices;
-	if (S.brush < 0 || S.brush >= static_cast<int>(GroundBrushes().size()))
-		choices = { S.pickedTile };
-	else
-		choices = GroundBrushes()[S.brush].tiles;
+	if (S.showTilePicker) {
+		choices = { S.pickerTile };
+	} else {
+		const auto &brushes = GroundBrushes();
+		if (S.brush < 0 || S.brush >= static_cast<int>(brushes.size()))
+			return;
+		choices = brushes[S.brush].tiles;
+	}
+
 	if (choices.empty() || choices.front() == 0)
 		return;
+
 	PushUndo();
 	for (int y = y0; y <= y1; y++) {
 		for (int x = x0; x <= x1; x++) {
 			uint16_t tile;
-			// If a specific variant is selected in variants mode, use it consistently.
-			if (S.showVariants && S.selectedVariant >= 0 && S.selectedVariant < static_cast<int>(choices.size())) {
-				tile = choices[S.selectedVariant];
+			if (S.showTilePicker) {
+				// Use the picker tile directly
+				tile = S.pickerTile;
 			} else {
-				// Random selection from available choices.
+				// Random selection from brush
 				const uint32_t h = static_cast<uint32_t>(x) * 73856093u ^ static_cast<uint32_t>(y) * 19349663u;
 				tile = choices[(h >> 4) % choices.size()];
 			}
@@ -667,19 +675,14 @@ std::vector<std::string> PaletteRows()
 	std::vector<std::string> rows;
 	switch (S.tool) {
 	case Tool::Paint:
-		if (S.showVariants) {
-			// Show variants of the selected brush.
-			rows.push_back("◄ Back to brushes");
-			const auto variants = CurrentBrushVariants();
-			for (uint16_t tile : variants)
-				rows.push_back(VariantLabel(tile));
-		} else {
-			// Show ground brushes.
-			for (const GroundBrush &b : GroundBrushes())
-				rows.emplace_back(b.name);
-			if (S.pickedTile != 0)
-				rows.push_back(StrCat("Picked tile #", S.pickedTile));
-		}
+		// Show ground brushes.
+		for (const GroundBrush &b : GroundBrushes())
+			rows.emplace_back(b.name);
+		rows.push_back("---");
+		if (S.pickedTile != 0)
+			rows.push_back(StrCat("Tile picker [", S.pickerTile, "]"));
+		else
+			rows.push_back("Open tile picker");
 		break;
 	case Tool::Stamp:
 		for (const TownStamp &s : TownStamps())
@@ -709,13 +712,11 @@ std::string PaletteTitle()
 {
 	switch (S.tool) {
 	case Tool::Paint:
-		if (S.showVariants) {
-			const auto &brushes = GroundBrushes();
-			const std::string name = S.brush >= 0 && S.brush < static_cast<int>(brushes.size()) ? std::string(brushes[S.brush].name) : "Unknown";
-			const std::string selected = S.selectedVariant >= 0 ? StrCat(" [#", CurrentBrushVariants()[S.selectedVariant], "]") : "";
-			return StrCat(name, " variants", selected, "  F/G: hue");
-		}
-		return "Ground brushes  (click to pick)";
+		if (S.showTilePicker)
+			return StrCat("Tile Picker [#", S.pickerTile, "]  Scroll: zoom  MMB: pan");
+		if (S.brush >= 0 && S.brush < static_cast<int>(GroundBrushes().size()))
+			return GroundBrushes()[S.brush].name;
+		return "Ground";
 	case Tool::Stamp: return "Pieces of Tristram";
 	case Tool::Npc: return "Townspeople";
 	case Tool::Spawner: return StrCat("Pack of ", S.packSize, "  (click +/right -)");
@@ -742,30 +743,18 @@ int PaletteSelected()
 void SelectPalette(int row)
 {
 	switch (S.tool) {
-	case Tool::Paint:
-		if (S.showVariants) {
-			if (row == 0) {
-				// "Back to brushes"
-				S.showVariants = false;
-				S.selectedVariant = -1;
-			} else if (row > 2) {
-				// Click on a tile variant (row 0=back, 1=header, 2+=variants)
-				const auto variants = CurrentBrushVariants();
-				const int varIdx = row - 3;
-				if (varIdx >= 0 && varIdx < static_cast<int>(variants.size()))
-					S.selectedVariant = varIdx;
-			}
+	case Tool::Paint: {
+		const auto &brushes = GroundBrushes();
+		if (row < static_cast<int>(brushes.size())) {
+			S.brush = row;
+		} else if (row == static_cast<int>(brushes.size()) + 1) {
+			// Separator
 		} else {
-			// Selecting a brush - show its variants
-			if (row < static_cast<int>(GroundBrushes().size())) {
-				S.brush = row;
-				S.showVariants = true;
-				S.selectedVariant = 0;  // Auto-select first variant
-			} else {
-				S.brush = -1;  // Picked tile
-			}
+			// Open tile picker
+			S.showTilePicker = !S.showTilePicker;
 		}
 		break;
+	}
 	case Tool::Stamp: S.stamp = row >= static_cast<int>(TownStamps().size()) ? -1 : row; break;
 	case Tool::Npc: S.npc = row; break;
 	case Tool::Spawner: S.monster = row; break;
@@ -1030,6 +1019,36 @@ void DrawPalette(const Surface &out)
 	}
 }
 
+void DrawTilePicker(const Surface &out)
+{
+	const Rectangle panel = PaletteRect();
+	DrawHalfTransparentRectTo(out, panel.position.x, panel.position.y, panel.size.width, panel.size.height);
+	DrawHalfTransparentRectTo(out, panel.position.x, panel.position.y, panel.size.width, panel.size.height);
+	DrawString(out, PaletteTitle(), { panel.position + Displacement { 0, 5 }, { panel.size.width, 12 } }, { .flags = UiFlags::ColorWhitegold | UiFlags::AlignCenter | UiFlags::KerningFitSpacing });
+
+	// Draw a grid of tiles
+	const int tileSize = S.pickerZoom * 16;  // zoom level 1 = 16px, 2 = 32px, etc.
+	const int tilesPerRow = std::max(1, panel.size.width / (tileSize + 4));
+	const int startX = panel.position.x + 4;
+	const int startY = panel.position.y + 24;
+
+	for (uint16_t tile = 1; tile <= 127; tile++) {
+		const int row = (tile - 1) / tilesPerRow;
+		const int col = (tile - 1) % tilesPerRow;
+		const int x = startX + col * (tileSize + 4) + S.pickerPan.x;
+		const int y = startY + row * (tileSize + 4) + S.pickerPan.y;
+
+		// Draw tile rect
+		if (tile == S.pickerTile)
+			FillRect(out, x - 2, y - 2, tileSize + 4, tileSize + 4, PAL16_YELLOW + 12);
+
+		DrawRect(out, x, y, tileSize, tileSize, PAL16_GRAY + 5);
+
+		// Draw tile number label
+		DrawString(out, StrCat(tile), { { x, y + tileSize - 8 }, { tileSize, 8 } }, { .flags = UiFlags::ColorWhite | UiFlags::AlignCenter });
+	}
+}
+
 void DrawInterface(const Surface &out)
 {
 	// Top bar.
@@ -1062,7 +1081,10 @@ void DrawInterface(const Surface &out)
 		Button(out, ToolButton(n + 1), S.grid ? "G Grid: on" : "G Grid: off", false);
 	Button(out, ToolButton(n + (S.kind == Kind::Tristram ? 1 : 2)), "Ctrl+Z Undo", false);
 
-	DrawPalette(out);
+	if (S.tool == Tool::Paint && S.showTilePicker)
+		DrawTilePicker(out);
+	else
+		DrawPalette(out);
 
 	// Status line.
 	const int y = gnViewportHeight - 18;
@@ -1308,6 +1330,28 @@ void MouseDown(Point p, bool right)
 				S.packSize = std::clamp(S.packSize + (right ? -1 : 1), 1, 20);
 			return;
 		}
+		// Tile picker click handling.
+		if (S.showTilePicker) {
+			const Rectangle panel = PaletteRect();
+			const int tileSize = S.pickerZoom * 16;
+			const int tilesPerRow = std::max(1, panel.size.width / (tileSize + 4));
+			const int startX = panel.position.x + 4;
+			const int startY = panel.position.y + 24;
+
+			for (uint16_t tile = 1; tile <= 127; tile++) {
+				const int row = (tile - 1) / tilesPerRow;
+				const int col = (tile - 1) % tilesPerRow;
+				const int x = startX + col * (tileSize + 4) + S.pickerPan.x;
+				const int y = startY + row * (tileSize + 4) + S.pickerPan.y;
+
+				if (Rectangle{{ x, y }, { tileSize, tileSize }}.contains(p)) {
+					S.pickerTile = tile;
+					return;
+				}
+			}
+			return;
+		}
+
 		const int rows = static_cast<int>(PaletteRows().size());
 		for (int i = 0; i < rows; i++) {
 			if (PaletteRowShown(i) && PaletteRowRect(i).contains(p))
@@ -1746,6 +1790,12 @@ bool MapEditorHandleEvent(const SDL_Event &event)
 		return false;
 	switch (event.type) {
 	case SDL_EVENT_MOUSE_BUTTON_DOWN:
+		if (event.button.button == SDL_BUTTON_MIDDLE && S.editing && S.showTilePicker) {
+			// Middle mouse to drag tile picker
+			S.pickerDragging = true;
+			S.pickerDragStart = MousePosition;
+			return true;
+		}
 		if (event.button.button != SDL_BUTTON_LEFT && event.button.button != SDL_BUTTON_RIGHT)
 			return S.editing;
 		if (!S.editing && !TopButton(1).contains(MousePosition) && !TopButton(0).contains(MousePosition) && !TopButton(2).contains(MousePosition))
@@ -1753,6 +1803,10 @@ bool MapEditorHandleEvent(const SDL_Event &event)
 		MouseDown(MousePosition, event.button.button == SDL_BUTTON_RIGHT);
 		return true;
 	case SDL_EVENT_MOUSE_BUTTON_UP:
+		if (S.pickerDragging) {
+			S.pickerDragging = false;
+			return true;
+		}
 		if (!S.editing)
 			return false;
 		MouseUp();
@@ -1770,16 +1824,6 @@ bool MapEditorHandleEvent(const SDL_Event &event)
 				return true;
 			}
 			return false;
-		}
-		// Hue adjustment when showing tile variants.
-		if (S.tool == Tool::Paint && S.showVariants) {
-			if (sc == SDL_SCANCODE_F) {
-				S.hueShift = std::max(S.hueShift - 5, -30);
-				return true;
-			} else if (sc == SDL_SCANCODE_G) {
-				S.hueShift = std::min(S.hueShift + 5, 30);
-				return true;
-			}
 		}
 		if (ctrl && sc == SDL_SCANCODE_S) {
 			SaveMap();
@@ -1809,8 +1853,22 @@ bool MapEditorHandleEvent(const SDL_Event &event)
 	case SDL_EVENT_MOUSE_WHEEL:
 		if (!S.editing)
 			return false;
+		if (S.showTilePicker) {
+			// Zoom the tile picker
+			S.pickerZoom = std::clamp(S.pickerZoom + (event.wheel.y > 0 ? 1 : -1), 1, 4);
+			return true;
+		}
 		ScrollPalette(event.wheel.y > 0 ? -3 : 3);
 		return true;
+	case SDL_EVENT_MOUSE_MOTION:
+		if (S.pickerDragging && S.showTilePicker) {
+			// Pan the tile picker with middle mouse drag
+			const Point delta = MousePosition - S.pickerDragStart;
+			S.pickerPan = S.pickerPan + delta;
+			S.pickerDragStart = MousePosition;
+			return true;
+		}
+		return false;
 	default:
 		return false;
 	}
