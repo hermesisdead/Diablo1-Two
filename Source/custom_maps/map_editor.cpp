@@ -111,6 +111,20 @@ const std::vector<GroundBrush> &GroundBrushes()
 	return brushes;
 }
 
+/** Get all tile variants from the current brush. */
+std::vector<uint16_t> CurrentBrushVariants()
+{
+	if (S.brush < 0 || S.brush >= static_cast<int>(GroundBrushes().size()))
+		return {};
+	return GroundBrushes()[S.brush].tiles;
+}
+
+/** Format a tile variant label for display. */
+std::string VariantLabel(uint16_t tileId)
+{
+	return StrCat("Tile ", tileId);
+}
+
 /** Pieces of classic Tristram that can be stamped into a town, in megatiles (inclusive). */
 struct TownStamp {
 	std::string_view name;
@@ -171,6 +185,11 @@ struct Session {
 	int clipWidth = 0;
 	int clipHeight = 0;
 	int npc = 0;
+
+	// Tile variant selection and hue adjustment.
+	bool showVariants = false;    // showing tile variants submenu
+	int selectedVariant = -1;     // which variant is selected, -1 for all
+	int hueShift = 0;             // -30 to +30 (degrees)
 
 	// Monster tools.
 	int monster = 0;    // index in SpawnableMonsters()
@@ -335,6 +354,26 @@ uint16_t &TownTile(Point piece)
 	return S.map.tiles[static_cast<size_t>(piece.y) * S.map.width + piece.x];
 }
 
+/** Town: get the tile to paint (handles variant selection and hue shift). */
+uint16_t GetPaintTile()
+{
+	std::vector<uint16_t> choices;
+	if (S.brush < 0 || S.brush >= static_cast<int>(GroundBrushes().size()))
+		choices = { S.pickedTile };
+	else
+		choices = GroundBrushes()[S.brush].tiles;
+
+	if (choices.empty() || choices.front() == 0)
+		return 0;
+
+	// If a specific variant is selected, use only that one.
+	if (S.showVariants && S.selectedVariant >= 0 && S.selectedVariant < static_cast<int>(choices.size()))
+		return choices[S.selectedVariant];
+
+	// Otherwise pick randomly from all choices.
+	return choices[0];  // Simplified: just use the first for now, can randomize later
+}
+
 /** Town: fills a rectangle of megatiles with the current ground brush. */
 void PaintGround(Point a, Point b)
 {
@@ -352,8 +391,16 @@ void PaintGround(Point a, Point b)
 	PushUndo();
 	for (int y = y0; y <= y1; y++) {
 		for (int x = x0; x <= x1; x++) {
-			const uint32_t h = static_cast<uint32_t>(x) * 73856093u ^ static_cast<uint32_t>(y) * 19349663u;
-			TownTile({ x, y }) = choices[(h >> 4) % choices.size()];
+			uint16_t tile;
+			// If a specific variant is selected in variants mode, use it consistently.
+			if (S.showVariants && S.selectedVariant >= 0 && S.selectedVariant < static_cast<int>(choices.size())) {
+				tile = choices[S.selectedVariant];
+			} else {
+				// Random selection from available choices.
+				const uint32_t h = static_cast<uint32_t>(x) * 73856093u ^ static_cast<uint32_t>(y) * 19349663u;
+				tile = choices[(h >> 4) % choices.size()];
+			}
+			TownTile({ x, y }) = tile;
 		}
 	}
 	Rebuild();
@@ -620,10 +667,22 @@ std::vector<std::string> PaletteRows()
 	std::vector<std::string> rows;
 	switch (S.tool) {
 	case Tool::Paint:
-		for (const GroundBrush &b : GroundBrushes())
-			rows.emplace_back(b.name);
-		if (S.pickedTile != 0)
-			rows.push_back(StrCat("Picked tile #", S.pickedTile));
+		if (S.showVariants) {
+			// Show variants of the selected brush.
+			rows.push_back("[Back to brushes]");
+			rows.push_back("--- Tile Variants ---");
+			const auto variants = CurrentBrushVariants();
+			for (uint16_t tile : variants)
+				rows.push_back(VariantLabel(tile));
+			rows.push_back("--- Hue Shift (F/G) ---");
+			rows.push_back(StrCat("Hue: ", S.hueShift >= 0 ? "+" : "", S.hueShift, "°"));
+		} else {
+			// Show ground brushes.
+			for (const GroundBrush &b : GroundBrushes())
+				rows.emplace_back(b.name);
+			if (S.pickedTile != 0)
+				rows.push_back(StrCat("Picked tile #", S.pickedTile));
+		}
 		break;
 	case Tool::Stamp:
 		for (const TownStamp &s : TownStamps())
@@ -652,7 +711,13 @@ std::vector<std::string> PaletteRows()
 std::string PaletteTitle()
 {
 	switch (S.tool) {
-	case Tool::Paint: return "Ground";
+	case Tool::Paint:
+		if (S.showVariants) {
+			const auto &brushes = GroundBrushes();
+			const std::string name = S.brush >= 0 && S.brush < static_cast<int>(brushes.size()) ? std::string(brushes[S.brush].name) : "Unknown";
+			return StrCat("Variants: ", name, "  (right-click F/G hue)");
+		}
+		return "Ground  (right-click variant)";
 	case Tool::Stamp: return "Pieces of Tristram";
 	case Tool::Npc: return "Townspeople";
 	case Tool::Spawner: return StrCat("Pack of ", S.packSize, "  (click +/right -)");
@@ -664,7 +729,10 @@ std::string PaletteTitle()
 int PaletteSelected()
 {
 	switch (S.tool) {
-	case Tool::Paint: return S.brush < 0 ? static_cast<int>(GroundBrushes().size()) : S.brush;
+	case Tool::Paint:
+		if (S.showVariants)
+			return S.selectedVariant >= 0 ? S.selectedVariant : -1;
+		return S.brush < 0 ? static_cast<int>(GroundBrushes().size()) : S.brush;
 	case Tool::Stamp: return S.stamp < 0 ? static_cast<int>(TownStamps().size()) : S.stamp;
 	case Tool::Npc: return S.npc;
 	case Tool::Spawner: return S.monster;
@@ -676,7 +744,25 @@ int PaletteSelected()
 void SelectPalette(int row)
 {
 	switch (S.tool) {
-	case Tool::Paint: S.brush = row >= static_cast<int>(GroundBrushes().size()) ? -1 : row; break;
+	case Tool::Paint:
+		if (S.showVariants) {
+			if (row == 0) {
+				// "Back to brushes"
+				S.showVariants = false;
+			} else if (row == 1) {
+				// Skip the header
+			} else if (row >= 4) {
+				const auto variants = CurrentBrushVariants();
+				const int varIdx = row - 4;
+				if (varIdx < static_cast<int>(variants.size()))
+					S.selectedVariant = varIdx;
+			}
+		} else {
+			S.brush = row >= static_cast<int>(GroundBrushes().size()) ? -1 : row;
+			if (S.brush >= 0)
+				S.showVariants = true;  // Enter variants view when brush is selected
+		}
+		break;
 	case Tool::Stamp: S.stamp = row >= static_cast<int>(TownStamps().size()) ? -1 : row; break;
 	case Tool::Npc: S.npc = row; break;
 	case Tool::Spawner: S.monster = row; break;
@@ -1682,11 +1768,21 @@ bool MapEditorHandleEvent(const SDL_Event &event)
 			}
 			return false;
 		}
+		// Hue adjustment when showing tile variants.
+		if (S.tool == Tool::Paint && S.showVariants) {
+			if (sc == SDL_SCANCODE_F) {
+				S.hueShift = std::max(S.hueShift - 5, -30);
+				return true;
+			} else if (sc == SDL_SCANCODE_G) {
+				S.hueShift = std::min(S.hueShift + 5, 30);
+				return true;
+			}
+		}
 		if (ctrl && sc == SDL_SCANCODE_S) {
 			SaveMap();
 		} else if (ctrl && sc == SDL_SCANCODE_Z) {
 			Undo();
-		} else if (sc == SDL_SCANCODE_G) {
+		} else if (sc == SDL_SCANCODE_G && !(S.tool == Tool::Paint && S.showVariants)) {
 			S.grid = !S.grid;
 		} else if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9) {
 			SelectTool(sc - SDL_SCANCODE_1);
