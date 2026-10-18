@@ -48,6 +48,12 @@ struct Layer {
 	int dMinX = 0, dMinY = 0, dMaxX = -1, dMaxY = -1;
 	std::vector<uint8_t> floor;
 	int floorW = 0, floorH = 0, floorScale = 1, floorOffX = 0;
+	int floorX0 = 0, floorY0 = 0; // where the floor surface starts in the back buffer
+
+	// Full-colour sprite pixels (premultiplied) and the 8-bit pixel each expects to find.
+	std::vector<uint32_t> sprites;
+	std::vector<uint8_t> spriteExpect;
+	int sMinX = 0, sMinY = 0, sMaxX = -1, sMaxY = -1;
 	bool floorValid = false;
 };
 
@@ -181,6 +187,10 @@ bool ColorOverlayBegin(const Surface &region)
 		L.particles.assign(size, 0);
 		L.decals.assign(size, 0);
 		L.snapshot.assign(size, 0);
+		L.sprites.assign(size, 0);
+		L.spriteExpect.assign(size, 0);
+		L.sMinX = L.sMinY = 0;
+		L.sMaxX = L.sMaxY = -1;
 		L.dMinX = L.dMinY = 0;
 		L.dMaxX = L.dMaxY = -1;
 		L.pMinX = L.pMinY = 0;
@@ -202,6 +212,12 @@ bool ColorOverlayBegin(const Surface &region)
 		}
 		L.dMinX = L.dMinY = 0;
 		L.dMaxX = L.dMaxY = -1;
+		if (L.sMaxX >= L.sMinX) {
+			for (int y = L.sMinY; y <= L.sMaxY; y++)
+				std::fill_n(&L.sprites[static_cast<size_t>(y) * rect.w + L.sMinX], L.sMaxX - L.sMinX + 1, 0u);
+		}
+		L.sMinX = L.sMinY = 0;
+		L.sMaxX = L.sMaxY = -1;
 	}
 	L.floorValid = false;
 	L.rect = rect;
@@ -260,6 +276,8 @@ void ColorOverlayFloorSnapshot(const Surface &floor, int scale, int offsetX)
 	L.floorH = floor.h();
 	L.floorScale = std::max(1, scale);
 	L.floorOffX = offsetX;
+	L.floorX0 = floor.region.x;
+	L.floorY0 = floor.region.y;
 	L.floor.resize(static_cast<size_t>(L.floorW) * L.floorH);
 	for (int y = 0; y < L.floorH; y++)
 		std::memcpy(&L.floor[static_cast<size_t>(y) * L.floorW], floor.at(0, y), L.floorW);
@@ -289,6 +307,43 @@ void ColorOverlayDecal(int x, int y, OverlayColor color, float alpha)
 	const uint32_t b = Mul(color.b, a) + Mul((p >> 16) & 0xFF, inv);
 	const uint32_t na = a + Mul(p >> 24, inv);
 	p = Pack(std::min(r, 255u), std::min(g, 255u), std::min(b, 255u), std::min(na, 255u));
+}
+
+void ColorOverlaySpritePixel(const Surface &out, Point p, OverlayColor color, uint8_t alpha, uint8_t expect)
+{
+	if (!L.recording || alpha == 0 || out.surface != PalSurface)
+		return;
+	// Layer coordinates; a zoomed view is drawn at half size and doubled afterwards.
+	int scale = 1, lx, ly;
+	if (L.floorValid && L.floorScale > 1) {
+		scale = L.floorScale;
+		lx = L.floorOffX + (out.region.x + p.x - L.floorX0) * scale + L.floorX0 - L.rect.x;
+		ly = (out.region.y + p.y - L.floorY0) * scale + L.floorY0 - L.rect.y;
+	} else {
+		lx = out.region.x + p.x - L.rect.x;
+		ly = out.region.y + p.y - L.rect.y;
+	}
+	const uint32_t a = alpha;
+	const uint32_t value = Pack(Mul(color.r, a), Mul(color.g, a), Mul(color.b, a), a);
+	for (int sy = 0; sy < scale; sy++) {
+		for (int sx = 0; sx < scale; sx++) {
+			const int x = lx + sx, y = ly + sy;
+			if (!InLayer(x, y))
+				continue;
+			if (L.sMaxX < L.sMinX) {
+				L.sMinX = L.sMaxX = x;
+				L.sMinY = L.sMaxY = y;
+			} else {
+				L.sMinX = std::min(L.sMinX, x);
+				L.sMaxX = std::max(L.sMaxX, x);
+				L.sMinY = std::min(L.sMinY, y);
+				L.sMaxY = std::max(L.sMaxY, y);
+			}
+			const size_t i = static_cast<size_t>(y) * L.rect.w + x;
+			L.sprites[i] = value; // the one drawn last is in front
+			L.spriteExpect[i] = expect;
+		}
+	}
 }
 
 void ColorOverlaySetFogColor(OverlayColor color)
@@ -365,7 +420,7 @@ void ColorOverlayComposite(SDL_Surface *src, const SDL_Rect *srcRect, SDL_Surfac
 	PixelLayout layout;
 	if (!GetLayout(dst, layout))
 		return;
-	const bool anything = L.pre.alpha != 0 || L.post.alpha != 0 || L.fogUsed || L.lightUsed || L.pMaxX >= L.pMinX || L.dMaxX >= L.dMinX;
+	const bool anything = L.pre.alpha != 0 || L.post.alpha != 0 || L.fogUsed || L.lightUsed || L.pMaxX >= L.pMinX || L.dMaxX >= L.dMinX || L.sMaxX >= L.sMinX;
 	if (!anything)
 		return;
 
@@ -397,6 +452,9 @@ void ColorOverlayComposite(SDL_Surface *src, const SDL_Rect *srcRect, SDL_Surfac
 		const uint32_t *part = &L.particles[static_cast<size_t>(ly) * L.rect.w];
 		const uint32_t *lit = &L.light[static_cast<size_t>(ly) * L.rect.w];
 		const uint32_t *decal = &L.decals[static_cast<size_t>(ly) * L.rect.w];
+		const uint32_t *spr = &L.sprites[static_cast<size_t>(ly) * L.rect.w];
+		const uint8_t *sprExpect = &L.spriteExpect[static_cast<size_t>(ly) * L.rect.w];
+		const bool rowHasSprites = ly >= L.sMinY && ly <= L.sMaxY;
 		const bool rowHasDecals = ly >= L.dMinY && ly <= L.dMaxY;
 		const uint8_t *floorRow = nullptr;
 		if (rowHasDecals && L.floorValid) {
@@ -411,7 +469,8 @@ void ColorOverlayComposite(SDL_Surface *src, const SDL_Rect *srcRect, SDL_Surfac
 			const uint32_t p = rowHasParticles ? part[lx] : 0;
 			const uint32_t m = L.lightUsed ? lit[lx] : 0x808080u;
 			uint32_t dc = rowHasDecals ? decal[lx] : 0;
-			if (!wholeArea && f == 0 && p == 0 && m == 0x808080u && dc == 0)
+			uint32_t sp = rowHasSprites ? spr[lx] : 0;
+			if (!wholeArea && f == 0 && p == 0 && m == 0x808080u && dc == 0 && sp == 0)
 				continue;
 			if (pal[x] != snap[lx])
 				continue; // the interface drew here after the world
@@ -431,6 +490,13 @@ void ColorOverlayComposite(SDL_Surface *src, const SDL_Rect *srcRect, SDL_Surfac
 				r = std::min(255u, (dc & 0xFF) + Mul(r, inv));
 				g = std::min(255u, ((dc >> 8) & 0xFF) + Mul(g, inv));
 				b = std::min(255u, ((dc >> 16) & 0xFF) + Mul(b, inv));
+			}
+			if (sp != 0 && sprExpect[lx] == snap[lx]) {
+				// A full-colour sprite pixel nothing was drawn over.
+				const uint32_t inv = 255 - (sp >> 24);
+				r = std::min(255u, (sp & 0xFF) + Mul(r, inv));
+				g = std::min(255u, ((sp >> 8) & 0xFF) + Mul(g, inv));
+				b = std::min(255u, ((sp >> 16) & 0xFF) + Mul(b, inv));
 			}
 			if (m != 0x808080u) {
 				r = std::min(255u, (r * (m & 0xFF) + 64) >> 7);

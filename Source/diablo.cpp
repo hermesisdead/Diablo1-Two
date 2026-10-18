@@ -2420,6 +2420,14 @@ void InitKeymapActions()
 	    nullptr,
 	    IsGameRunning);
 	options.Keymapper.AddAction(
+	    "ToggleNewTextures",
+	    N_("New textures"),
+	    N_("Switches townspeople and animals between the new sprites and the original art."),
+	    SDLK_BACKSLASH,
+	    [] { ToggleNewTextures(); },
+	    nullptr,
+	    [] { return true; });
+	options.Keymapper.AddAction(
 	    "ToggleFreeMovement",
 	    N_("Free movement"),
 	    N_("Toggles free movement: move at any angle instead of along the tile grid."),

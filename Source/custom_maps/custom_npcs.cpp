@@ -37,6 +37,12 @@ const std::vector<NpcLook> AllLooks {
 	{ "TOWN_FARMER", "Farmer", "towners\\farmer\\farmrn2", 15, 3 },
 	{ "TOWN_COWFARM", "Farmer in a cow suit", "towners\\farmer\\cfrmrn2", 15, 3 },
 	{ "TOWN_GIRL", "Girl", "towners\\girl\\girlw1", 20, 6 },
+	// Only drawn as new sprites.
+	{ "NEW_DRUNK_STANDING", "Drunkard (standing)", "towners\\new\\farnham_stand", 18, 3 },
+	{ "NEW_BROWN_SUIT", "Farmer in a brown cow suit", "towners\\new\\nut_brown", 15, 3 },
+	{ "NEW_GIRL_APRON", "Girl in an apron", "towners\\new\\celia2", 20, 6 },
+	{ "NEW_GIRL_BUCKET", "Girl with a bucket", "towners\\new\\celia_beer1", 20, 6 },
+	{ "NEW_GIRL_BUCKET2", "Girl with a bucket (2)", "towners\\new\\celia_beer2", 20, 6 },
 };
 
 std::string NpcsPath()
@@ -209,7 +215,7 @@ const std::vector<NpcLook> &NpcLooks()
 	static std::vector<NpcLook> looks;
 	if (looks.empty()) {
 		for (const NpcLook &look : AllLooks) {
-			if (FindAsset(StrCat(look.path, ".cel").c_str()).ok())
+			if (TownerLookExists(look.path))
 				looks.push_back(look);
 		}
 	}
@@ -454,10 +460,17 @@ void InitCustomNpcTowner(Towner &towner)
 			return;
 		NameStore.push_back(npc->name);
 		towner.name = NameStore.back();
-		if (towner.ownedAnim) {
-			const std::array<uint8_t, 256> trn = BuildNpcTrn(*npc, logical_palette);
+		const std::array<uint8_t, 256> trn = BuildNpcTrn(*npc, logical_palette);
+		if (towner.ownedAnim)
 			ClxApplyTrans(*towner.ownedAnim, trn.data());
-		}
+		if (towner.ownedNewAnim)
+			ClxApplyTrans(*towner.ownedNewAnim, trn.data());
+		// Their own colours only exist in 256 colours: no full-colour version unless unchanged.
+		bool recoloured = false;
+		for (int i = 0; i < 256; i++)
+			recoloured = recoloured || trn[i] != i;
+		if (recoloured)
+			towner.hd = nullptr;
 		return;
 	}
 }

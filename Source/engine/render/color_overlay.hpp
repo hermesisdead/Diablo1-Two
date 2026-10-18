@@ -62,6 +62,14 @@ void ColorOverlayMulLight(int x, int y, float r, float g, float b);
 void ColorOverlayFloorSnapshot(const Surface &floor, int scale, int offsetX);
 void ColorOverlayDecal(int x, int y, OverlayColor color, float alpha);
 
+/**
+ * @brief Full-colour sprites (HD textures): a pixel of a sprite drawn in true colour over the scene,
+ * shown only if, when the world is finished, the 8-bit pixel there is still `expect` (what the
+ * sprite drew there, or what was under it): walls and people drawn in front keep it hidden.
+ * @param out The surface the sprite was drawn on (the game view), `p` in its coordinates.
+ */
+void ColorOverlaySpritePixel(const Surface &out, Point p, OverlayColor color, uint8_t alpha, uint8_t expect);
+
 /** @brief A whole-region wash: before everything else (darkening) or after (flashes). */
 void ColorOverlayWash(OverlayColor color, float alpha, bool last);
 

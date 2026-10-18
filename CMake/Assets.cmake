@@ -232,6 +232,40 @@ set(devilutionx_assets
   animals/goat.anm
   animals/pig.anm
   animals/sheep.anm
+  towners/new/adria.clx
+  towners/new/cain.clx
+  towners/new/celia1.clx
+  towners/new/celia2.clx
+  towners/new/celia_beer1.clx
+  towners/new/celia_beer2.clx
+  towners/new/deadguy.clx
+  towners/new/farnham.clx
+  towners/new/farnham_stand.clx
+  towners/new/gillian.clx
+  towners/new/griswold.clx
+  towners/new/lester.clx
+  towners/new/nut.clx
+  towners/new/nut_brown.clx
+  towners/new/ogden.clx
+  towners/new/pepin.clx
+  towners/new/wirt.clx
+  towners/new/adria.hds
+  towners/new/cain.hds
+  towners/new/celia1.hds
+  towners/new/celia2.hds
+  towners/new/celia_beer1.hds
+  towners/new/celia_beer2.hds
+  towners/new/deadguy.hds
+  towners/new/farnham.hds
+  towners/new/farnham_stand.hds
+  towners/new/gillian.hds
+  towners/new/griswold.hds
+  towners/new/lester.hds
+  towners/new/nut.hds
+  towners/new/nut_brown.hds
+  towners/new/ogden.hds
+  towners/new/pepin.hds
+  towners/new/wirt.hds
   ui_art/diablo.pal
   ui_art/creditsw.clx
   ui_art/dvl_but_sml.clx

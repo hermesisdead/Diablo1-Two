@@ -775,7 +775,10 @@ void DrawMonsterHelper(const Surface &out, Point tilePosition, Point targetBuffe
 		if (mi == pcursmonst) {
 			ClxDrawOutlineSkipColorZero(out, OutlineColorsTowner, position, sprite);
 		}
-		ClxDraw(out, position, sprite);
+		if (towner.showingNew && towner.hd != nullptr && HdTexturesActive())
+			DrawHdSprite(out, position, *towner.hd, towner._tAnimFrame);
+		else
+			ClxDraw(out, position, sprite);
 		if (towner.ownedOverlay && towner.ownedOverlay->numSprites() > 0)
 			ClxDraw(out, position, (*towner.ownedOverlay)[towner._tAnimFrame % towner.ownedOverlay->numSprites()]);
 		return;

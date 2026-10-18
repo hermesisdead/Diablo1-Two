@@ -802,6 +802,12 @@ GraphicsOptions::GraphicsOptions()
     , townWeather("Town Weather", OptionEntryFlags::None, N_("Town Weather"), N_("Changing weather in Tristram and the Darkwood: rain, thunderstorms, snow, wind, fog and fireflies, each with its own ambient sound."), true)
     , dungeonMoods("Dungeon Moods", OptionEntryFlags::None, N_("Dungeon Moods"), N_("Every visit to a dungeon level rolls its own atmosphere and ambient sound: fog, dust, frost, embers, dripping water, ash, spores or blood mist."), true)
     , smoothEffects("Smooth Effects", OptionEntryFlags::None, N_("Smooth Effects"), N_("Fog, rain, glows and other weather effects are blended in full colour with real transparency instead of a dither pattern."), true)
+    , textures("Textures", OptionEntryFlags::None, N_("Textures"), N_("Townspeople and animals: the original art (Vanilla), the new sprites in full colour (HD, needs Smooth Effects), or the new sprites in the game's 256 colours (HD Redux). Cycle in game with \\."), TextureMode::HD,
+          {
+              { TextureMode::Vanilla, N_("Vanilla") },
+              { TextureMode::HD, N_("HD") },
+              { TextureMode::HDRedux, N_("HD Redux") },
+          })
     , weatherEffects("Weather Effects", OptionEntryFlags::None, N_("Weather Effects"), N_("Shows weather and dungeon mood effects. Also in the weather panel (F8)."), true)
     , weatherIntensity("Weather Intensity", OptionEntryFlags::Invisible, "Weather Intensity", "Weather effect strength in percent (F8 weather panel).", 100)
     , coloredLighting("Coloured Lighting", OptionEntryFlags::None, N_("Coloured Lighting"), N_("Torches and candles glow warm, fire spells orange, lightning cold blue, portals blue. Needs Smooth Effects."), true)
@@ -844,6 +850,7 @@ std::vector<OptionEntryBase *> GraphicsOptions::GetEntries()
 		&townWeather,
 		&dungeonMoods,
 		&smoothEffects,
+		&textures,
 		&weatherEffects,
 		&weatherIntensity,
 		&coloredLighting,

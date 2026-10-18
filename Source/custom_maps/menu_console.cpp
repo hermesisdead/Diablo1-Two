@@ -14,6 +14,8 @@
 #include "custom_maps/campaign.hpp"
 #include "custom_maps/campaign_quests.hpp"
 #include "custom_maps/custom_town.hpp"
+#include "options.h"
+#include "towners.h"
 #include "custom_maps/custom_npcs.hpp"
 #include "engine/load_cel.hpp"
 #include "engine/load_file.hpp"
@@ -825,9 +827,10 @@ void DrawNpcPreview(const Surface &out, const CustomNpc &npc, Rectangle box)
 	const NpcLook *look = FindNpcLook(npc.look);
 	if (look == nullptr)
 		return;
-	if (PreviewLook != look->path || !PreviewSprites) {
-		PreviewLook = std::string(look->path);
-		PreviewSprites = LoadCel(PreviewLook.c_str(), 96);
+	const std::string wanted = StrCat(look->path, NewTexturesActive() ? "|new" : "|classic");
+	if (PreviewLook != wanted || !PreviewSprites) {
+		PreviewLook = wanted;
+		PreviewSprites = LoadTownerLookSprites(look->path, 96);
 	}
 	const std::array<uint8_t, 256> trn = BuildNpcTrn(npc, logical_palette);
 	const int frame = static_cast<int>((SDL_GetTicks() / static_cast<uint32_t>(std::max(1, look->delay) * 50)) % static_cast<uint32_t>(std::max(1, look->frames)));

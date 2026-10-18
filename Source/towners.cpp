@@ -9,9 +9,14 @@
 #include <unordered_map>
 
 #include "cursor.h"
+#include "diablo_msg.hpp"
 #include "cursor_defs.hpp"
 #include "engine/clx_sprite.hpp"
+#include "engine/assets.hpp"
 #include "engine/load_cel.hpp"
+#include "engine/load_clx.hpp"
+#include "options.h"
+#include "utils/str_cat.hpp"
 #include "engine/load_file.hpp"
 #include "engine/random.hpp"
 #include "engine/render/clx_render.hpp"
@@ -88,9 +93,45 @@ const TownerDataEntry *FindTownerDataEntry(_talker_id type, Point position = {})
 }
 #endif
 
+/** Original towner animations and the new sprites drawn for them (same frames, same order). */
+constexpr std::pair<std::string_view, const char *> NewTownerTextures[] {
+	{ "towners\\smith\\smithn", "towners\\new\\griswold.clx" },
+	{ "towners\\healer\\healer", "towners\\new\\pepin.clx" },
+	{ "towners\\butch\\deadguy", "towners\\new\\deadguy.clx" },
+	{ "towners\\twnf\\twnfn", "towners\\new\\ogden.clx" },
+	{ "towners\\strytell\\strytell", "towners\\new\\cain.clx" },
+	{ "towners\\drunk\\twndrunk", "towners\\new\\farnham.clx" },
+	{ "towners\\townwmn1\\witch", "towners\\new\\adria.clx" },
+	{ "towners\\townwmn1\\wmnn", "towners\\new\\gillian.clx" },
+	{ "towners\\townboy\\pegkid1", "towners\\new\\wirt.clx" },
+	{ "towners\\farmer\\farmrn2", "towners\\new\\lester.clx" },
+	{ "towners\\farmer\\cfrmrn2", "towners\\new\\nut.clx" },
+	{ "towners\\farmer\\mfrmrn2", "towners\\new\\nut_brown.clx" },
+	{ "towners\\girl\\girlw1", "towners\\new\\celia1.clx" },
+	{ "towners\\girl\\girls1", "towners\\new\\celia2.clx" },
+};
+
+/** Looks that only exist as new sprites ("towners\\new\\<name>"): shown with either setting. */
+bool IsNewOnlyLook(std::string_view path)
+{
+	return path.starts_with("towners\\new\\");
+}
+
+/** Shows the new or the original art on one towner. */
+void ApplyTownerTexture(Towner &towner)
+{
+	const bool useNew = NewTexturesActive() && towner.ownedNewAnim;
+	if (useNew)
+		towner.anim.emplace(*towner.ownedNewAnim);
+	else if (towner.classicAnim)
+		towner.anim = towner.classicAnim;
+	towner.showingNew = useNew || towner.classicIsNew;
+}
+
 void NewTownerAnim(Towner &towner, ClxSpriteList sprites, uint8_t numFrames, int delay)
 {
 	towner.anim.emplace(sprites);
+	towner.classicAnim.emplace(sprites);
 	towner._tAnimLen = numFrames;
 	towner._tAnimFrame = 0;
 	towner._tAnimCnt = 0;
@@ -115,8 +156,36 @@ void InitTownerInfo(Towner &towner, const TownerData &townerData, const TownerDa
 void LoadTownerAnimations(Towner &towner, const char *path, int frames, int delay)
 {
 	towner.ownedAnim = std::nullopt;
-	towner.ownedAnim = LoadCel(path, towner._tAnimWidth);
+	towner.ownedNewAnim = std::nullopt;
+	towner.hd = nullptr;
+	towner.classicIsNew = false;
+	const std::string_view classicPath = path;
+	auto loadHd = [&towner](std::string_view clxPath) {
+		towner.hd = LoadHdSprite(StrCat(clxPath.substr(0, clxPath.size() - 4), ".hds"));
+	};
+	const char *newPath = IsNewOnlyLook(classicPath) ? nullptr : NewTownerTexturePath(classicPath);
+	if (IsNewOnlyLook(classicPath)) {
+		const std::string clx = StrCat(classicPath, ".clx");
+		towner.ownedAnim = LoadClx(clx.c_str());
+		towner.classicIsNew = true;
+		loadHd(clx);
+	} else if (newPath != nullptr && !FindAsset(StrCat(classicPath, ".cel")).ok()) {
+		// No original art here (a Hellfire townsperson in Diablo): the new sprites stand in.
+		towner.ownedAnim = LoadClx(newPath);
+		towner.classicIsNew = true;
+		loadHd(newPath);
+		newPath = nullptr;
+	} else {
+		towner.ownedAnim = LoadCel(path, towner._tAnimWidth);
+	}
+	// Jamal borrows Ogden's sprites (in his own colours): he keeps them.
+	if (newPath != nullptr && towner._ttype != TOWN_CARAVAN) {
+		towner.ownedNewAnim = LoadOptionalClx(newPath);
+		if (towner.ownedNewAnim)
+			loadHd(newPath);
+	}
 	NewTownerAnim(towner, *towner.ownedAnim, frames, delay);
+	ApplyTownerTexture(towner);
 }
 
 /**
@@ -821,6 +890,7 @@ Towner *GetTowner(_talker_id type)
 
 void InitTowners()
 {
+	GetOptions().Graphics.textures.SetValueChangedCallback(ApplyTownerTextures);
 	assert(!CowSprites);
 
 	// Load towner data from TSV files
@@ -903,10 +973,66 @@ void InitTowners()
 	}
 }
 
+const char *NewTownerTexturePath(std::string_view classicPath)
+{
+	for (const auto &[classic, replacement] : NewTownerTextures) {
+		if (classic == classicPath)
+			return replacement;
+	}
+	return nullptr;
+}
+
+bool TownerLookExists(std::string_view path)
+{
+	if (IsNewOnlyLook(path))
+		return FindAsset(StrCat(path, ".clx")).ok();
+	if (FindAsset(StrCat(path, ".cel")).ok())
+		return true;
+	const char *newPath = NewTownerTexturePath(path);
+	return newPath != nullptr && FindAsset(newPath).ok();
+}
+
+OwnedClxSpriteList LoadTownerLookSprites(std::string_view path, uint16_t width)
+{
+	if (IsNewOnlyLook(path))
+		return LoadClx(StrCat(path, ".clx").c_str());
+	const char *newPath = NewTownerTexturePath(path);
+	const bool haveClassic = FindAsset(StrCat(path, ".cel")).ok();
+	if (newPath != nullptr && (NewTexturesActive() || !haveClassic)) {
+		if (OptionalOwnedClxSpriteList sprites = LoadOptionalClx(newPath); sprites)
+			return std::move(*sprites);
+	}
+	return LoadCel(std::string(path).c_str(), width);
+}
+
+void ApplyTownerTextures()
+{
+	for (Towner &towner : Towners)
+		ApplyTownerTexture(towner);
+}
+
+void ToggleNewTextures()
+{
+	auto &option = GetOptions().Graphics.textures;
+	const TextureMode next = *option == TextureMode::Vanilla ? TextureMode::HD : (*option == TextureMode::HD ? TextureMode::HDRedux : TextureMode::Vanilla);
+	option.SetValue(next);
+	ApplyTownerTextures();
+	switch (next) {
+	case TextureMode::Vanilla: InitDiabloMsg(_("Textures: Vanilla")); break;
+	case TextureMode::HD:
+		InitDiabloMsg(*GetOptions().Graphics.smoothEffects ? _("Textures: HD") : _("Textures: HD (needs Smooth Effects for full colour)"));
+		break;
+	default: InitDiabloMsg(_("Textures: HD Redux")); break;
+	}
+}
+
 void FreeTownerGFX()
 {
 	for (Towner &towner : Towners) {
 		towner.ownedAnim = std::nullopt;
+		towner.ownedNewAnim = std::nullopt;
+		towner.classicAnim = std::nullopt;
+		towner.hd = nullptr;
 		towner.ownedOverlay = std::nullopt;
 	}
 	CowSprites = std::nullopt;

@@ -11,6 +11,9 @@
 
 #include "custom_maps/custom_town.hpp"
 #include "custom_maps/map_editor.hpp"
+#include "options.h"
+#include "engine/render/color_overlay.hpp"
+#include "engine/render/hd_sprite.hpp"
 #include "diablo.h"
 #include "engine/clx_sprite.hpp"
 #include "engine/direction.hpp"
@@ -564,6 +567,8 @@ struct SpriteSet {
 
 const SpriteSet *AnimalSprites(int kind)
 {
+	if (!NewTexturesActive())
+		return nullptr; // original-style: the drawn animals
 	static std::array<std::optional<SpriteSet>, Kinds.size()> sets;
 	static std::array<bool, Kinds.size()> tried {};
 	if (tried[kind])
@@ -614,10 +619,19 @@ void BlitSprite(const Surface &out, Point feet, const SpriteFrame &f, float scal
 	const int left = static_cast<int>(static_cast<float>(f.ox) * scale), top = static_cast<int>(static_cast<float>(f.oy) * scale);
 	const float rx = static_cast<float>(width) * 0.42f, ry = rx * 0.32f;
 	const Point c = feet + Displacement { left + width / 2 + 2, 0 };
+	const bool hd = HdTexturesActive();
+	// HD: the light of the tile as a brightness (light table 0 is full light).
+	const float lit = 1.0f - static_cast<float>(lightLevel) / static_cast<float>(std::max<size_t>(1, LightTables.size() - 1));
 	for (int y = static_cast<int>(-ry); y <= static_cast<int>(ry); y++) {
 		for (int x = static_cast<int>(-rx); x <= static_cast<int>(rx); x++) {
 			const float dd = (x * x) / (rx * rx) + (y * y) / (ry * ry);
 			const Point p = c + Displacement { x, y };
+			if (hd && dd <= 1.0f && out.InBounds(p)) {
+				// A soft, see-through shadow in full colour.
+				const float a = 0.5f * std::min(1.0f, (1.0f - dd) * 2.5f);
+				ColorOverlaySpritePixel(out, p, { 0, 0, 0 }, static_cast<uint8_t>(a * 255.0f), *out.at(p.x, p.y));
+				continue;
+			}
 			if (dd <= 1.0f && out.InBounds(p) && (dd < 0.6f || Grain(p.x, p.y) > (dd - 0.6f) * 5.0f - 1.0f)) {
 				const SDL_Color &g = logical_palette[*out.at(p.x, p.y)];
 				*out.at(p.x, p.y) = NearestIndex({ g.r * 0.45f, g.g * 0.45f, g.b * 0.45f });
@@ -642,11 +656,19 @@ void BlitSprite(const Surface &out, Point feet, const SpriteFrame &f, float scal
 					solid++;
 				}
 			}
-			if (solid == 0 || solid * 2 < total)
+			if (solid == 0 || (!hd && solid * 2 < total))
 				continue;
 			const Point p = feet + Displacement { left + x, top + y };
-			if (out.InBounds(p))
-				*out.at(p.x, p.y) = tbl[NearestIndex({ static_cast<float>(r) / solid, static_cast<float>(g) / solid, static_cast<float>(b) / solid })];
+			if (!out.InBounds(p))
+				continue;
+			const Rgb avg { static_cast<float>(r) / solid, static_cast<float>(g) / solid, static_cast<float>(b) / solid };
+			if (solid * 2 >= total)
+				*out.at(p.x, p.y) = tbl[NearestIndex(avg)];
+			if (hd) {
+				// The real colour, edges partly covering what is behind.
+				const auto ch = [lit](float v) { return static_cast<uint8_t>(std::clamp(v * lit, 0.0f, 255.0f)); };
+				ColorOverlaySpritePixel(out, p, { ch(avg.r), ch(avg.g), ch(avg.b) }, static_cast<uint8_t>(255 * solid / total), *out.at(p.x, p.y));
+			}
 		}
 	}
 }

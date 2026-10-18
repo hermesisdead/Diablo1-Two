@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "engine/clx_sprite.hpp"
+#include "engine/render/hd_sprite.hpp"
 #include "items.h"
 #include "levels/dun_tile.hpp"
 #include "player.h"
@@ -57,6 +58,16 @@ extern const std::unordered_map<_talker_id, const char *> TownerShortNames;     
 
 struct Towner {
 	OptionalOwnedClxSpriteList ownedAnim;
+	/** The new-texture version of ownedAnim (same frames), when there is one. */
+	OptionalOwnedClxSpriteList ownedNewAnim;
+	/** The original-art animation (ownedAnim, or a shared sheet such as the cows'). */
+	OptionalClxSpriteList classicAnim;
+	/** The full-colour version of the new sprites (HD textures), when there is one. */
+	std::shared_ptr<const HdSprite> hd;
+	/** ownedAnim itself is new sprites (a look that has no original art). */
+	bool classicIsNew = false;
+	/** The new sprites are the ones shown now. */
+	bool showingNew = false;
 	/** Drawn over the towner each frame (the pack cow's load). */
 	OptionalOwnedClxSpriteList ownedOverlay;
 	OptionalClxSpriteList anim;
@@ -84,7 +95,7 @@ struct Towner {
 
 	[[nodiscard]] ClxSprite currentSprite() const
 	{
-		return (*anim)[_tAnimFrame];
+		return (*anim)[_tAnimFrame % anim->numSprites()];
 	}
 	[[nodiscard]] Displacement getRenderingOffset() const
 	{
@@ -93,6 +104,17 @@ struct Towner {
 };
 
 extern std::vector<Towner> Towners;
+
+/** @brief Shows the new or the original art on every townsperson, as the Textures option says. */
+void ApplyTownerTextures();
+/** @brief Cycles Vanilla, HD and HD Redux textures (the backslash key). */
+void ToggleNewTextures();
+/** @brief The new-texture sprites standing in for an original towner animation (e.g. "towners\\smith\\smithn"), if any. */
+[[nodiscard]] const char *NewTownerTexturePath(std::string_view classicPath);
+/** @brief Whether a towner look (original path without extension, or "towners\\new\\<name>") can be shown. */
+[[nodiscard]] bool TownerLookExists(std::string_view path);
+/** @brief A towner look's sprites as the New Textures option shows them. */
+[[nodiscard]] OwnedClxSpriteList LoadTownerLookSprites(std::string_view path, uint16_t width);
 
 /**
  * @brief Returns the number of unique towner types found in TSV data.

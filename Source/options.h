@@ -67,6 +67,13 @@ enum class StartUpSplash : uint8_t {
 	LogoAndTitleDialog = 2,
 };
 
+/** @brief How townspeople and animals are drawn. */
+enum class TextureMode : uint8_t {
+	Vanilla, // the original art
+	HD,      // the new sprites in full colour, with soft edges and see-through shadows
+	HDRedux, // the new sprites in the game's own 256 colours, pixel for pixel (low-fi)
+};
+
 enum class ScalingQuality : uint8_t {
 	NearestPixel,
 	BilinearFiltering,
@@ -570,6 +577,8 @@ struct GraphicsOptions : OptionCategoryBase {
 	OptionEntryBoolean dungeonMoods;
 	/** @brief Weather and mood effects with real transparency instead of a dither pattern. */
 	OptionEntryBoolean smoothEffects;
+	/** @brief Original art, the new sprites in full colour (HD), or the new sprites in the game's 256 colours (HD Redux). \\ cycles. */
+	OptionEntryEnum<TextureMode> textures;
 	/** @brief Master switch for weather and mood effects (F8 weather panel). */
 	OptionEntryBoolean weatherEffects;
 	/** @brief Weather effect strength in percent, 0..200 (F8 weather panel). */
