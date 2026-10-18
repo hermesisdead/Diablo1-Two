@@ -35,7 +35,7 @@ struct Kind {
 };
 
 constexpr std::array<Kind, 8> Kinds { {
-	{ "cow", "Cow", 1.0f, 0.55f, 5, 0.6f },
+	{ "cow", "Cow", 1.0f, 0.0f, 0, 0.0f }, // the game's cow art has no walk: cows stay put, chew and turn
 	{ "horse", "Horse", 2.0f, 0.9f, 6, 0.55f },
 	{ "sheep", "Sheep", 1.8f, 0.6f, 5, 0.7f },
 	{ "goat", "Goat", 1.75f, 0.8f, 6, 0.5f },
@@ -609,6 +609,16 @@ void UpdateAnimal(Animal &a, int self, float dt)
 {
 	a.animTime += dt;
 	const Kind &kind = Kinds[a.kind];
+	if (kind.speed <= 0) {
+		// Stays where it was put; now and then turns to face somewhere new.
+		a.state = State::Stand;
+		a.timer -= dt;
+		if (a.timer <= 0) {
+			a.facing = static_cast<Direction>(a.RandomBetween(0, 7));
+			a.timer = 6.0f + a.Random01() * 10.0f;
+		}
+		return;
+	}
 	switch (a.state) {
 	case State::Stand:
 	case State::Graze:
@@ -736,6 +746,14 @@ void UpdateAnimals()
 		const Animal &a = Animals[i];
 		if (InDungeonBounds(a.tile))
 			Occupied[a.tile.x][a.tile.y] = static_cast<int16_t>(i + 1);
+		if (Kinds[a.kind].speed <= 0) {
+			// A standing cow is big: others walk round it, not through it.
+			for (const Displacement d : { Displacement { 1, 0 }, Displacement { -1, 0 }, Displacement { 0, 1 }, Displacement { 0, -1 } }) {
+				const Point t = a.tile + d;
+				if (InDungeonBounds(t) && Occupied[t.x][t.y] == 0)
+					Occupied[t.x][t.y] = static_cast<int16_t>(i + 1);
+			}
+		}
 		if (InDungeonBounds(a.next))
 			Occupied[a.next.x][a.next.y] = static_cast<int16_t>(i + 1);
 	}

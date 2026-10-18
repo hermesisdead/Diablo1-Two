@@ -827,7 +827,7 @@ std::string_view ToolHint(Tool tool)
 	case Tool::Boss: return "Click to place the chosen boss with its minions. Right-click removes. Wheel over the list scrolls it.";
 	case Tool::Chest: return "Click to place a chest (quests can hide an item in it). Right-click removes.";
 	case Tool::Fence: return "Drag a straight run of fence (or a gate). Right-drag removes fencing.";
-	case Tool::Animal: return "Click to place the chosen animal; it wanders around there, never past fences. Right-click removes.";
+	case Tool::Animal: return "Click to place the chosen animal; it wanders around there, never past fences (cows stay put). Right-click removes.";
 	default: return "";
 	}
 }
