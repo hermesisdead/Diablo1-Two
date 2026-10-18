@@ -11,8 +11,10 @@
 
 #include <cstdint>
 #include <string_view>
+#include <vector>
 
 #include "engine/surface.hpp"
+#include "levels/gendung_defs.hpp"
 
 namespace devilution {
 
@@ -58,6 +60,10 @@ struct WeatherStatus {
 [[nodiscard]] WeatherStatus GetWeatherStatus();
 /** @brief Display name of a mood, translated. */
 [[nodiscard]] std::string_view DungeonMoodTitle(DungeonMood mood);
+/** @brief Weathers that suit a level type (what it rolls from), for choosing one in the map editor. */
+[[nodiscard]] std::vector<DungeonMood> MoodsForLevelType(dungeon_type type);
+/** @brief Whether weather is switched on for a level type in the options. */
+[[nodiscard]] bool MoodsEnabledFor(dungeon_type type);
 /** @brief Outdoors: start turning to the next weather now. */
 void ChangeWeatherNow();
 

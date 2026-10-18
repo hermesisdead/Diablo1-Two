@@ -9,6 +9,7 @@
  */
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <expected>
 #include <optional>
@@ -70,6 +71,9 @@ struct MapPortal {
 	MapLink to;
 };
 
+/** @brief Decor layers painted over the ground of town-tiled maps. */
+inline constexpr int MapDecorLayerCount = 3;
+
 struct CustomMap {
 	std::string name;
 	dungeon_type style = DTYPE_CATHEDRAL;
@@ -77,6 +81,9 @@ struct CustomMap {
 	int height = 40;
 	std::vector<uint16_t> tiles;    // width * height piece ids, 0 = solid rock
 	std::vector<int8_t> hues;       // width * height hue shifts in TileHueStepDegrees steps (town-tiled styles), 0 = as drawn
+	// Decor over the ground (town-tiled styles): width * height ids per layer, see engine/render/tile_decor.hpp.
+	std::array<std::vector<uint16_t>, MapDecorLayerCount> decor;
+	std::array<std::vector<int8_t>, MapDecorLayerCount> decorHues;
 	std::vector<uint16_t> monsters; // (2 * width) * (2 * height) .dun monster ids, 0 = none
 	std::vector<uint16_t> objects;  // (2 * width) * (2 * height) .dun object ids, 0 = none
 	std::vector<MapEntryPoint> entries;
@@ -124,6 +131,8 @@ std::expected<void, std::string> WriteTristramLayer(const CustomMap &layer);
 
 /** @brief The custom map being played (or edited), if any. */
 const CustomMap *ActiveCustomMap();
+/** @brief Weather the current level's hand-made map asks for (a DungeonMoodName), empty for the usual changing weather. */
+[[nodiscard]] std::string CurrentMapWeather();
 /** @brief Makes a map the active one; the hero arrives at the named entry point (or the first). */
 void SetActiveCustomMap(CustomMap map, std::string_view entry);
 void ClearActiveCustomMap();

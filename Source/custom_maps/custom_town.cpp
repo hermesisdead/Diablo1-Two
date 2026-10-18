@@ -26,6 +26,7 @@
 #include "tables/townerdat.hpp"
 #include "towners.h"
 #include "engine/load_file.hpp"
+#include "engine/render/tile_decor.hpp"
 #include "engine/render/tile_hue.hpp"
 #include "utils/endian_swap.hpp"
 #include "utils/log.hpp"
@@ -251,6 +252,59 @@ void EnterCustomTownForEditor(std::string_view entry)
 	StartNewLvl(*MyPlayer, WM_DIABRETOWN, 0);
 }
 
+namespace {
+unsigned HiddenDecorLayers = 0;
+static_assert(MapDecorLayerCount == DecorLayerCount);
+
+/** Puts a map's decor layers into the level: standing parts of town megatiles, and flower patches. */
+void PaintDecorLayers(const CustomMap &map)
+{
+	std::memset(dDecorPiece, 0, sizeof(dDecorPiece));
+	std::memset(dDecorFlower, 0, sizeof(dDecorFlower));
+	std::memset(dDecorHue, 0, sizeof(dDecorHue));
+	std::memset(dDecorSolid, 0, sizeof(dDecorSolid));
+	for (int layer = 0; layer < MapDecorLayerCount; layer++) {
+		if ((HiddenDecorLayers & (1u << layer)) != 0 || map.decor[layer].size() != map.tiles.size())
+			continue;
+		const bool hasHues = map.decorHues[layer].size() == map.tiles.size();
+		for (int y = 0; y < map.height; y++) {
+			for (int x = 0; x < map.width; x++) {
+				const size_t i = static_cast<size_t>(y) * map.width + x;
+				const uint16_t id = map.decor[layer][i];
+				if (id == 0)
+					continue;
+				const int8_t hue = hasHues ? map.decorHues[layer][i] : 0;
+				std::array<uint16_t, 4> pieces {};
+				const bool flower = IsFlowerDecor(id);
+				if (!flower) {
+					if (pMegaTiles == nullptr || id > MegaTileCount)
+						continue;
+					const MegaTile mega = pMegaTiles[id - 1];
+					pieces = { Swap16LE(mega.micro1), Swap16LE(mega.micro2), Swap16LE(mega.micro3), Swap16LE(mega.micro4) };
+				}
+				for (int k = 0; k < 4; k++) {
+					const Point w { 16 + 2 * x + k % 2, 16 + 2 * y + k / 2 };
+					dDecorHue[layer][w.x][w.y] = hue;
+					if (flower) {
+						dDecorFlower[layer][w.x][w.y] = static_cast<uint8_t>(id - DecorFlowerBase + 1);
+					} else if (PieceHasStandingParts(pieces[k])) {
+						dDecorPiece[layer][w.x][w.y] = static_cast<uint16_t>(pieces[k] + 1);
+						if (HasAnyOf(SOLData[pieces[k]], TileProperties::Solid))
+							dDecorSolid[w.x][w.y] = true;
+					}
+				}
+			}
+		}
+	}
+	MarkWalkabilityChanged();
+}
+} // namespace
+
+void SetHiddenDecorLayers(unsigned mask)
+{
+	HiddenDecorLayers = mask;
+}
+
 void PaintCustomTownTiles()
 {
 	PaintTownStyleTiles(CurrentCustomTownMap());
@@ -265,8 +319,10 @@ void PaintTownStyleTiles(const CustomMap *map)
 	}
 	std::memset(dungeon, 0, sizeof(dungeon));
 	ClearTileHues();
-	if (map == nullptr)
+	if (map == nullptr) {
+		PaintDecorLayers(CustomMap {});
 		return;
+	}
 	const bool hasHues = map->hues.size() == map->tiles.size();
 	for (int y = 0; y < map->height; y++) {
 		for (int x = 0; x < map->width; x++) {
@@ -279,6 +335,7 @@ void PaintTownStyleTiles(const CustomMap *map)
 			}
 		}
 	}
+	PaintDecorLayers(*map);
 }
 
 void CreateCustomTownLevel(lvl_entry entry)

@@ -14,7 +14,7 @@ bool IsTileNotSolid(Point position)
 		return false;
 	}
 
-	return !TileHasAny(position, TileProperties::Solid);
+	return !TileHasAny(position, TileProperties::Solid) && !dDecorSolid[position.x][position.y];
 }
 
 bool IsTileSolid(Point position)
@@ -23,7 +23,7 @@ bool IsTileSolid(Point position)
 		return false;
 	}
 
-	return TileHasAny(position, TileProperties::Solid);
+	return TileHasAny(position, TileProperties::Solid) || dDecorSolid[position.x][position.y];
 }
 
 bool IsTileWalkable(Point position, bool ignoreDoors)

@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <optional>
+#include <unordered_map>
 #include <span>
 #include <string>
 #include <vector>
@@ -13,6 +14,7 @@
 #include "control/control.hpp"
 #include "controls/control_mode.hpp"
 #include "cursor.h"
+#include "custom_maps/building_library.hpp"
 #include "custom_maps/campaign.hpp"
 #include "custom_maps/custom_map.hpp"
 #include "custom_maps/custom_npcs.hpp"
@@ -24,10 +26,12 @@
 #include "engine/palette.h"
 #include "engine/rectangle.hpp"
 #include "engine/render/clx_render.hpp"
+#include "engine/render/dungeon_mood.hpp"
 #include "engine/render/dun_render.hpp"
 #include "engine/render/light_render.hpp"
 #include "engine/render/primitive_render.hpp"
 #include "engine/render/text_render.hpp"
+#include "engine/render/tile_decor.hpp"
 #include "engine/render/tile_hue.hpp"
 #include "engine/render/scrollrt.h"
 #include "engine/render/world_projector.hpp"
@@ -99,6 +103,15 @@ struct Snapshot {
 	std::vector<MapBoss> bosses;
 	std::vector<uint16_t> objects;
 	std::vector<int8_t> hues;
+	std::array<std::vector<uint16_t>, MapDecorLayerCount> decor;
+	std::array<std::vector<int8_t>, MapDecorLayerCount> decorHues;
+};
+
+/** What the Paint tool lays: ground (a brush or one tile), decor on a decor layer, or a whole building. */
+enum class PaintKind : uint8_t {
+	Ground,
+	Decor,
+	Building,
 };
 
 /** Town ground brushes: town megatiles (1-based), one picked at random per tile for variety. */
@@ -120,36 +133,6 @@ const std::vector<GroundBrush> &GroundBrushes()
 		{ "Large trees", { 41, 55, 96 } },
 	};
 	return brushes;
-}
-
-/** Pieces of classic Tristram that can be stamped into a town, in megatiles (inclusive). */
-struct TownStamp {
-	std::string_view name;
-	int x0, y0, x1, y1;
-};
-
-const std::vector<TownStamp> &TownStamps()
-{
-	static const std::vector<TownStamp> stamps {
-		{ "Cathedral", 7, 5, 16, 16 },
-		{ "Tavern", 22, 26, 28, 32 },
-		{ "Smithy", 29, 27, 36, 32 },
-		{ "Healer's house", 23, 36, 28, 40 },
-		{ "Witch's hut", 36, 7, 40, 10 },
-		{ "Gillian's house", 18, 31, 22, 34 },
-		{ "Farnham's house", 33, 38, 36, 42 },
-		{ "Cottage", 34, 33, 37, 36 },
-		{ "House (large)", 22, 19, 27, 23 },
-		{ "House (small)", 12, 23, 15, 26 },
-		{ "Fountain", 29, 34, 32, 36 },
-		{ "Graveyard", 16, 9, 20, 13 },
-		{ "Catacombs entrance", 23, 8, 26, 12 },
-		{ "Caves entrance", 7, 33, 9, 36 },
-		{ "Hell entrance", 17, 38, 23, 41 },
-		{ "Stream", 0, 0, 4, 14 },
-		{ "Thicket", 0, 32, 9, 41 },
-	};
-	return stamps;
 }
 
 struct Session {
@@ -176,15 +159,31 @@ struct Session {
 
 	// Town tools.
 	int brush = 0;            // ground brush, or -1 for a single tile (pickerTile)
-	int stamp = 0;            // town stamp, or -1 for the clipboard
-	std::vector<uint16_t> clipboard;
-	std::vector<int8_t> clipHues;
-	int clipWidth = 0;
-	int clipHeight = 0;
+	int stamp = 0;            // index in Buildings(), or -1 for the copied area
+	Building clip;            // the copied area
 	int npc = 0;
+
+	// Paint tool: what is laid, and on which layer (0 ground, 1.. decor layers).
+	PaintKind paintKind = PaintKind::Ground;
+	uint16_t pickerDecor = DecorFlowerBase; // decor id painted (0 erases)
+	int pickerBuilding = 0;                 // index in Buildings()
+	int layer = 0;
+	unsigned hiddenLayers = 0;              // decor layers hidden while editing (bit per layer)
+
+	// Building maker: drag out an area, then type its name.
+	bool capturing = false;
+	bool naming = false;
+	bool replaceAsked = false;
+	std::string nameText;
+	Building pending;
+	std::string deleteAsk;
+	uint32_t deleteUntil = 0;
+
+	bool weatherMenu = false; // the weather list is open
 
 	// Tile picker (Paint tool): every megatile of the tileset as a picture.
 	bool showTilePicker = false;
+	int pickerTab = 0;         // Ground, Decor, Buildings, All
 	uint16_t pickerTile = 1;   // painted when brush < 0
 	int pickerScroll = 0;      // first row of pictures shown
 	int pickerZoom = 2;        // picture size, 1 to 3
@@ -203,6 +202,9 @@ struct Session {
 		uint16_t piece;
 		int8_t hue;
 		int8_t special;
+		std::array<uint16_t, DecorLayerCount> decorPiece;
+		std::array<uint8_t, DecorLayerCount> decorFlower;
+		std::array<int8_t, DecorLayerCount> decorHue;
 	};
 	std::vector<GhostCell> ghost;
 
@@ -279,7 +281,7 @@ bool OnEditorLevel()
 
 void PushUndo()
 {
-	S.undo.push_back({ S.map.plan, S.map.overrides, S.map.tiles, S.map.entries, S.map.portals, S.map.npcs, S.map.spawners, S.map.bosses, S.map.objects, S.map.hues });
+	S.undo.push_back({ S.map.plan, S.map.overrides, S.map.tiles, S.map.entries, S.map.portals, S.map.npcs, S.map.spawners, S.map.bosses, S.map.objects, S.map.hues, S.map.decor, S.map.decorHues });
 	if (S.undo.size() > 60)
 		S.undo.erase(S.undo.begin());
 	S.dirty = true;
@@ -301,6 +303,7 @@ void Rebuild()
 {
 	if (S.kind == Kind::Tristram)
 		return; // Tristram's tiles are not edited
+	SetHiddenDecorLayers(S.editing ? S.hiddenLayers : 0);
 	if (S.kind == Kind::Town) {
 		SetCustomTownMapForEditor(S.map);
 		if (OnEditorLevel())
@@ -407,13 +410,47 @@ void PaintGround(Point a, Point b)
 	Rebuild();
 }
 
+/** Town: decor id on a decor layer (0-based) at a megatile. */
+uint16_t &TownDecor(int layer, Point piece)
+{
+	std::vector<uint16_t> &ids = S.map.decor[layer];
+	if (ids.size() != S.map.tiles.size())
+		ids.assign(S.map.tiles.size(), 0);
+	return ids[static_cast<size_t>(piece.y) * S.map.width + piece.x];
+}
+
+int8_t &TownDecorHue(int layer, Point piece)
+{
+	std::vector<int8_t> &hues = S.map.decorHues[layer];
+	if (hues.size() != S.map.tiles.size())
+		hues.assign(S.map.tiles.size(), 0);
+	return hues[static_cast<size_t>(piece.y) * S.map.width + piece.x];
+}
+
+/** Town: the building the Stamp tool places (the copied area for stamp -1), nullptr if none. */
+const Building *StampBuilding()
+{
+	if (S.stamp < 0)
+		return S.clip.width > 0 ? &S.clip : nullptr;
+	const std::vector<Building> &all = Buildings();
+	return S.stamp < static_cast<int>(all.size()) ? &all[S.stamp] : nullptr;
+}
+
+/** Town: the building being placed now (Stamp tool, or a building chosen in the picker). */
+const Building *PlacingBuilding()
+{
+	if (S.tool == Tool::Paint && S.paintKind == PaintKind::Building) {
+		const std::vector<Building> &all = Buildings();
+		return S.pickerBuilding >= 0 && S.pickerBuilding < static_cast<int>(all.size()) ? &all[S.pickerBuilding] : nullptr;
+	}
+	return S.tool == Tool::Stamp ? StampBuilding() : nullptr;
+}
+
 /** Town: size of the current stamp in megatiles. */
 Size StampSize()
 {
-	if (S.stamp < 0)
-		return { S.clipWidth, S.clipHeight };
-	const TownStamp &s = TownStamps()[S.stamp];
-	return { s.x1 - s.x0 + 1, s.y1 - s.y0 + 1 };
+	const Building *b = PlacingBuilding();
+	return b != nullptr ? Size { b->width, b->height } : Size { 0, 0 };
 }
 
 /** Town: top-left megatile of the stamp when centred on a megatile. */
@@ -423,59 +460,69 @@ Point StampOrigin(Point centre)
 	return centre - Displacement { size.width / 2, size.height / 2 };
 }
 
-void PlaceStamp(Point centre)
+/** Lays a building into the map centred on a megatile: its ground, hues and decor layers (empty cells keep what is there). */
+void PlaceBuilding(const Building &b, Point centre)
 {
-	const Size size = StampSize();
-	if (size.width <= 0 || size.height <= 0)
+	if (b.width <= 0 || b.height <= 0)
 		return;
-	const Point origin = StampOrigin(centre);
+	const Point origin = centre - Displacement { b.width / 2, b.height / 2 };
 	PushUndo();
-	const std::vector<uint16_t> &classic = ClassicTownMegaTiles();
-	for (int y = 0; y < size.height; y++) {
-		for (int x = 0; x < size.width; x++) {
+	for (int y = 0; y < b.height; y++) {
+		for (int x = 0; x < b.width; x++) {
 			const Point at = origin + Displacement { x, y };
-			if (!InMap(at))
+			const size_t i = static_cast<size_t>(y) * b.width + x;
+			if (!InMap(at) || b.tiles[i] == 0)
 				continue;
-			uint16_t tile;
-			int8_t hue = 0;
-			if (S.stamp < 0) {
-				const size_t i = static_cast<size_t>(y) * S.clipWidth + x;
-				tile = S.clipboard[i];
-				if (i < S.clipHues.size())
-					hue = S.clipHues[i];
-			} else {
-				const TownStamp &s = TownStamps()[S.stamp];
-				tile = classic[static_cast<size_t>(s.y0 + y) * 48 + s.x0 + x];
-			}
-			if (tile != 0) {
-				TownTile(at) = tile;
-				TownHue(at) = hue;
+			TownTile(at) = b.tiles[i];
+			TownHue(at) = b.hues[i];
+			for (int layer = 0; layer < MapDecorLayerCount; layer++) {
+				TownDecor(layer, at) = b.decor[layer][i];
+				TownDecorHue(layer, at) = b.decorHues[layer][i];
 			}
 		}
 	}
 	Rebuild();
-	Say(StrCat("Placed ", S.stamp < 0 ? std::string("the copied area") : std::string(TownStamps()[S.stamp].name), "."));
+	Say(StrCat("Placed ", &b == &S.clip ? std::string("the copied area") : b.name, "."));
+}
+
+void PlaceStamp(Point centre)
+{
+	if (const Building *b = PlacingBuilding(); b != nullptr)
+		PlaceBuilding(*b, centre);
+}
+
+/** Copies an area of the map (ground, hues and decor) into a building. */
+Building TakeArea(Point a, Point b)
+{
+	Building out;
+	const int x0 = std::max(0, std::min(a.x, b.x)), x1 = std::min(S.map.width - 1, std::max(a.x, b.x));
+	const int y0 = std::max(0, std::min(a.y, b.y)), y1 = std::min(S.map.height - 1, std::max(a.y, b.y));
+	if (x0 > x1 || y0 > y1)
+		return out;
+	out.Resize(x1 - x0 + 1, y1 - y0 + 1);
+	for (int y = y0; y <= y1; y++) {
+		for (int x = x0; x <= x1; x++) {
+			const size_t i = static_cast<size_t>(y - y0) * out.width + (x - x0);
+			out.tiles[i] = TownTile({ x, y });
+			out.hues[i] = TownHue({ x, y });
+			for (int layer = 0; layer < MapDecorLayerCount; layer++) {
+				out.decor[layer][i] = TownDecor(layer, { x, y });
+				out.decorHues[layer][i] = TownDecorHue(layer, { x, y });
+			}
+		}
+	}
+	return out;
 }
 
 void CopyArea(Point a, Point b)
 {
-	const int x0 = std::max(0, std::min(a.x, b.x)), x1 = std::min(S.map.width - 1, std::max(a.x, b.x));
-	const int y0 = std::max(0, std::min(a.y, b.y)), y1 = std::min(S.map.height - 1, std::max(a.y, b.y));
-	if (x0 > x1 || y0 > y1)
+	Building area = TakeArea(a, b);
+	if (area.width == 0)
 		return;
-	S.clipWidth = x1 - x0 + 1;
-	S.clipHeight = y1 - y0 + 1;
-	S.clipboard.clear();
-	S.clipHues.clear();
-	for (int y = y0; y <= y1; y++) {
-		for (int x = x0; x <= x1; x++) {
-			S.clipboard.push_back(TownTile({ x, y }));
-			S.clipHues.push_back(TownHue({ x, y }));
-		}
-	}
+	S.clip = std::move(area);
 	S.stamp = -1;
 	S.tool = Tool::Stamp;
-	Say(StrCat("Copied ", S.clipWidth, "x", S.clipHeight, ". Click to paste it (Stamp tool, \"Copied area\")."));
+	Say(StrCat("Copied ", S.clip.width, "x", S.clip.height, ". Click to paste it (Stamp tool, \"Copied area\")."));
 }
 
 int EntryAt(Point tile)
@@ -630,7 +677,48 @@ Rectangle ToolButton(int index)
 
 int ToolButtonCount()
 {
-	return static_cast<int>(ToolsFor(S.kind).size()) + (S.kind == Kind::Tristram ? 2 : 3);
+	return static_cast<int>(ToolsFor(S.kind).size()) + (S.kind == Kind::Tristram ? 2 : 4);
+}
+
+/** The weather button sits under Undo (not for Tristram's own layer). */
+int WeatherButtonIndex()
+{
+	return S.kind == Kind::Tristram ? -1 : static_cast<int>(ToolsFor(S.kind).size()) + 3;
+}
+
+/** Weathers offered for this map: "changing" (empty), then those its style rolls from. */
+std::vector<std::string> WeatherChoices()
+{
+	std::vector<std::string> names { "" };
+	for (const DungeonMood mood : MoodsForLevelType(S.map.style))
+		names.emplace_back(DungeonMoodName(mood));
+	return names;
+}
+
+std::string WeatherTitle(std::string_view name)
+{
+	if (name.empty())
+		return "Changing";
+	for (int m = 0; m < static_cast<int>(DungeonMood::COUNT); m++) {
+		if (name == DungeonMoodName(static_cast<DungeonMood>(m)))
+			return std::string(DungeonMoodTitle(static_cast<DungeonMood>(m)));
+	}
+	return std::string(name);
+}
+
+constexpr int WeatherRow = 18;
+
+Rectangle WeatherMenuRect()
+{
+	const Rectangle button = ToolButton(std::max(0, WeatherButtonIndex()));
+	const int rows = static_cast<int>(WeatherChoices().size());
+	return { { button.position.x + button.size.width + 4, button.position.y }, { 170, 22 + rows * WeatherRow + 4 } };
+}
+
+Rectangle WeatherRowRect(int row)
+{
+	const Rectangle m = WeatherMenuRect();
+	return { m.position + Displacement { 4, 22 + row * WeatherRow }, { m.size.width - 8, WeatherRow - 2 } };
 }
 
 std::string_view ToolName(Tool tool)
@@ -660,7 +748,7 @@ std::string_view ToolHint(Tool tool)
 	case Tool::Entry: return "Click to add an arrival point, drag to move, right-click to delete.";
 	case Tool::Portal: return "Click to place a portal and choose where it leads. Right-click deletes.";
 	case Tool::Door: return "Click to place a doorway exit and choose where it leads. Right-click deletes.";
-	case Tool::Paint: return "Drag to paint. Right-click picks up a tile and its hue. T: tile picker (F/G: hue).";
+	case Tool::Paint: return "Drag to paint. Right-click picks up. T: picker   L: layer   F/G: hue";
 	case Tool::Stamp: return "Click to place the chosen piece of Tristram (centred on the cursor).";
 	case Tool::Copy: return "Drag over an area to copy it, then click to paste it anywhere.";
 	case Tool::Npc: return "Click to place the chosen townsperson (or move them). Right-click removes.";
@@ -671,6 +759,8 @@ std::string_view ToolHint(Tool tool)
 	}
 }
 
+std::string PaintingLabel();
+
 /** Rows of the palette panel for the current tool. */
 std::vector<std::string> PaletteRows()
 {
@@ -680,13 +770,13 @@ std::vector<std::string> PaletteRows()
 		// Ground brushes (a mix of variants), then any single tile from the picker.
 		for (const GroundBrush &b : GroundBrushes())
 			rows.emplace_back(b.name);
-		rows.push_back(S.brush < 0 ? StrCat("Tile #", S.pickerTile, "  (T: picker)") : std::string("Pick a tile...  (T)"));
+		rows.push_back(S.paintKind != PaintKind::Ground || S.brush < 0 ? StrCat(PaintingLabel(), "  (T)") : std::string("Tiles, decor, buildings  (T)"));
 		break;
 	case Tool::Stamp:
-		for (const TownStamp &s : TownStamps())
-			rows.emplace_back(s.name);
-		if (!S.clipboard.empty())
-			rows.push_back(StrCat("Copied area ", S.clipWidth, "x", S.clipHeight));
+		for (const Building &b : Buildings())
+			rows.emplace_back(b.name);
+		if (S.clip.width > 0)
+			rows.push_back(StrCat("Copied area ", S.clip.width, "x", S.clip.height));
 		break;
 	case Tool::Npc:
 		for (const Person &p : People())
@@ -710,12 +800,10 @@ std::string PaletteTitle()
 {
 	switch (S.tool) {
 	case Tool::Paint: {
-		const std::string hue = S.hueShift != 0 ? StrCat("  hue ", S.hueShift > 0 ? "+" : "", S.hueShift * TileHueStepDegrees) : std::string {};
-		if (S.brush >= 0 && S.brush < static_cast<int>(GroundBrushes().size()))
-			return StrCat(GroundBrushes()[S.brush].name, hue);
-		return StrCat("Tile #", S.pickerTile, hue);
+		const std::string hue = S.hueShift != 0 && S.paintKind != PaintKind::Building ? StrCat("  hue ", S.hueShift > 0 ? "+" : "", S.hueShift * TileHueStepDegrees) : std::string {};
+		return StrCat(PaintingLabel(), hue);
 	}
-	case Tool::Stamp: return "Pieces of Tristram";
+	case Tool::Stamp: return "Buildings";
 	case Tool::Npc: return "Townspeople";
 	case Tool::Spawner: return StrCat("Pack of ", S.packSize, "  (click +/right -)");
 	case Tool::Boss: return "Bosses (with minions)";
@@ -727,8 +815,8 @@ int PaletteSelected()
 {
 	switch (S.tool) {
 	case Tool::Paint:
-		return S.brush < 0 ? static_cast<int>(GroundBrushes().size()) : S.brush;
-	case Tool::Stamp: return S.stamp < 0 ? static_cast<int>(TownStamps().size()) : S.stamp;
+		return S.paintKind != PaintKind::Ground || S.brush < 0 ? static_cast<int>(GroundBrushes().size()) : S.brush;
+	case Tool::Stamp: return S.stamp < 0 ? static_cast<int>(Buildings().size()) : S.stamp;
 	case Tool::Npc: return S.npc;
 	case Tool::Spawner: return S.monster;
 	case Tool::Boss: return S.boss;
@@ -742,13 +830,14 @@ void SelectPalette(int row)
 	case Tool::Paint:
 		if (row < static_cast<int>(GroundBrushes().size())) {
 			S.brush = row;
+			S.paintKind = PaintKind::Ground;
+			S.layer = 0;
 			S.showTilePicker = false;
 		} else {
-			S.brush = -1;
 			S.showTilePicker = true;
 		}
 		break;
-	case Tool::Stamp: S.stamp = row >= static_cast<int>(TownStamps().size()) ? -1 : row; break;
+	case Tool::Stamp: S.stamp = row >= static_cast<int>(Buildings().size()) ? -1 : row; break;
 	case Tool::Npc: S.npc = row; break;
 	case Tool::Spawner: S.monster = row; break;
 	case Tool::Boss: S.boss = row; break;
@@ -795,15 +884,176 @@ Rectangle PaletteTitleRect()
 
 // --- Tile picker layout ------------------------------------------------------------------------
 
-constexpr int PickerHeader = 44; // title, then a row of buttons
-constexpr int PickerGap = 4;
-constexpr int PickerScrollBar = 6;
+enum class PickerTab : uint8_t {
+	Ground,
+	Decor,
+	Buildings,
+	All,
+};
+constexpr std::array<std::string_view, 4> PickerTabNames { "Ground", "Decor", "Buildings", "All tiles" };
+constexpr std::array<std::string_view, 4> LayerNames { "Ground", "Decor 1", "Decor 2", "Decor 3" };
 constexpr std::array<std::string_view, 4> PickerButtonLabels { "Hue -  (F)", "Hue +  (G)", "Hue off", "Close (T)" };
 constexpr std::array<std::string_view, 4> PickerButtonShortLabels { "Hue -", "Hue +", "Reset", "Close" };
+constexpr int PickerButtonRows = 3; // tabs, layers, hue
+constexpr int PickerHeader = 20 + PickerButtonRows * 21 + 4;
+constexpr int PickerGap = 4;
+constexpr int PickerScrollBar = 6;
+
+/** One picture in the picker. */
+struct PickerItem {
+	enum class Kind : uint8_t {
+		Tile,        // a megatile laid as ground
+		Decor,       // a decor id laid on a decor layer (0 erases)
+		Building,    // index in Buildings()
+		NewBuilding, // the building maker
+	};
+	Kind kind;
+	int id;
+	bool operator==(const PickerItem &other) const = default;
+};
+
+/** What a town megatile is: flat ground, something standing on the ground, or a piece of a building. */
+enum class TileClass : uint8_t {
+	Ground,
+	Decor,
+	Building,
+};
+
+const std::vector<TileClass> &TileClasses()
+{
+	static std::vector<TileClass> classes;
+	static const MegaTile *builtFor = nullptr;
+	if (builtFor == pMegaTiles.get() && classes.size() == MegaTileCount)
+		return classes;
+	builtFor = pMegaTiles.get();
+	classes.assign(MegaTileCount, TileClass::Ground);
+	if (pMegaTiles == nullptr)
+		return classes;
+	// A building piece is one classic Tristram only uses inside its buildings.
+	std::vector<uint8_t> inBuilding(MegaTileCount + 1, 0), elsewhere(MegaTileCount + 1, 0);
+	if (!InDesertRegion()) {
+		const std::vector<uint16_t> &classic = ClassicTownMegaTiles();
+		for (const Building &b : Buildings()) {
+			if (!b.builtIn || IsSceneryStamp(b.name))
+				continue;
+			for (uint16_t t : b.tiles) {
+				if (t >= 1 && t <= MegaTileCount)
+					inBuilding[t] = 1;
+			}
+		}
+		// Tiles also found outside every building in classic Tristram are scenery, not building parts.
+		std::vector<bool> inside(48 * 48, false);
+		for (const Building &b : Buildings()) {
+			if (!b.builtIn || IsSceneryStamp(b.name))
+				continue;
+			// Built-in buildings are cut from the classic grid; find where (their first row matches).
+			for (int oy = 0; oy + b.height <= 48; oy++) {
+				for (int ox = 0; ox + b.width <= 48; ox++) {
+					bool match = true;
+					for (int y = 0; match && y < b.height; y++) {
+						for (int x = 0; match && x < b.width; x++)
+							match = classic[static_cast<size_t>(oy + y) * 48 + ox + x] == b.tiles[static_cast<size_t>(y) * b.width + x];
+					}
+					if (!match)
+						continue;
+					for (int y = 0; y < b.height; y++) {
+						for (int x = 0; x < b.width; x++)
+							inside[static_cast<size_t>(oy + y) * 48 + ox + x] = true;
+					}
+				}
+			}
+		}
+		for (size_t i = 0; i < classic.size(); i++) {
+			if (!inside[i] && classic[i] >= 1 && classic[i] <= MegaTileCount)
+				elsewhere[classic[i]] = 1;
+		}
+	}
+	for (size_t i = 0; i < MegaTileCount; i++) {
+		const MegaTile mega = pMegaTiles[i];
+		const std::array<uint16_t, 4> pieces { Swap16LE(mega.micro1), Swap16LE(mega.micro2), Swap16LE(mega.micro3), Swap16LE(mega.micro4) };
+		// Decor rises off the ground (walls, rocks, trees, signs); low plants and water lie flat and count as ground.
+		const bool standing = std::any_of(pieces.begin(), pieces.end(), [](uint16_t piece) {
+			if (piece >= MAXTILES)
+				return false;
+			if (HasAnyOf(SOLData[piece], TileProperties::Solid | TileProperties::BlockMissile))
+				return true;
+			for (int b = 2; b < static_cast<int>(MicroTileLen); b++) {
+				if (LevelCelBlock { DPieceMicros[piece].mt[b] }.hasValue())
+					return true;
+			}
+			return false;
+		});
+		if (!standing)
+			classes[i] = TileClass::Ground;
+		else
+			classes[i] = inBuilding[i + 1] != 0 && elsewhere[i + 1] == 0 ? TileClass::Building : TileClass::Decor;
+	}
+	return classes;
+}
 
 bool PickerShown()
 {
 	return S.editing && S.showTilePicker && S.tool == Tool::Paint;
+}
+
+PickerTab CurrentTab()
+{
+	return static_cast<PickerTab>(std::clamp(S.pickerTab, 0, 3));
+}
+
+/** The pictures of the current tab. */
+const std::vector<PickerItem> &PickerItems()
+{
+	static std::vector<PickerItem> items;
+	static int builtTab = -1;
+	static size_t builtTiles = 0, builtBuildings = 0;
+	static const MegaTile *builtFor = nullptr;
+	const size_t tileCount = pMegaTiles == nullptr ? 0 : MegaTileCount;
+	if (builtTab == S.pickerTab && builtTiles == tileCount && builtBuildings == Buildings().size() && builtFor == pMegaTiles.get())
+		return items;
+	builtTab = S.pickerTab;
+	builtTiles = tileCount;
+	builtBuildings = Buildings().size();
+	builtFor = pMegaTiles.get();
+	items.clear();
+	const std::vector<TileClass> &classes = TileClasses();
+	switch (CurrentTab()) {
+	case PickerTab::Ground:
+		for (size_t i = 0; i < tileCount; i++) {
+			if (classes[i] == TileClass::Ground)
+				items.push_back({ PickerItem::Kind::Tile, static_cast<int>(i + 1) });
+		}
+		break;
+	case PickerTab::Decor:
+		items.push_back({ PickerItem::Kind::Decor, 0 });
+		for (int f = 0; f < FlowerPatchCount; f++)
+			items.push_back({ PickerItem::Kind::Decor, DecorFlowerBase + f });
+		for (size_t i = 0; i < tileCount; i++) {
+			if (classes[i] == TileClass::Decor)
+				items.push_back({ PickerItem::Kind::Decor, static_cast<int>(i + 1) });
+		}
+		break;
+	case PickerTab::Buildings:
+		items.push_back({ PickerItem::Kind::NewBuilding, 0 });
+		for (size_t i = 0; i < Buildings().size(); i++)
+			items.push_back({ PickerItem::Kind::Building, static_cast<int>(i) });
+		break;
+	case PickerTab::All:
+		for (size_t i = 0; i < tileCount; i++)
+			items.push_back({ PickerItem::Kind::Tile, static_cast<int>(i + 1) });
+		break;
+	}
+	return items;
+}
+
+/** The picker item matching what the Paint tool lays now. */
+PickerItem SelectedPickerItem()
+{
+	switch (S.paintKind) {
+	case PaintKind::Decor: return { PickerItem::Kind::Decor, S.pickerDecor };
+	case PaintKind::Building: return { PickerItem::Kind::Building, S.pickerBuilding };
+	default: return { PickerItem::Kind::Tile, S.brush < 0 ? S.pickerTile : -1 };
+	}
 }
 
 int PickerCell()
@@ -819,22 +1069,22 @@ int PickerColumns()
 
 Rectangle PickerRect()
 {
-	const int w = PickerColumns() * (PickerCell() + PickerGap) + PickerGap + PickerScrollBar + 4;
+	const int w = std::max(300, PickerColumns() * (PickerCell() + PickerGap) + PickerGap + PickerScrollBar + 4);
 	const int top = TopBarHeight + 4;
-	return { { gnScreenWidth - w - 4, top }, { w, std::max(160, gnViewportHeight - 22 - top) } };
+	return { { gnScreenWidth - w - 4, top }, { w, std::max(200, gnViewportHeight - 22 - top) } };
 }
 
 /** Short screens skip the large picture (the preview on the map still shows the tile in place). */
 bool PickerHasPreview()
 {
-	return PickerRect().size.height >= 400;
+	return PickerRect().size.height >= 430;
 }
 
-/** The large picture of the hovered (or chosen) tile at the bottom of the picker. */
+/** The large picture of the hovered (or chosen) item at the bottom of the picker. */
 Rectangle PickerPreviewRect()
 {
 	const Rectangle r = PickerRect();
-	const int h = std::clamp(r.size.height / 3, 80, 170);
+	const int h = std::clamp(r.size.height / 3, 80, 190);
 	return { { r.position.x + 4, r.position.y + r.size.height - h - 4 }, { r.size.width - 8, h } };
 }
 
@@ -846,22 +1096,23 @@ Rectangle PickerGridRect()
 	return { { r.position.x + PickerGap, top }, { r.size.width - PickerGap - PickerScrollBar - 4, bottom - top } };
 }
 
-Rectangle PickerButton(int index)
+/** A button in one of the header rows: 0 tabs, 1 layers, 2 hue and close. */
+Rectangle PickerRowButton(int row, int index)
 {
 	const Rectangle r = PickerRect();
-	const int n = static_cast<int>(PickerButtonLabels.size());
-	const int w = (r.size.width - 8 - (n - 1) * 3) / n;
-	return { { r.position.x + 4 + index * (w + 3), r.position.y + 20 }, { w, 18 } };
+	constexpr int N = 4;
+	const int w = (r.size.width - 8 - (N - 1) * 3) / N;
+	return { { r.position.x + 4 + index * (w + 3), r.position.y + 20 + row * 21 }, { w, 18 } };
 }
 
-int PickerTileCount()
+int PickerItemCount()
 {
-	return pMegaTiles == nullptr ? 0 : static_cast<int>(MegaTileCount);
+	return static_cast<int>(PickerItems().size());
 }
 
 int PickerRowCount()
 {
-	return (PickerTileCount() + PickerColumns() - 1) / PickerColumns();
+	return (PickerItemCount() + PickerColumns() - 1) / PickerColumns();
 }
 
 int PickerVisibleRows()
@@ -874,48 +1125,78 @@ void ScrollPicker(int rows)
 	S.pickerScroll = std::clamp(S.pickerScroll + rows, 0, std::max(0, PickerRowCount() - PickerVisibleRows()));
 }
 
-/** Scrolls so the chosen tile is on screen. */
-void ShowPickerTile()
+int PickerIndexOf(const PickerItem &item)
 {
-	const int row = (S.pickerTile - 1) / PickerColumns();
-	if (row < S.pickerScroll)
-		ScrollPicker(row - S.pickerScroll);
-	else if (row >= S.pickerScroll + PickerVisibleRows())
-		ScrollPicker(row - S.pickerScroll - PickerVisibleRows() + 1);
+	const std::vector<PickerItem> &items = PickerItems();
+	const auto it = std::find(items.begin(), items.end(), item);
+	return it == items.end() ? -1 : static_cast<int>(it - items.begin());
+}
+
+/** Scrolls so the chosen item is on screen. */
+void ShowPickerSelection()
+{
+	const int index = PickerIndexOf(SelectedPickerItem());
+	if (index >= 0) {
+		const int row = index / PickerColumns();
+		if (row < S.pickerScroll)
+			ScrollPicker(row - S.pickerScroll);
+		else if (row >= S.pickerScroll + PickerVisibleRows())
+			ScrollPicker(row - S.pickerScroll - PickerVisibleRows() + 1);
+	}
 	ScrollPicker(0);
 }
 
-/** Screen cell of a tile (1-based id), whether or not it is scrolled into view. */
-Rectangle PickerCellRect(int tile)
+/** Screen cell of an item (index in the tab), whether or not it is scrolled into view. */
+Rectangle PickerCellRect(int index)
 {
 	const Rectangle grid = PickerGridRect();
-	const int index = tile - 1;
 	const int row = index / PickerColumns() - S.pickerScroll;
 	const int col = index % PickerColumns();
 	return { { grid.position.x + col * (PickerCell() + PickerGap), grid.position.y + row * (PickerCell() + PickerGap) }, { PickerCell(), PickerCell() } };
 }
 
-/** Tile under a screen point in the picker's grid, 0 if none. */
-int PickerTileAt(Point p)
+/** Item index under a screen point in the picker's grid, -1 if none. */
+int PickerItemAt(Point p)
 {
 	const Rectangle grid = PickerGridRect();
 	if (!grid.contains(p))
-		return 0;
+		return -1;
 	const int stride = PickerCell() + PickerGap;
 	const int col = (p.x - grid.position.x) / stride;
 	const int row = (p.y - grid.position.y) / stride;
 	if (col >= PickerColumns() || row >= PickerVisibleRows() || (p.x - grid.position.x) % stride >= PickerCell() || (p.y - grid.position.y) % stride >= PickerCell())
-		return 0;
-	const int tile = (row + S.pickerScroll) * PickerColumns() + col + 1;
-	return tile <= PickerTileCount() ? tile : 0;
+		return -1;
+	const int index = (row + S.pickerScroll) * PickerColumns() + col;
+	return index < PickerItemCount() ? index : -1;
+}
+
+void SetPickerTab(PickerTab tab)
+{
+	if (S.pickerTab == static_cast<int>(tab))
+		return;
+	S.pickerTab = static_cast<int>(tab);
+	S.pickerScroll = 0;
+	ShowPickerSelection();
+}
+
+/** The tab showing what is being painted. */
+PickerTab TabForPaint()
+{
+	switch (S.paintKind) {
+	case PaintKind::Decor: return PickerTab::Decor;
+	case PaintKind::Building: return PickerTab::Buildings;
+	default: return CurrentTab() == PickerTab::All ? PickerTab::All : PickerTab::Ground;
+	}
 }
 
 void OpenTilePicker()
 {
-	S.brush = -1;
+	if (S.paintKind == PaintKind::Ground)
+		S.brush = -1;
 	S.showTilePicker = true;
-	S.pickerTile = static_cast<uint16_t>(std::clamp<int>(S.pickerTile, 1, std::max(1, PickerTileCount())));
-	ShowPickerTile();
+	S.pickerTile = static_cast<uint16_t>(std::clamp<int>(S.pickerTile, 1, std::max<int>(1, static_cast<int>(MegaTileCount))));
+	S.pickerTab = static_cast<int>(TabForPaint());
+	ShowPickerSelection();
 }
 
 void ShiftHue(int steps)
@@ -927,6 +1208,54 @@ void ShiftHue(int steps)
 	if (hue < -MaxTileHueSteps)
 		hue += 2 * MaxTileHueSteps;
 	S.hueShift = hue;
+}
+
+/** Makes a layer the one painted on: ground takes tiles, decor layers take decor. */
+void SelectLayer(int layer)
+{
+	S.layer = std::clamp(layer, 0, MapDecorLayerCount);
+	if (S.layer == 0 && S.paintKind == PaintKind::Decor) {
+		S.paintKind = PaintKind::Ground;
+	} else if (S.layer > 0 && S.paintKind == PaintKind::Ground) {
+		S.paintKind = PaintKind::Decor;
+	}
+	if (S.showTilePicker && S.paintKind != PaintKind::Building)
+		SetPickerTab(TabForPaint());
+	Say(StrCat("Painting on ", LayerNames[S.layer], ".", S.layer > 0 && (S.hiddenLayers & (1u << (S.layer - 1))) != 0 ? " (hidden: right-click its button to show it)" : ""));
+}
+
+void ToggleLayerHidden(int layer)
+{
+	if (layer < 1 || layer > MapDecorLayerCount)
+		return;
+	S.hiddenLayers ^= 1u << (layer - 1);
+	Rebuild();
+	Say(StrCat(LayerNames[layer], (S.hiddenLayers & (1u << (layer - 1))) != 0 ? " hidden while editing (it is still saved and shows in play)." : " shown."));
+}
+
+std::string DecorName(uint16_t id)
+{
+	if (id == 0)
+		return "Erase decor";
+	if (IsFlowerDecor(id))
+		return std::string(FlowerPatchName(id - DecorFlowerBase));
+	return StrCat("Decor #", id);
+}
+
+/** What the Paint tool lays, for titles. */
+std::string PaintingLabel()
+{
+	switch (S.paintKind) {
+	case PaintKind::Decor: return StrCat(LayerNames[std::max(1, S.layer)], ": ", DecorName(S.pickerDecor));
+	case PaintKind::Building: {
+		const std::vector<Building> &all = Buildings();
+		return S.pickerBuilding >= 0 && S.pickerBuilding < static_cast<int>(all.size()) ? StrCat("Building: ", all[S.pickerBuilding].name) : std::string("Building");
+	}
+	default:
+		if (S.brush >= 0 && S.brush < static_cast<int>(GroundBrushes().size()))
+			return std::string(GroundBrushes()[S.brush].name);
+		return StrCat("Tile #", S.pickerTile);
+	}
 }
 
 constexpr int DialogWidth = 320;
@@ -1062,16 +1391,17 @@ void DrawWorldOverlay(const Surface &out)
 	}
 	// What the brush would cover.
 	const Point hover = PieceAt(cursPosition);
-	if (IsAnyOf(S.tool, Tool::Room, Tool::Erase, Tool::Paint, Tool::Copy) && InMap(hover)) {
+	const bool placingBuilding = S.tool == Tool::Paint && S.paintKind == PaintKind::Building && !S.capturing;
+	if (IsAnyOf(S.tool, Tool::Room, Tool::Erase, Tool::Paint, Tool::Copy) && InMap(hover) && !placingBuilding) {
 		const Point from = S.dragging ? S.dragStart : hover;
 		uint8_t color = PAL16_YELLOW + 2;
-		if (S.tool == Tool::Erase || (S.tool == Tool::Room && S.dragging && S.dragErase))
+		if (S.tool == Tool::Erase || (S.tool == Tool::Room && S.dragging && S.dragErase) || (S.tool == Tool::Paint && S.paintKind == PaintKind::Decor && S.pickerDecor == 0))
 			color = PAL8_RED;
-		else if (S.tool == Tool::Copy)
+		else if (S.tool == Tool::Copy || (S.tool == Tool::Paint && S.capturing))
 			color = PAL16_BLUE + 2;
 		PieceOutline(view, pr, { std::min(from.x, hover.x), std::min(from.y, hover.y) }, { std::max(from.x, hover.x), std::max(from.y, hover.y) }, color);
 	}
-	if (S.tool == Tool::Stamp && InMap(hover)) {
+	if ((S.tool == Tool::Stamp || placingBuilding) && InMap(hover)) {
 		const Size size = StampSize();
 		if (size.width > 0) {
 			const Point o = StampOrigin(hover);
@@ -1148,119 +1478,191 @@ void DrawPalette(const Surface &out)
 	}
 }
 
-/**
- * Draws a megatile's four pieces the way the game draws them (floors first, then walls, foliage
- * and roofs). `base` is where the top piece's lowest blocks start (their bottom-left corner).
- */
-void RenderMegaTile(const Surface &out, Point base, int tile, int hue)
+/** Pieces (0-based level pieces) of a town megatile, or nullopt for none. */
+std::optional<std::array<uint16_t, 4>> MegaPieces(int tile)
 {
-	if (tile <= 0 || tile > PickerTileCount() || pDungeonCels == nullptr)
-		return;
+	if (tile <= 0 || pMegaTiles == nullptr || tile > static_cast<int>(MegaTileCount))
+		return std::nullopt;
 	const MegaTile mega = pMegaTiles[tile - 1];
-	const std::array<uint16_t, 4> pieces { Swap16LE(mega.micro1), Swap16LE(mega.micro2), Swap16LE(mega.micro3), Swap16LE(mega.micro4) };
-	// Screen offsets of the pieces at (0,0), (1,0), (0,1) and (1,1), back to front.
-	constexpr std::array<Displacement, 4> Offsets { Displacement { 0, 0 }, Displacement { 32, 16 }, Displacement { -32, 16 }, Displacement { 0, 32 } };
+	return std::array<uint16_t, 4> { Swap16LE(mega.micro1), Swap16LE(mega.micro2), Swap16LE(mega.micro3), Swap16LE(mega.micro4) };
+}
 
+/**
+ * Draws a block of map pieces the way the game draws them: floors and flowers first, then
+ * everything standing, back to front. `base` is the bottom-left corner of the floor of its
+ * top world tile. Used for tiles, decor and whole buildings in the picker.
+ */
+void RenderBuilding(const Surface &out, Point base, const Building &b)
+{
+	if (pDungeonCels == nullptr || pMegaTiles == nullptr)
+		return;
 	constexpr int HalfTileWidth = static_cast<int>(DunFrameWidth);
-	const HueLightTableSet *hueTables = GetTileHueLightTables(hue);
-	const std::span<const std::array<uint8_t, LightTableSize>, NumLightingLevels> tables = hueTables != nullptr
-	    ? std::span<const std::array<uint8_t, LightTableSize>, NumLightingLevels>(*hueTables)
-	    : std::span<const std::array<uint8_t, LightTableSize>, NumLightingLevels>(LightTables);
-	const uint8_t *tbl = tables[0].data(); // fully lit
+	using Tables = std::span<const std::array<uint8_t, LightTableSize>, NumLightingLevels>;
+	auto tablesFor = [](int hue) {
+		const HueLightTableSet *hueTables = GetTileHueLightTables(hue);
+		return hueTables != nullptr ? Tables(*hueTables) : Tables(LightTables);
+	};
 	static std::vector<uint8_t> fullLight;
 	fullLight.assign(out.pitch(), 0);
-	const Lightmap lightmap(out.at(0, 0), out.pitch(), fullLight, 0, tables, FullyLitLightTable, FullyDarkLightTable);
-
+	auto lightmapFor = [&](Tables tables) { return Lightmap(out.at(0, 0), out.pitch(), fullLight, 0, tables, FullyLitLightTable, FullyDarkLightTable); };
 	auto isFloor = [](uint16_t piece) { return !HasAnyOf(SOLData[piece], TileProperties::Solid | TileProperties::BlockMissile); };
-	for (size_t i = 0; i < pieces.size(); i++) {
-		if (pieces[i] >= MAXTILES || !isFloor(pieces[i]))
-			continue;
-		for (int half = 0; half < 2; half++) {
-			const LevelCelBlock block { DPieceMicros[pieces[i]].mt[half] };
-			if (block.hasValue())
-				RenderTileFrame(out, lightmap, base + Offsets[i] + Displacement { half * HalfTileWidth, 0 }, half == 0 ? TileType::LeftTriangle : TileType::RightTriangle,
-				    GetDunFrame(pDungeonCels.get(), block.frame()), DunFrameTriangleHeight, MaskType::Solid, tbl);
-		}
-	}
-	for (size_t i = 0; i < pieces.size(); i++) {
-		if (pieces[i] >= MAXTILES)
-			continue;
-		const bool floor = isFloor(pieces[i]);
-		const MICROS &micros = DPieceMicros[pieces[i]];
-		Point at = base + Offsets[i];
-		for (int half = 0; half < 2; half++) {
-			const LevelCelBlock block { micros.mt[half] };
-			if (!block.hasValue())
-				continue;
-			const Point p = at + Displacement { half * HalfTileWidth, 0 };
-			if (floor && block.type() == TileType::TransparentSquare)
-				RenderTileFoliage(out, lightmap, p, pDungeonCels.get(), block, tbl);
-			else if (!floor)
-				RenderTile(out, lightmap, p, pDungeonCels.get(), block, MaskType::Solid, tbl);
-		}
-		at.y -= TILE_HEIGHT;
-		for (int b = 2; b + 1 < static_cast<int>(MicroTileLen); b += 2, at.y -= TILE_HEIGHT) {
-			for (int half = 0; half < 2; half++) {
-				const LevelCelBlock block { micros.mt[b + half] };
-				if (block.hasValue())
-					RenderTile(out, lightmap, at + Displacement { half * HalfTileWidth, 0 }, pDungeonCels.get(), block, MaskType::Solid, tbl);
+	const int cols = 2 * b.width, rows = 2 * b.height;
+	auto screen = [&](int wx, int wy) { return base + Displacement { (wx - wy) * 32, (wx + wy) * 16 }; };
+	auto cellOf = [&](int wx, int wy) { return static_cast<size_t>(wy / 2) * b.width + wx / 2; };
+	auto pieceOf = [&](int tile, int wx, int wy) -> int {
+		const std::optional<std::array<uint16_t, 4>> pieces = MegaPieces(tile);
+		if (!pieces)
+			return -1;
+		const uint16_t piece = (*pieces)[(wy % 2) * 2 + wx % 2];
+		return piece < MAXTILES ? piece : -1;
+	};
+	const bool townRoofs = pSpecialCels && IsAnyOf(leveltype, DTYPE_TOWN, DTYPE_FOREST) && !InDesertRegion();
+
+	// Floors, and flowers on them.
+	for (int wy = 0; wy < rows; wy++) {
+		for (int wx = 0; wx < cols; wx++) {
+			const size_t i = cellOf(wx, wy);
+			const Point at = screen(wx, wy);
+			if (const int piece = pieceOf(b.tiles[i], wx, wy); piece >= 0 && isFloor(static_cast<uint16_t>(piece))) {
+				const Tables tables = tablesFor(b.hues[i]);
+				const Lightmap lightmap = lightmapFor(tables);
+				for (int half = 0; half < 2; half++) {
+					const LevelCelBlock block { DPieceMicros[piece].mt[half] };
+					if (block.hasValue())
+						RenderTileFrame(out, lightmap, at + Displacement { half * HalfTileWidth, 0 }, half == 0 ? TileType::LeftTriangle : TileType::RightTriangle,
+						    GetDunFrame(pDungeonCels.get(), block.frame()), DunFrameTriangleHeight, MaskType::Solid, tables[0].data());
+				}
+			}
+			for (int layer = 0; layer < MapDecorLayerCount; layer++) {
+				const uint16_t id = b.decor[layer][i];
+				if (IsFlowerDecor(id))
+					DrawFlowerPatch(out, at, id - DecorFlowerBase, static_cast<uint32_t>(wx) * 73856093u ^ static_cast<uint32_t>(wy) * 19349663u ^ static_cast<uint32_t>(layer) * 83492791u, tablesFor(b.decorHues[layer][i])[0].data());
 			}
 		}
 	}
-	// Roofs and arches of town buildings are separate sprites.
-	if (pSpecialCels && IsAnyOf(leveltype, DTYPE_TOWN, DTYPE_FOREST) && !InDesertRegion()) {
-		for (size_t i = 0; i < pieces.size(); i++) {
-			const uint8_t special = TownSpecialForPiece(pieces[i]);
-			if (special == 0 || special > pSpecialCels->numSprites())
-				continue;
-			if (hueTables != nullptr)
-				ClxDrawTRN(out, base + Offsets[i], (*pSpecialCels)[special - 1], tbl);
-			else
-				ClxDraw(out, base + Offsets[i], (*pSpecialCels)[special - 1]);
+	// Everything standing, back to front.
+	for (int sum = 0; sum <= cols + rows - 2; sum++) {
+		for (int wx = std::max(0, sum - rows + 1); wx <= std::min(cols - 1, sum); wx++) {
+			const int wy = sum - wx;
+			const size_t i = cellOf(wx, wy);
+			const Point at = screen(wx, wy);
+			const int piece = pieceOf(b.tiles[i], wx, wy);
+			if (piece >= 0) {
+				const Tables tables = tablesFor(b.hues[i]);
+				DrawDecorPiece(out, lightmapFor(tables), at, static_cast<uint16_t>(piece), tables[0].data());
+			}
+			for (int layer = 0; layer < MapDecorLayerCount; layer++) {
+				const uint16_t id = b.decor[layer][i];
+				if (id == 0 || IsFlowerDecor(id))
+					continue;
+				const int decorPiece = pieceOf(id, wx, wy);
+				if (decorPiece < 0 || !PieceHasStandingParts(static_cast<uint16_t>(decorPiece)))
+					continue;
+				const Tables tables = tablesFor(b.decorHues[layer][i]);
+				DrawDecorPiece(out, lightmapFor(tables), at, static_cast<uint16_t>(decorPiece), tables[0].data());
+			}
+			if (townRoofs && piece >= 0) {
+				const uint8_t special = TownSpecialForPiece(static_cast<uint16_t>(piece));
+				if (special != 0 && special <= pSpecialCels->numSprites()) {
+					if (b.hues[i] != 0)
+						ClxDrawTRN(out, at, (*pSpecialCels)[special - 1], tablesFor(b.hues[i])[0].data());
+					else
+						ClxDraw(out, at, (*pSpecialCels)[special - 1]);
+				}
+			}
 		}
 	}
 }
 
-/** Draws a tile scaled to fit a box: flat ground fills the width, tall trees and walls shrink to fit. */
-void DrawTilePicture(const Surface &out, Rectangle box, int tile, int hue)
-{
-	// Full-size drawing first, into a scratch surface tall enough for the tallest pieces.
-	static std::optional<OwnedSurface> scratch;
-	const int height = static_cast<int>(MicroTileLen / 2) * TILE_HEIGHT + 48;
-	if (!scratch || scratch->h() != height)
-		scratch.emplace(2 * TILE_WIDTH, height);
-	const Surface &s = *scratch;
-	for (int y = 0; y < s.h(); y++)
-		std::memset(s.at(0, y), 0, s.w());
-	RenderMegaTile(s, { TILE_WIDTH / 2, s.h() - 1 - TILE_HEIGHT }, tile, hue);
+/** A scaled picture, kept so the picker does not redraw every tile each frame. */
+struct Picture {
+	int width = 0;
+	int height = 0;
+	std::vector<uint8_t> pixels; // 0 = see-through
+};
 
-	int x0 = s.w(), y0 = s.h(), x1 = -1, y1 = -1;
-	for (int y = 0; y < s.h(); y++) {
-		const uint8_t *row = s.at(0, y);
-		for (int x = 0; x < s.w(); x++) {
-			if (row[x] != 0) {
-				x0 = std::min(x0, x), x1 = std::max(x1, x);
-				y0 = std::min(y0, y), y1 = std::max(y1, y);
+std::unordered_map<std::string, Picture> PictureCache;
+std::array<SDL_Color, 256> PictureCachePalette {};
+
+/** Forgets cached pictures when the palette changed or there are too many. */
+void RefreshPictureCache()
+{
+	bool same = true;
+	for (size_t i = 0; same && i < logical_palette.size(); i++)
+		same = logical_palette[i].r == PictureCachePalette[i].r && logical_palette[i].g == PictureCachePalette[i].g && logical_palette[i].b == PictureCachePalette[i].b;
+	if (!same || PictureCache.size() > 1500) {
+		PictureCache.clear();
+		PictureCachePalette = logical_palette;
+	}
+}
+
+/** Draws a block of pieces scaled into a box. A single map piece is drawn at the same scale as every other single piece. */
+void DrawBuildingPicture(const Surface &out, Rectangle box, const Building &b, const std::string &key)
+{
+	if (box.size.width <= 0 || box.size.height <= 0 || b.width <= 0)
+		return;
+	const std::string fullKey = StrCat(key, "@", box.size.width, "x", box.size.height);
+	auto it = PictureCache.find(fullKey);
+	if (it == PictureCache.end()) {
+		// Full size first, into a scratch surface big enough for the whole block and its tallest pieces.
+		const int cols = 2 * b.width, rows = 2 * b.height;
+		const int tall = static_cast<int>(MicroTileLen / 2) * TILE_HEIGHT + 48;
+		OwnedSurface scratch((cols + rows) * 32, (cols + rows - 2) * 16 + tall + 8);
+		for (int y = 0; y < scratch.h(); y++)
+			std::memset(scratch.at(0, y), 0, scratch.w());
+		RenderBuilding(scratch, { (rows - 1) * 32, tall }, b);
+		int x0 = scratch.w(), y0 = scratch.h(), x1 = -1, y1 = -1;
+		for (int y = 0; y < scratch.h(); y++) {
+			const uint8_t *row = scratch.at(0, y);
+			for (int x = 0; x < scratch.w(); x++) {
+				if (row[x] != 0) {
+					x0 = std::min(x0, x), x1 = std::max(x1, x);
+					y0 = std::min(y0, y), y1 = std::max(y1, y);
+				}
 			}
 		}
+		Picture picture;
+		if (x1 >= 0) {
+			const int bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+			float scale = std::min(static_cast<float>(box.size.width) / bw, static_cast<float>(box.size.height) / bh);
+			if (b.width == 1 && b.height == 1)
+				scale = std::min(scale, static_cast<float>(box.size.width) / (2 * TILE_WIDTH)); // flat ground fills the width; tall pieces shrink to fit
+			scale = std::min(scale, 1.0f);
+			picture.width = std::max(1, static_cast<int>(bw * scale));
+			picture.height = std::max(1, static_cast<int>(bh * scale));
+			picture.pixels.assign(static_cast<size_t>(picture.width) * picture.height, 0);
+			for (int y = 0; y < picture.height; y++) {
+				const uint8_t *row = scratch.at(0, y0 + std::min(bh - 1, static_cast<int>(y / scale)));
+				for (int x = 0; x < picture.width; x++)
+					picture.pixels[static_cast<size_t>(y) * picture.width + x] = row[x0 + std::min(bw - 1, static_cast<int>(x / scale))];
+			}
+		}
+		it = PictureCache.emplace(fullKey, std::move(picture)).first;
 	}
-	if (x1 < 0) {
+	const Picture &picture = it->second;
+	if (picture.width == 0) {
 		DrawString(out, "(empty)", { box.position + Displacement { 0, box.size.height / 2 - 6 }, { box.size.width, 12 } }, { .flags = UiFlags::ColorWhite | UiFlags::AlignCenter });
 		return;
 	}
-	const int bw = x1 - x0 + 1, bh = y1 - y0 + 1;
-	const float scale = std::min({ static_cast<float>(box.size.width) / s.w(), static_cast<float>(box.size.width) / bw, static_cast<float>(box.size.height) / bh });
-	const int dw = std::max(1, static_cast<int>(bw * scale)), dh = std::max(1, static_cast<int>(bh * scale));
 	// Centred across, standing on the bottom of the box like it stands on the ground.
-	const Point to { box.position.x + (box.size.width - dw) / 2, box.position.y + box.size.height - dh };
-	for (int y = 0; y < dh; y++) {
-		const uint8_t *row = s.at(0, y0 + std::min(bh - 1, static_cast<int>(y / scale)));
-		for (int x = 0; x < dw; x++) {
-			const uint8_t color = row[x0 + std::min(bw - 1, static_cast<int>(x / scale))];
+	const Point to { box.position.x + (box.size.width - picture.width) / 2, box.position.y + box.size.height - picture.height };
+	for (int y = 0; y < picture.height; y++) {
+		for (int x = 0; x < picture.width; x++) {
+			const uint8_t color = picture.pixels[static_cast<size_t>(y) * picture.width + x];
 			if (color != 0)
 				out.SetPixel(to + Displacement { x, y }, color);
 		}
 	}
+}
+
+/** Draws a single tile (for the Ground tab and the hue preview). */
+void DrawTilePicture(const Surface &out, Rectangle box, int tile, int hue)
+{
+	Building b;
+	b.Resize(1, 1);
+	b.tiles[0] = static_cast<uint16_t>(tile);
+	b.hues[0] = static_cast<int8_t>(hue);
+	DrawBuildingPicture(out, box, b, StrCat("t", tile, "h", hue));
 }
 
 void Frame(const Surface &out, Rectangle r, uint8_t color, int thickness)
@@ -1280,37 +1682,129 @@ std::string HueLabel(int steps)
 	return StrCat("hue ", steps > 0 ? "+" : "", steps * TileHueStepDegrees, " deg");
 }
 
+/** Draws one picker item into a box (pictures follow the current hue, except buildings, which keep their own). */
+void DrawPickerItem(const Surface &out, Rectangle box, const PickerItem &item)
+{
+	switch (item.kind) {
+	case PickerItem::Kind::Tile:
+		DrawTilePicture(out, box, item.id, S.hueShift);
+		break;
+	case PickerItem::Kind::Decor: {
+		if (item.id == 0) {
+			const Point c = box.position + Displacement { box.size.width / 2, box.size.height / 2 };
+			const int r = std::min(box.size.width, box.size.height) / 4;
+			Line(out, c + Displacement { -r, -r }, c + Displacement { r, r }, PAL8_RED);
+			Line(out, c + Displacement { -r, r }, c + Displacement { r, -r }, PAL8_RED);
+			break;
+		}
+		Building b;
+		b.Resize(1, 1);
+		b.decor[0][0] = static_cast<uint16_t>(item.id);
+		b.decorHues[0][0] = static_cast<int8_t>(S.hueShift);
+		DrawBuildingPicture(out, box, b, StrCat("d", item.id, "h", S.hueShift));
+		break;
+	}
+	case PickerItem::Kind::Building: {
+		const std::vector<Building> &all = Buildings();
+		if (item.id >= 0 && item.id < static_cast<int>(all.size()))
+			DrawBuildingPicture(out, box, all[item.id], StrCat("b", all[item.id].builtIn ? "*" : "", all[item.id].name));
+		break;
+	}
+	case PickerItem::Kind::NewBuilding: {
+		const Point c = box.position + Displacement { box.size.width / 2, box.size.height / 2 - 6 };
+		const int r = std::min(box.size.width, box.size.height) / 5;
+		for (int t = -1; t <= 1; t++) {
+			DrawHorizontalLine(out, c + Displacement { -r, t }, 2 * r + 1, PAL16_YELLOW + 2);
+			DrawVerticalLine(out, c + Displacement { t, -r }, 2 * r + 1, PAL16_YELLOW + 2);
+		}
+		break;
+	}
+	}
+}
+
+/** Short name under an item's picture. */
+std::string PickerItemLabel(const PickerItem &item)
+{
+	switch (item.kind) {
+	case PickerItem::Kind::Tile: return StrCat(item.id);
+	case PickerItem::Kind::Decor: return item.id == 0 ? std::string("Erase") : (IsFlowerDecor(static_cast<uint16_t>(item.id)) ? std::string(FlowerPatchName(item.id - DecorFlowerBase)) : StrCat(item.id));
+	case PickerItem::Kind::Building: {
+		const std::vector<Building> &all = Buildings();
+		return item.id >= 0 && item.id < static_cast<int>(all.size()) ? all[item.id].name : std::string {};
+	}
+	case PickerItem::Kind::NewBuilding: return "New building";
+	}
+	return {};
+}
+
+/** Longer description for the large preview. */
+std::string PickerItemDescription(const PickerItem &item)
+{
+	switch (item.kind) {
+	case PickerItem::Kind::Tile: return StrCat("Tile #", item.id);
+	case PickerItem::Kind::Decor:
+		if (item.id == 0)
+			return "Erase decor (on the chosen decor layer)";
+		return IsFlowerDecor(static_cast<uint16_t>(item.id)) ? StrCat(FlowerPatchName(item.id - DecorFlowerBase), " (flowers)") : StrCat("Decor #", item.id, " (laid over the ground)");
+	case PickerItem::Kind::Building: {
+		const std::vector<Building> &all = Buildings();
+		if (item.id < 0 || item.id >= static_cast<int>(all.size()))
+			return {};
+		const Building &b = all[item.id];
+		return StrCat(b.name, " (", b.width, "x", b.height, ")", b.builtIn ? "" : "   right-click: delete");
+	}
+	case PickerItem::Kind::NewBuilding: return "New building: drag over an area of the map, then name it";
+	}
+	return {};
+}
+
 void DrawTilePicker(const Surface &out)
 {
+	RefreshPictureCache();
 	const Rectangle r = PickerRect();
 	DrawHalfTransparentRectTo(out, r.position.x, r.position.y, r.size.width, r.size.height);
 	DrawHalfTransparentRectTo(out, r.position.x, r.position.y, r.size.width, r.size.height);
 	DrawHalfTransparentRectTo(out, r.position.x, r.position.y, r.size.width, r.size.height);
-	const int hovered = PickerTileAt(MousePosition);
-	const std::string hoverNote = !PickerHasPreview() && hovered != 0 && hovered != S.pickerTile ? StrCat("  (#", hovered, ")") : std::string {};
-	DrawString(out, StrCat("Tile picker   chosen #", S.pickerTile, hoverNote, "   ", HueLabel(S.hueShift)), { r.position + Displacement { 0, 5 }, { r.size.width, 12 } },
-	    { .flags = UiFlags::ColorWhitegold | UiFlags::AlignCenter | UiFlags::KerningFitSpacing });
-	const bool narrow = PickerButton(0).size.width < 80;
-	for (int i = 0; i < static_cast<int>(PickerButtonLabels.size()); i++)
-		Button(out, PickerButton(i), narrow ? PickerButtonShortLabels[i] : PickerButtonLabels[i], false);
+	const std::vector<PickerItem> &items = PickerItems();
+	const int hoveredIndex = PickerItemAt(MousePosition);
+	const std::string title = S.capturing ? std::string("Drag over the area to save as a building")
+	                                      : StrCat(PaintingLabel(), S.paintKind != PaintKind::Building ? StrCat("   ", HueLabel(S.hueShift)) : std::string {});
+	DrawString(out, title, { r.position + Displacement { 4, 5 }, { r.size.width - 8, 12 } }, { .flags = UiFlags::ColorWhitegold | UiFlags::AlignCenter | UiFlags::KerningFitSpacing });
 
-	const int count = PickerTileCount();
-	if (count == 0) {
-		DrawString(out, "No tiles loaded here.", { PickerGridRect().position + Displacement { 0, 20 }, { PickerGridRect().size.width, 12 } }, { .flags = UiFlags::ColorWhite | UiFlags::AlignCenter });
+	const bool narrow = PickerRowButton(0, 0).size.width < 80;
+	for (int i = 0; i < 4; i++)
+		Button(out, PickerRowButton(0, i), PickerTabNames[i], S.pickerTab == i);
+	for (int i = 0; i < 4; i++) {
+		const bool hidden = i > 0 && (S.hiddenLayers & (1u << (i - 1))) != 0;
+		Button(out, PickerRowButton(1, i), hidden ? StrCat(narrow ? "D" : "Decor ", i, " (off)") : std::string(LayerNames[i]), S.layer == i);
+	}
+	for (int i = 0; i < 4; i++)
+		Button(out, PickerRowButton(2, i), narrow ? PickerButtonShortLabels[i] : PickerButtonLabels[i], false);
+
+	if (items.empty()) {
+		DrawString(out, "Nothing here for this tileset.", { PickerGridRect().position + Displacement { 0, 20 }, { PickerGridRect().size.width, 12 } }, { .flags = UiFlags::ColorWhite | UiFlags::AlignCenter });
 		return;
 	}
 
-	const int first = S.pickerScroll * PickerColumns() + 1;
-	const int last = std::min(count, first + PickerVisibleRows() * PickerColumns() - 1);
-	for (int tile = first; tile <= last; tile++) {
-		const Rectangle cell = PickerCellRect(tile);
+	const PickerItem selected = SelectedPickerItem();
+	const int first = S.pickerScroll * PickerColumns();
+	const int last = std::min(static_cast<int>(items.size()), first + PickerVisibleRows() * PickerColumns()) - 1;
+	const bool labelled = CurrentTab() == PickerTab::Buildings || CurrentTab() == PickerTab::Decor;
+	for (int index = first; index <= last; index++) {
+		const PickerItem &item = items[index];
+		const Rectangle cell = PickerCellRect(index);
 		FillRect(out, cell.position.x, cell.position.y, cell.size.width, cell.size.height, 0);
-		DrawTilePicture(out, { cell.position + Displacement { 3, 3 }, { cell.size.width - 6, cell.size.height - 6 } }, tile, S.hueShift);
-		if (tile == S.pickerTile)
+		const int labelRoom = labelled && item.kind != PickerItem::Kind::Tile ? 12 : 0;
+		DrawPickerItem(out, { cell.position + Displacement { 3, 3 }, { cell.size.width - 6, cell.size.height - 6 - labelRoom } }, item);
+		if (item == selected)
 			Frame(out, cell, PAL16_YELLOW + 2, 2);
-		else if (tile == hovered)
+		else if (index == hoveredIndex)
 			Frame(out, cell, PAL16_GRAY + 2, 1);
-		DrawString(out, StrCat(tile), { cell.position + Displacement { 3, 2 }, { cell.size.width - 6, 12 } }, { .flags = (tile == S.pickerTile ? UiFlags::ColorWhitegold : UiFlags::ColorWhite) | UiFlags::KerningFitSpacing });
+		const bool on = item == selected;
+		if (labelRoom > 0)
+			DrawString(out, PickerItemLabel(item), { cell.position + Displacement { 2, cell.size.height - 13 }, { cell.size.width - 4, 12 } }, { .flags = (on ? UiFlags::ColorWhitegold : UiFlags::ColorWhite) | UiFlags::AlignCenter | UiFlags::KerningFitSpacing });
+		else if (item.kind == PickerItem::Kind::Tile || item.kind == PickerItem::Kind::Decor)
+			DrawString(out, PickerItemLabel(item), { cell.position + Displacement { 3, 2 }, { cell.size.width - 6, 12 } }, { .flags = (on ? UiFlags::ColorWhitegold : UiFlags::ColorWhite) | UiFlags::KerningFitSpacing });
 	}
 
 	// Scroll bar.
@@ -1327,16 +1821,34 @@ void DrawTilePicker(const Surface &out)
 
 	if (!PickerHasPreview())
 		return;
-	// Large picture of what is under the mouse (or the chosen tile).
+	// Large picture of what is under the mouse (or what is chosen).
 	const Rectangle preview = PickerPreviewRect();
-	const int shownTile = hovered != 0 ? hovered : S.pickerTile;
+	const bool hovering = hoveredIndex >= 0;
+	const PickerItem shown_ = hovering ? items[hoveredIndex] : selected;
 	FillRect(out, preview.position.x, preview.position.y, preview.size.width, preview.size.height, 0);
 	Frame(out, preview, PAL16_YELLOW + 9, 1);
-	DrawString(out, StrCat("Tile #", shownTile, hovered != 0 && hovered != S.pickerTile ? "   (click to choose)" : "   (chosen)"),
+	DrawString(out, StrCat(PickerItemDescription(shown_), hovering && !(shown_ == selected) && shown_.kind != PickerItem::Kind::NewBuilding ? "   (click to choose)" : ""),
 	    { preview.position + Displacement { 6, 4 }, { preview.size.width - 12, 12 } }, { .flags = UiFlags::ColorWhitegold | UiFlags::KerningFitSpacing });
-	DrawString(out, preview.size.width >= 360 ? "Wheel: scroll   Ctrl+wheel: size   Middle-drag: scroll" : "Wheel: scroll   Ctrl+wheel: size",
+	DrawString(out, preview.size.width >= 360 ? "Wheel: scroll   Ctrl+wheel: size   Right-click layer: hide" : "Wheel: scroll   Ctrl+wheel: size",
 	    { preview.position + Displacement { 6, preview.size.height - 16 }, { preview.size.width - 12, 12 } }, { .flags = UiFlags::ColorWhite | UiFlags::KerningFitSpacing });
-	DrawTilePicture(out, { preview.position + Displacement { 8, 20 }, { preview.size.width - 16, preview.size.height - 40 } }, shownTile, S.hueShift);
+	if (!(shown_.kind == PickerItem::Kind::Tile && shown_.id <= 0))
+		DrawPickerItem(out, { preview.position + Displacement { 8, 20 }, { preview.size.width - 16, preview.size.height - 40 } }, shown_);
+}
+
+/** The building maker's name box. */
+void DrawNamingDialog(const Surface &out)
+{
+	const int w = 340, h = 86;
+	const Rectangle d { { (gnScreenWidth - w) / 2, std::max(TopBarHeight + 10, (gnViewportHeight - h) / 2) }, { w, h } };
+	DrawHalfTransparentRectTo(out, d.position.x, d.position.y, d.size.width, d.size.height);
+	DrawHalfTransparentRectTo(out, d.position.x, d.position.y, d.size.width, d.size.height);
+	DrawHalfTransparentRectTo(out, d.position.x, d.position.y, d.size.width, d.size.height);
+	Frame(out, d, PAL16_YELLOW + 9, 1);
+	DrawString(out, StrCat("Save building (", S.pending.width, "x", S.pending.height, ")"), { d.position + Displacement { 0, 8 }, { w, 12 } }, { .flags = UiFlags::ColorWhitegold | UiFlags::AlignCenter });
+	const bool blink = (SDL_GetTicks() / 400) % 2 == 0;
+	DrawString(out, StrCat("Name: ", S.nameText, blink ? "_" : ""), { d.position + Displacement { 16, 32 }, { w - 32, 12 } }, { .flags = UiFlags::ColorWhite });
+	DrawString(out, S.replaceAsked ? "That name exists. Enter again replaces it." : "Enter: save    Esc: cancel", { d.position + Displacement { 0, 60 }, { w, 12 } },
+	    { .flags = (S.replaceAsked ? UiFlags::ColorRed : UiFlags::ColorGold) | UiFlags::AlignCenter });
 }
 
 void DrawInterface(const Surface &out)
@@ -1370,6 +1882,8 @@ void DrawInterface(const Surface &out)
 	if (S.kind != Kind::Tristram)
 		Button(out, ToolButton(n + 1), S.grid ? "G Grid: on" : "G Grid: off", false);
 	Button(out, ToolButton(n + (S.kind == Kind::Tristram ? 1 : 2)), "Ctrl+Z Undo", false);
+	if (WeatherButtonIndex() >= 0)
+		Button(out, ToolButton(WeatherButtonIndex()), StrCat("Weather: ", WeatherTitle(S.map.weather)), S.weatherMenu);
 
 	if (PickerShown())
 		DrawTilePicker(out);
@@ -1390,6 +1904,25 @@ void DrawInterface(const Surface &out)
 
 	if (S.linkPortal >= 0 && S.linkPortal < static_cast<int>(S.map.portals.size()))
 		DrawLinkDialog(out);
+	if (S.weatherMenu && WeatherButtonIndex() >= 0) {
+		const Rectangle m = WeatherMenuRect();
+		DrawHalfTransparentRectTo(out, m.position.x, m.position.y, m.size.width, m.size.height);
+		DrawHalfTransparentRectTo(out, m.position.x, m.position.y, m.size.width, m.size.height);
+		DrawHalfTransparentRectTo(out, m.position.x, m.position.y, m.size.width, m.size.height);
+		DrawString(out, MoodsEnabledFor(S.map.style) ? "Weather of this map" : "Weather (off in options)", { m.position + Displacement { 0, 5 }, { m.size.width, 12 } },
+		    { .flags = UiFlags::ColorWhitegold | UiFlags::AlignCenter | UiFlags::KerningFitSpacing });
+		const std::vector<std::string> choices = WeatherChoices();
+		for (int i = 0; i < static_cast<int>(choices.size()); i++) {
+			const Rectangle row = WeatherRowRect(i);
+			const bool on = choices[i] == S.map.weather;
+			if (on || row.contains(MousePosition))
+				FillRect(out, row.position.x, row.position.y, row.size.width, row.size.height, on ? PAL16_YELLOW + 12 : PAL16_GRAY + 13);
+			DrawString(out, i == 0 ? std::string("Changing (rolls and turns)") : WeatherTitle(choices[i]), { row.position + Displacement { 6, 2 }, { row.size.width - 12, 12 } },
+			    { .flags = (on ? UiFlags::ColorWhitegold : UiFlags::ColorWhite) | UiFlags::KerningFitSpacing });
+		}
+	}
+	if (S.naming)
+		DrawNamingDialog(out);
 }
 
 // --- Input -----------------------------------------------------------------------------------
@@ -1406,6 +1939,8 @@ bool OnInterface(Point p)
 		if (ToolButton(i).contains(p))
 			return true;
 	}
+	if (S.weatherMenu && WeatherMenuRect().contains(p))
+		return true;
 	if (PickerShown())
 		return PickerRect().contains(p) || p.y >= gnViewportHeight - 18;
 	if (PaletteRect().contains(p))
@@ -1431,6 +1966,8 @@ void Undo()
 	S.map.bosses = s.bosses;
 	S.map.objects = s.objects;
 	S.map.hues = s.hues;
+	S.map.decor = s.decor;
+	S.map.decorHues = s.decorHues;
 	S.dirty = true;
 	Rebuild();
 }
@@ -1443,8 +1980,10 @@ void ToggleTest()
 			S.map.entries.push_back({ "start", cursPosition });
 			Say("No arrival point yet: added one under the cursor.");
 		}
+		SetHiddenDecorLayers(0); // play-testing shows every layer
 		LoadMapLevel(false);
 	} else {
+		SetHiddenDecorLayers(S.hiddenLayers);
 		LoadMapLevel(true);
 	}
 }
@@ -1454,6 +1993,7 @@ void ExitEditor()
 	if (S.dirty)
 		SaveMap();
 	S.running = false;
+	SetHiddenDecorLayers(0);
 	ClearActiveCustomMap();
 	SetTristramLayerForEditor(nullptr);
 	SetCurrentCustomTown({});
@@ -1586,25 +2126,215 @@ void SelectTool(int index)
 	ScrollPalette(PaletteSelected() - PaletteVisibleRows() / 2);
 }
 
-void ClickPicker(Point p)
+void ChoosePickerItem(const PickerItem &item, bool right)
 {
-	for (int i = 0; i < static_cast<int>(PickerButtonLabels.size()); i++) {
-		if (!PickerButton(i).contains(p))
-			continue;
-		if (i == 0)
-			ShiftHue(-1);
-		else if (i == 1)
-			ShiftHue(1);
-		else if (i == 2)
-			S.hueShift = 0;
-		else
-			S.showTilePicker = false;
+	switch (item.kind) {
+	case PickerItem::Kind::Tile:
+		S.pickerTile = static_cast<uint16_t>(item.id);
+		S.brush = -1;
+		S.paintKind = PaintKind::Ground;
+		S.layer = 0;
+		Say(StrCat("Tile #", item.id, " chosen. Drag on the map to paint it (it shows in place under the cursor)."));
+		break;
+	case PickerItem::Kind::Decor:
+		S.pickerDecor = static_cast<uint16_t>(item.id);
+		S.paintKind = PaintKind::Decor;
+		if (S.layer == 0)
+			S.layer = 1;
+		Say(item.id == 0 ? StrCat("Drag on the map to erase decor from ", LayerNames[S.layer], ".")
+		                 : StrCat(DecorName(static_cast<uint16_t>(item.id)), " chosen for ", LayerNames[S.layer], ". Drag on the map to lay it over the ground."));
+		break;
+	case PickerItem::Kind::Building: {
+		const std::vector<Building> &all = Buildings();
+		if (item.id < 0 || item.id >= static_cast<int>(all.size()))
+			break;
+		const Building &b = all[item.id];
+		if (right) {
+			if (b.builtIn) {
+				Say("Tristram's own buildings cannot be deleted.");
+			} else if (S.deleteAsk == b.name && SDL_GetTicks() < S.deleteUntil) {
+				const std::string name = b.name;
+				DeleteSavedBuilding(name);
+				S.deleteAsk.clear();
+				S.pickerBuilding = std::min(S.pickerBuilding, static_cast<int>(Buildings().size()) - 1);
+				ScrollPicker(0);
+				Say(StrCat("Deleted building \"", name, "\". Maps it was placed in keep it."));
+			} else {
+				S.deleteAsk = b.name;
+				S.deleteUntil = SDL_GetTicks() + 3000;
+				Say(StrCat("Right-click \"", b.name, "\" again to delete it from the building list."));
+			}
+			break;
+		}
+		S.pickerBuilding = item.id;
+		S.paintKind = PaintKind::Building;
+		Say(StrCat(b.name, " chosen. Click on the map to place it (it shows in place under the cursor)."));
+		break;
+	}
+	case PickerItem::Kind::NewBuilding:
+		S.capturing = true;
+		S.dragging = false;
+		Say("Building maker: drag over the area of the map to save. Right-click or Esc cancels.");
+		break;
+	}
+}
+
+void ClickPicker(Point p, bool right)
+{
+	for (int i = 0; i < 4; i++) {
+		if (PickerRowButton(0, i).contains(p)) {
+			SetPickerTab(static_cast<PickerTab>(i));
+			return;
+		}
+		if (PickerRowButton(1, i).contains(p)) {
+			if (right)
+				ToggleLayerHidden(i);
+			else
+				SelectLayer(i);
+			return;
+		}
+		if (PickerRowButton(2, i).contains(p)) {
+			if (i == 0)
+				ShiftHue(-1);
+			else if (i == 1)
+				ShiftHue(1);
+			else if (i == 2)
+				S.hueShift = 0;
+			else
+				S.showTilePicker = false;
+			return;
+		}
+	}
+	if (const int index = PickerItemAt(p); index >= 0)
+		ChoosePickerItem(PickerItems()[index], right);
+}
+
+/** Right-click on the map with the Paint tool: picks up what is on the chosen layer there. */
+void PickUp(Point piece)
+{
+	if (S.layer > 0) {
+		const uint16_t id = TownDecor(S.layer - 1, piece);
+		S.pickerDecor = id;
+		if (id != 0)
+			S.hueShift = TownDecorHue(S.layer - 1, piece);
+		S.paintKind = PaintKind::Decor;
+		Say(id == 0 ? StrCat("Nothing on ", LayerNames[S.layer], " here: painting now erases it.") : StrCat("Picked up ", DecorName(id), " (", HueLabel(S.hueShift), ") from ", LayerNames[S.layer], "."));
+	} else {
+		if (TownTile(piece) == 0)
+			return;
+		S.pickerTile = TownTile(piece);
+		S.hueShift = TownHue(piece);
+		S.brush = -1;
+		S.paintKind = PaintKind::Ground;
+		Say(StrCat("Picked up tile #", S.pickerTile, " (", HueLabel(S.hueShift), "). Drag to paint with it."));
+	}
+	if (S.showTilePicker) {
+		SetPickerTab(TabForPaint());
+		ShowPickerSelection();
+	}
+}
+
+/** Lays the chosen decor (or erases) on the chosen decor layer over a rectangle of megatiles. */
+void PaintDecor(Point a, Point b)
+{
+	const int x0 = std::max(0, std::min(a.x, b.x)), x1 = std::min(S.map.width - 1, std::max(a.x, b.x));
+	const int y0 = std::max(0, std::min(a.y, b.y)), y1 = std::min(S.map.height - 1, std::max(a.y, b.y));
+	if (x0 > x1 || y0 > y1)
+		return;
+	const int layer = std::max(1, S.layer) - 1;
+	PushUndo();
+	for (int y = y0; y <= y1; y++) {
+		for (int x = x0; x <= x1; x++) {
+			TownDecor(layer, { x, y }) = S.pickerDecor;
+			TownDecorHue(layer, { x, y }) = static_cast<int8_t>(S.pickerDecor != 0 ? S.hueShift : 0);
+		}
+	}
+	Rebuild();
+	if ((S.hiddenLayers & (1u << layer)) != 0)
+		Say(StrCat(LayerNames[layer + 1], " is hidden, so this does not show while editing."));
+}
+
+/** Building maker: the dragged area becomes a building waiting for its name. */
+void CaptureArea(Point a, Point b)
+{
+	S.pending = TakeArea(a, b);
+	S.capturing = false;
+	if (S.pending.width == 0)
+		return;
+	S.naming = true;
+	S.nameText.clear();
+	S.replaceAsked = false;
+	Say("Type a name for the building, then press Enter.");
+}
+
+void FinishNaming(bool save)
+{
+	if (!save) {
+		S.naming = false;
+		Say("Building not saved.");
 		return;
 	}
-	if (const int tile = PickerTileAt(p); tile != 0) {
-		S.pickerTile = static_cast<uint16_t>(tile);
-		S.brush = -1;
-		Say(StrCat("Tile #", tile, " chosen. Drag on the map to paint it (the outline shows it in place)."));
+	std::string name = S.nameText;
+	while (!name.empty() && name.back() == ' ')
+		name.pop_back();
+	if (!IsValidBuildingName(name)) {
+		Say("Type a name: letters, numbers, spaces, - and _ (up to 32).");
+		return;
+	}
+	for (const Building &b : Buildings()) {
+		if (b.builtIn && b.name == name) {
+			Say("That is the name of one of Tristram's buildings; pick another.");
+			return;
+		}
+	}
+	if (SavedBuildingExists(name) && !S.replaceAsked) {
+		S.replaceAsked = true;
+		return;
+	}
+	S.pending.name = name;
+	if (std::expected<void, std::string> r = SaveBuilding(S.pending); !r.has_value()) {
+		Say(r.error());
+		return;
+	}
+	S.naming = false;
+	const std::vector<Building> &all = Buildings();
+	for (size_t i = 0; i < all.size(); i++) {
+		if (!all[i].builtIn && all[i].name == name)
+			S.pickerBuilding = static_cast<int>(i);
+	}
+	S.paintKind = PaintKind::Building;
+	S.showTilePicker = true;
+	S.pickerTab = static_cast<int>(PickerTab::Buildings);
+	ShowPickerSelection();
+	Say(StrCat("Saved \"", name, "\". It is in the Buildings tab (and the Stamp tool) in every town."));
+}
+
+/** Typing into the building maker's name box. */
+void TypeName(SDL_Scancode sc, SDL_Keycode key)
+{
+	if (sc == SDL_SCANCODE_ESCAPE) {
+		FinishNaming(false);
+	} else if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER) {
+		FinishNaming(true);
+	} else if (sc == SDL_SCANCODE_BACKSPACE) {
+		if (!S.nameText.empty())
+			S.nameText.pop_back();
+		S.replaceAsked = false;
+	} else if (S.nameText.size() < 32) {
+		const bool shift = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
+		char c = 0;
+		if (key >= 'a' && key <= 'z')
+			c = static_cast<char>(shift ? key - 'a' + 'A' : key);
+		else if (key >= '0' && key <= '9')
+			c = static_cast<char>(key);
+		else if (key == ' ')
+			c = ' ';
+		else if (key == '-')
+			c = shift ? '_' : '-';
+		if (c != 0) {
+			S.nameText.push_back(c);
+			S.replaceAsked = false;
+		}
 	}
 }
 
@@ -1621,16 +2351,40 @@ void MouseDown(Point p, bool right)
 			ExitEditor();
 		return;
 	}
-	if (!S.editing)
+	if (!S.editing || S.naming)
 		return;
 	if (S.linkPortal >= 0) {
 		ClickDialog(p, right);
 		return;
 	}
+	if (S.weatherMenu) {
+		if (WeatherMenuRect().contains(p)) {
+			const std::vector<std::string> choices = WeatherChoices();
+			for (int i = 0; i < static_cast<int>(choices.size()); i++) {
+				if (!WeatherRowRect(i).contains(p))
+					continue;
+				S.map.weather = choices[i];
+				S.dirty = true;
+				S.weatherMenu = false;
+				if (S.kind == Kind::Town)
+					SetCustomTownMapForEditor(S.map);
+				Say(choices[i].empty() ? std::string("Weather: changing, as usual for this kind of place.")
+				                       : StrCat("Weather: ", WeatherTitle(choices[i]), ", always, on this map.", MoodsEnabledFor(S.map.style) ? "" : " (Weather is switched off in the options: F8.)"));
+			}
+			return;
+		}
+		S.weatherMenu = false;
+		if (!ToolButton(WeatherButtonIndex()).contains(p))
+			return; // a click away just closes the list
+	}
 	const int n = static_cast<int>(ToolsFor(S.kind).size());
 	for (int i = 0; i < ToolButtonCount(); i++) {
 		if (!ToolButton(i).contains(p))
 			continue;
+		if (i == WeatherButtonIndex()) {
+			S.weatherMenu = !S.weatherMenu;
+			return;
+		}
 		if (i < n)
 			SelectTool(i);
 		else if (S.kind != Kind::Tristram && i == n + 1)
@@ -1641,7 +2395,7 @@ void MouseDown(Point p, bool right)
 	}
 	if (PickerShown()) {
 		if (PickerRect().contains(p)) {
-			ClickPicker(p);
+			ClickPicker(p, right);
 			return;
 		}
 	} else if (PaletteRect().contains(p)) {
@@ -1677,15 +2431,21 @@ void MouseDown(Point p, bool right)
 	case Tool::Paint:
 		if (!InMap(piece))
 			break;
-		if (right) {
-			if (TownTile(piece) != 0) {
-				S.pickerTile = TownTile(piece);
-				S.hueShift = TownHue(piece);
-				S.brush = -1;
-				if (S.showTilePicker)
-					ShowPickerTile();
-				Say(StrCat("Picked up tile #", S.pickerTile, " (", HueLabel(S.hueShift), "). Drag to paint with it."));
+		if (S.capturing) {
+			if (right) {
+				S.capturing = false;
+				Say("Building maker cancelled.");
+			} else {
+				S.dragging = true;
+				S.dragStart = piece;
 			}
+			break;
+		}
+		if (right) {
+			PickUp(piece);
+		} else if (S.paintKind == PaintKind::Building) {
+			if (const Building *b = PlacingBuilding(); b != nullptr)
+				PlaceBuilding(*b, piece);
 		} else {
 			S.dragging = true;
 			S.dragStart = piece;
@@ -1829,7 +2589,11 @@ void MouseUp()
 	if (S.dragging) {
 		S.dragging = false;
 		const Point end = PieceAt(cursPosition);
-		if (S.tool == Tool::Paint)
+		if (S.tool == Tool::Paint && S.capturing)
+			CaptureArea(S.dragStart, end);
+		else if (S.tool == Tool::Paint && S.paintKind == PaintKind::Decor)
+			PaintDecor(S.dragStart, end);
+		else if (S.tool == Tool::Paint)
 			PaintGround(S.dragStart, end);
 		else if (S.tool == Tool::Copy)
 			CopyArea(S.dragStart, end);
@@ -1933,6 +2697,7 @@ void StartQueuedMapEditor()
 	gbLoadGame = false;
 	StartGame(true, true);
 	S.running = false;
+	SetHiddenDecorLayers(0);
 	ClearActiveCustomMap();
 	SetTristramLayerForEditor(nullptr);
 	SetCurrentCustomTown({});
@@ -1953,8 +2718,16 @@ bool IsMapEditing()
 	return S.running && S.editing && OnEditorLevel();
 }
 
+std::optional<std::string> EditorMapWeather()
+{
+	if (!S.running || S.kind == Kind::Tristram || !OnEditorLevel())
+		return std::nullopt;
+	return S.map.weather;
+}
+
 namespace {
 bool HandleKey(SDL_Scancode sc);
+void PlaceGhost();
 void SetMapZoom(bool on);
 void PanCamera(Displacement delta);
 void PanPicker(Displacement delta);
@@ -2052,37 +2825,83 @@ void MapEditorTick()
 				else if (w[0] == "picker")
 					OpenTilePicker();
 				else if (w[0] == "pickertile" && n.size() >= 2) {
-					S.pickerTile = static_cast<uint16_t>(std::clamp(n[1], 1, std::max(1, PickerTileCount())));
+					S.pickerTile = static_cast<uint16_t>(std::clamp(n[1], 1, std::max(1, static_cast<int>(MegaTileCount))));
 					S.brush = -1;
-					ShowPickerTile();
-				} else if (w[0] == "hue" && n.size() >= 2)
+					S.paintKind = PaintKind::Ground;
+					S.layer = 0;
+					ShowPickerSelection();
+				} else if (w[0] == "decor" && n.size() >= 2) {
+					S.pickerDecor = static_cast<uint16_t>(n[1]);
+					S.paintKind = PaintKind::Decor;
+					S.layer = std::max(S.layer, 1);
+				} else if (w[0] == "flower" && n.size() >= 2) {
+					S.pickerDecor = static_cast<uint16_t>(DecorFlowerBase + n[1]);
+					S.paintKind = PaintKind::Decor;
+					S.layer = std::max(S.layer, 1);
+				} else if (w[0] == "building" && n.size() >= 2) {
+					S.pickerBuilding = n[1];
+					S.paintKind = PaintKind::Building;
+				} else if (w[0] == "tab" && n.size() >= 2)
+					SetPickerTab(static_cast<PickerTab>(std::clamp(n[1], 0, 3)));
+				else if (w[0] == "layer" && n.size() >= 2)
+					SelectLayer(n[1]);
+				else if (w[0] == "hidelayer" && n.size() >= 2)
+					ToggleLayerHidden(n[1]);
+				else if (w[0] == "hue" && n.size() >= 2)
 					S.hueShift = std::clamp(n[1], -MaxTileHueSteps, MaxTileHueSteps);
 				else if (w[0] == "mouse" && n.size() >= 3) {
 					ControlMode = ControlTypes::KeyboardAndMouse; // a real mouse would switch to it
 					MousePosition = { n[1], n[2] };
-				}
-				else if (w[0] == "hovertile" && n.size() >= 2) {
+				} else if ((w[0] == "hoveritem" || w[0] == "clickitem" || w[0] == "rclickitem") && n.size() >= 2) {
 					const Rectangle cell = PickerCellRect(n[1]);
 					ControlMode = ControlTypes::KeyboardAndMouse;
 					MousePosition = cell.position + Displacement { cell.size.width / 2, cell.size.height / 2 };
+					if (w[0] != "hoveritem")
+						MouseDown(MousePosition, w[0] == "rclickitem");
+				} else if ((w[0] == "hovertile" || w[0] == "clicktile") && n.size() >= 2) {
+					const int index = PickerIndexOf({ PickerItem::Kind::Tile, n[1] });
+					if (index >= 0) {
+						const Rectangle cell = PickerCellRect(index);
+						ControlMode = ControlTypes::KeyboardAndMouse;
+						MousePosition = cell.position + Displacement { cell.size.width / 2, cell.size.height / 2 };
+						if (w[0] == "clicktile")
+							MouseDown(MousePosition, false);
+					}
 				} else if (w[0] == "mousepiece" && n.size() >= 3) {
 					// Put the mouse over a map piece (the camera is centred on it first).
 					S.camera = { 16 + 2 * n[1] + 1, 16 + 2 * n[2] + 1 };
 					ControlMode = ControlTypes::KeyboardAndMouse;
 					MousePosition = { gnScreenWidth / 2, gnViewportHeight / 2 };
-				} else if (w[0] == "scrollpicker" && n.size() >= 2)
+				} else if (w[0] == "drag" && n.size() >= 5) {
+					// A Paint-tool drag from one map piece to another.
+					S.dragging = true;
+					S.dragStart = { n[1], n[2] };
+					cursPosition = { 16 + 2 * n[3], 16 + 2 * n[4] };
+					MouseUp();
+				} else if (w[0] == "placeat" && n.size() >= 3) {
+					if (const Building *b = PlacingBuilding(); b != nullptr)
+						PlaceBuilding(*b, { n[1], n[2] });
+				} else if (w[0] == "newbuilding")
+					ChoosePickerItem({ PickerItem::Kind::NewBuilding, 0 }, false);
+				else if (w[0] == "type" && w.size() >= 2) {
+					for (size_t k = 1; k < w.size(); k++)
+						S.nameText += StrCat(k > 1 ? " " : "", w[k]);
+				} else if (w[0] == "enter")
+					FinishNaming(true);
+				else if (w[0] == "scrollpicker" && n.size() >= 2)
 					ScrollPicker(n[1]);
 				else if (w[0] == "zoom" && n.size() >= 2) {
 					S.pickerZoom = std::clamp(n[1], 1, 3);
-					ShowPickerTile();
+					ShowPickerSelection();
+				} else if (w[0] == "weathermenu")
+					S.weatherMenu = true;
+				else if (w[0] == "weatherrow" && n.size() >= 2) {
+					ControlMode = ControlTypes::KeyboardAndMouse;
+					MousePosition = WeatherRowRect(n[1]).position + Displacement { 20, 8 };
+					MouseDown(MousePosition, false);
 				} else if (w[0] == "closepicker")
 					S.showTilePicker = false;
-				else if (w[0] == "clicktile" && n.size() >= 2) {
-					const Rectangle cell = PickerCellRect(n[1]);
-					ControlMode = ControlTypes::KeyboardAndMouse;
-					MousePosition = cell.position + Displacement { cell.size.width / 2, cell.size.height / 2 };
-					MouseDown(MousePosition, false);
-				} else if (w[0] == "click" || w[0] == "rclick")
+				else if (w[0] == "click" || w[0] == "rclick")
 					MouseDown(MousePosition, w[0] == "rclick");
 				else if (w[0] == "release")
 					MouseUp();
@@ -2096,12 +2915,13 @@ void MapEditorTick()
 					Undo();
 				else if (w[0] == "mapzoom" && n.size() >= 2)
 					SetMapZoom(n[1] != 0);
-				else if (w[0] == "state")
-				{
+				else if (w[0] == "state") {
 					const Point at = PieceAt(cursPosition);
 					const bool in = InMap(at);
-					LogInfo("EDITORSTATE tile {} brush {} hue {} picker {} scroll {} zoom {} cam {},{} cursorPiece {},{} tileThere {} hueThere {} undo {}", S.pickerTile, S.brush, S.hueShift, S.showTilePicker, S.pickerScroll, S.pickerZoom, S.camera.x, S.camera.y,
-					    at.x, at.y, in ? TownTile(at) : 0, in ? TownHue(at) : 0, S.undo.size());
+					LogInfo("EDITORSTATE kind {} tile {} decor {} building {} layer {} hidden {} tab {} items {} hue {} picker {} capturing {} naming {} name '{}' cursorPiece {},{} tileThere {} decorThere {},{},{} solid {} buildings {} undo {}",
+					    static_cast<int>(S.paintKind), S.pickerTile, S.pickerDecor, S.pickerBuilding, S.layer, S.hiddenLayers, S.pickerTab, PickerItemCount(), S.hueShift, S.showTilePicker, S.capturing, S.naming, S.nameText,
+					    at.x, at.y, in ? TownTile(at) : 0, in ? TownDecor(0, at) : 0, in ? TownDecor(1, at) : 0, in ? TownDecor(2, at) : 0,
+					    in ? dDecorSolid[16 + 2 * at.x][16 + 2 * at.y] : false, Buildings().size(), S.undo.size());
 				}
 				LogInfo("EDITORSCRIPT {}", cmds[step - 1]);
 			}
@@ -2124,42 +2944,101 @@ namespace {
 void RestoreGhost()
 {
 	for (auto it = S.ghost.rbegin(); it != S.ghost.rend(); ++it) {
-		dPiece[it->tile.x][it->tile.y] = it->piece;
-		dTileHue[it->tile.x][it->tile.y] = it->hue;
-		dSpecial[it->tile.x][it->tile.y] = it->special;
+		const Point t = it->tile;
+		dPiece[t.x][t.y] = it->piece;
+		dTileHue[t.x][t.y] = it->hue;
+		dSpecial[t.x][t.y] = it->special;
+		for (int layer = 0; layer < DecorLayerCount; layer++) {
+			dDecorPiece[layer][t.x][t.y] = it->decorPiece[layer];
+			dDecorFlower[layer][t.x][t.y] = it->decorFlower[layer];
+			dDecorHue[layer][t.x][t.y] = it->decorHue[layer];
+		}
 	}
 	S.ghost.clear();
 }
 
-/** Lays what painting would lay (the hovered piece, or the whole dragged area) into the level for this frame's drawing. */
+/** Remembers the four world tiles of a megatile before the preview changes them. */
+void SaveGhostCell(Point cell)
+{
+	for (int k = 0; k < 4; k++) {
+		const Point t { 16 + 2 * cell.x + k % 2, 16 + 2 * cell.y + k / 2 };
+		Session::GhostCell g { t, dPiece[t.x][t.y], dTileHue[t.x][t.y], dSpecial[t.x][t.y], {}, {}, {} };
+		for (int layer = 0; layer < DecorLayerCount; layer++) {
+			g.decorPiece[layer] = dDecorPiece[layer][t.x][t.y];
+			g.decorFlower[layer] = dDecorFlower[layer][t.x][t.y];
+			g.decorHue[layer] = dDecorHue[layer][t.x][t.y];
+		}
+		S.ghost.push_back(g);
+	}
+}
+
+void GhostGround(Point cell, int tile, int hue)
+{
+	const std::optional<std::array<uint16_t, 4>> pieces = MegaPieces(tile);
+	if (!pieces)
+		return;
+	const bool townRoofs = !InDesertRegion();
+	for (int k = 0; k < 4; k++) {
+		const Point t { 16 + 2 * cell.x + k % 2, 16 + 2 * cell.y + k / 2 };
+		dPiece[t.x][t.y] = (*pieces)[k];
+		dTileHue[t.x][t.y] = static_cast<int8_t>(hue);
+		if (townRoofs)
+			dSpecial[t.x][t.y] = static_cast<int8_t>(TownSpecialForPiece((*pieces)[k]));
+	}
+}
+
+void GhostDecor(Point cell, int layer, uint16_t id, int hue)
+{
+	if ((S.hiddenLayers & (1u << layer)) != 0)
+		return;
+	const std::optional<std::array<uint16_t, 4>> pieces = IsFlowerDecor(id) ? std::nullopt : MegaPieces(id);
+	for (int k = 0; k < 4; k++) {
+		const Point t { 16 + 2 * cell.x + k % 2, 16 + 2 * cell.y + k / 2 };
+		dDecorFlower[layer][t.x][t.y] = IsFlowerDecor(id) ? static_cast<uint8_t>(id - DecorFlowerBase + 1) : 0;
+		dDecorPiece[layer][t.x][t.y] = pieces && PieceHasStandingParts((*pieces)[k]) ? static_cast<uint16_t>((*pieces)[k] + 1) : 0;
+		dDecorHue[layer][t.x][t.y] = static_cast<int8_t>(hue);
+	}
+}
+
+/** Lays what painting would lay (the hovered piece, the dragged area, or the building) into the level for this frame's drawing. */
 void PlaceGhost()
 {
-	if (!S.editing || S.tool != Tool::Paint || S.linkPortal >= 0 || S.panning || !IsAnyOf(S.kind, Kind::Town, Kind::Wilds))
+	if (!S.editing || S.tool != Tool::Paint || S.linkPortal >= 0 || S.panning || S.capturing || S.naming || !IsAnyOf(S.kind, Kind::Town, Kind::Wilds))
 		return;
-	if (OnInterface(MousePosition) || PickerTileCount() == 0)
+	if (OnInterface(MousePosition) || pMegaTiles == nullptr)
 		return;
 	const Point hover = PieceAt(cursPosition);
 	if (!InMap(hover))
 		return;
+	if (S.paintKind == PaintKind::Building) {
+		const Building *b = PlacingBuilding();
+		if (b == nullptr)
+			return;
+		const Point origin = hover - Displacement { b->width / 2, b->height / 2 };
+		for (int y = 0; y < b->height; y++) {
+			for (int x = 0; x < b->width; x++) {
+				const Point cell = origin + Displacement { x, y };
+				const size_t i = static_cast<size_t>(y) * b->width + x;
+				if (!InMap(cell) || b->tiles[i] == 0)
+					continue;
+				SaveGhostCell(cell);
+				GhostGround(cell, b->tiles[i], b->hues[i]);
+				for (int layer = 0; layer < MapDecorLayerCount; layer++)
+					GhostDecor(cell, layer, b->decor[layer][i], b->decorHues[layer][i]);
+			}
+		}
+		return;
+	}
 	const Point from = S.dragging ? S.dragStart : hover;
 	const int x0 = std::max(0, std::min(from.x, hover.x)), x1 = std::min(S.map.width - 1, std::max(from.x, hover.x));
 	const int y0 = std::max(0, std::min(from.y, hover.y)), y1 = std::min(S.map.height - 1, std::max(from.y, hover.y));
-	const bool townRoofs = !InDesertRegion();
 	for (int y = y0; y <= y1; y++) {
 		for (int x = x0; x <= x1; x++) {
-			const int tile = PaintTileAt({ x, y });
-			if (tile <= 0 || tile > PickerTileCount())
-				continue;
-			const MegaTile mega = pMegaTiles[tile - 1];
-			const std::array<uint16_t, 4> pieces { Swap16LE(mega.micro1), Swap16LE(mega.micro2), Swap16LE(mega.micro3), Swap16LE(mega.micro4) };
-			for (int i = 0; i < 4; i++) {
-				const Point world { 16 + 2 * x + i % 2, 16 + 2 * y + i / 2 };
-				S.ghost.push_back({ world, dPiece[world.x][world.y], dTileHue[world.x][world.y], dSpecial[world.x][world.y] });
-				dPiece[world.x][world.y] = pieces[i];
-				dTileHue[world.x][world.y] = static_cast<int8_t>(S.hueShift);
-				if (townRoofs)
-					dSpecial[world.x][world.y] = static_cast<int8_t>(TownSpecialForPiece(pieces[i]));
-			}
+			SaveGhostCell({ x, y });
+			if (S.paintKind == PaintKind::Decor)
+				GhostDecor({ x, y }, std::max(1, S.layer) - 1, S.pickerDecor, S.pickerDecor != 0 ? S.hueShift : 0);
+			else
+				GhostGround({ x, y }, PaintTileAt({ x, y }), S.hueShift);
 		}
 	}
 }
@@ -2218,6 +3097,19 @@ bool HandleKey(SDL_Scancode sc)
 		return false;
 	}
 	if (S.tool == Tool::Paint && S.linkPortal < 0 && IsAnyOf(S.kind, Kind::Town, Kind::Wilds)) {
+		if (sc == SDL_SCANCODE_ESCAPE && S.capturing) {
+			S.capturing = false;
+			Say("Building maker cancelled.");
+			return true;
+		}
+		if (sc == SDL_SCANCODE_L) {
+			SelectLayer((S.layer + 1) % (MapDecorLayerCount + 1));
+			return true;
+		}
+		if (sc == SDL_SCANCODE_TAB && S.showTilePicker) {
+			SetPickerTab(static_cast<PickerTab>((S.pickerTab + 1) % 4));
+			return true;
+		}
 		if (sc == SDL_SCANCODE_T) {
 			if (S.showTilePicker)
 				S.showTilePicker = false;
@@ -2345,6 +3237,10 @@ bool MapEditorHandleEvent(const SDL_Event &event)
 		}
 		return false; // let the game track the mouse
 	case SDL_EVENT_KEY_DOWN:
+		if (S.naming && S.editing) {
+			TypeName(SDLC_EventScancode(event), SDLC_EventKey(event));
+			return true;
+		}
 		return HandleKey(SDLC_EventScancode(event));
 	case SDL_EVENT_KEY_UP:
 		return S.editing;
@@ -2357,7 +3253,7 @@ bool MapEditorHandleEvent(const SDL_Event &event)
 		if (PickerShown() && PickerRect().contains(MousePosition)) {
 			if ((SDL_GetModState() & SDL_KMOD_CTRL) != 0) {
 				S.pickerZoom = std::clamp(S.pickerZoom + (wheel > 0 ? 1 : -1), 1, 3);
-				ShowPickerTile();
+				ShowPickerSelection();
 			} else {
 				ScrollPicker(wheel > 0 ? -1 : 1);
 			}

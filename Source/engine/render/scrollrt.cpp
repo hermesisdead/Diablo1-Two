@@ -55,6 +55,7 @@
 #include "nthread.h"
 #include "engine/render/color_overlay.hpp"
 #include "engine/render/dungeon_mood.hpp"
+#include "engine/render/tile_decor.hpp"
 #include "engine/render/tile_hue.hpp"
 #include "custom_maps/map_editor.hpp"
 #include "custom_maps/campaign_quests.hpp"
@@ -564,6 +565,7 @@ void DrawCell(const Surface &out, const Lightmap lightmap, Point tilePosition, P
 {
 	const uint16_t levelPieceId = dPiece[tilePosition.x][tilePosition.y];
 	const MICROS *pMap = &DPieceMicros[levelPieceId];
+	const Point decorPosition = targetBufferPosition;
 
 	const uint8_t *tbl = LightTables[lightTableIndex].data();
 	// Painted maps can shift a tile's colours around the colour wheel.
@@ -678,6 +680,9 @@ void DrawCell(const Surface &out, const Lightmap lightmap, Point tilePosition, P
 		targetBufferPosition.y -= TILE_HEIGHT;
 	}
 
+	// Decor layers painted over this tile in a hand-made map.
+	DrawDecorCell(out, lightmap, tilePosition, decorPosition, lightTableIndex);
+
 #ifdef _DEBUG
 	if (DebugPath && walkpathIdx != -1) {
 		DrawString(out, StrCat(walkpathIdx),
@@ -726,6 +731,8 @@ void DrawFloorTile(const Surface &out, const Lightmap &lightmap, Point tilePosit
 			    GetDunFrame(pDungeonCels.get(), levelCelBlock.frame()), DunFrameTriangleHeight, MaskType::Solid, tbl);
 		}
 	}
+	// Flowers painted on this ground in a hand-made map.
+	DrawDecorFloor(out, tilePosition, targetBufferPosition, lightTableIndex);
 }
 
 /**

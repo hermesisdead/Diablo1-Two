@@ -15,6 +15,7 @@
 #include <SDL.h>
 #endif
 
+#include "custom_maps/custom_map.hpp"
 #include "engine/lighting_defs.hpp"
 #include "engine/palette.h"
 #include "engine/render/color_overlay.hpp"
@@ -311,14 +312,14 @@ struct Weight {
 	uint32_t weight;
 };
 
-std::vector<Weight> MoodTable()
+std::vector<Weight> MoodTableFor(dungeon_type type, bool desert)
 {
-	if (InDesertRegion() && IsAnyOf(leveltype, DTYPE_TOWN, DTYPE_FOREST)) {
+	if (desert && IsAnyOf(type, DTYPE_TOWN, DTYPE_FOREST)) {
 		// Sand Tristram and the wastes: dust, wind-driven sand, the odd storm rolling in.
 		return { { DungeonMood::Clear, 30 }, { DungeonMood::Wind, 28 }, { DungeonMood::Dust, 20 }, { DungeonMood::Storm, 8 },
 			{ DungeonMood::Ash, 6 }, { DungeonMood::Mist, 4 }, { DungeonMood::Embers, 4 } };
 	}
-	switch (leveltype) {
+	switch (type) {
 	case DTYPE_TOWN:
 		return { { DungeonMood::Clear, 22 }, { DungeonMood::Rain, 18 }, { DungeonMood::Storm, 12 }, { DungeonMood::Snow, 14 },
 			{ DungeonMood::Mist, 12 }, { DungeonMood::Wind, 14 }, { DungeonMood::Ash, 4 }, { DungeonMood::Embers, 4 } };
@@ -342,6 +343,27 @@ std::vector<Weight> MoodTable()
 		return {};
 	}
 }
+
+std::vector<Weight> MoodTable()
+{
+	return MoodTableFor(leveltype, InDesertRegion());
+}
+
+/** Weather a hand-made map fixes for its level, if any. */
+std::optional<DungeonMood> MapMood()
+{
+	const std::string name = CurrentMapWeather();
+	if (name.empty())
+		return std::nullopt;
+	for (int m = 0; m < static_cast<int>(DungeonMood::COUNT); m++) {
+		if (name == DungeonMoodName(static_cast<DungeonMood>(m)))
+			return static_cast<DungeonMood>(m);
+	}
+	return std::nullopt;
+}
+
+/** The map's fixed weather in effect now (nullopt: weather rolls and turns as usual). */
+std::optional<DungeonMood> appliedMapMood;
 
 DungeonMood RollMood(DungeonMood exclude)
 {
@@ -531,6 +553,9 @@ void InitMood(int64_t key, uint32_t seed)
 	outdoor = IsOutdoorLevel();
 	PickColors();
 	DungeonMood mood = RollMood(DungeonMood::COUNT);
+	appliedMapMood = MapMood();
+	if (appliedMapMood)
+		mood = *appliedMapMood;
 #ifdef _DEBUG
 	if (const char *forced = std::getenv("DEVILUTIONX_DEV_MOOD"); forced != nullptr) {
 		for (int m = 0; m < static_cast<int>(DungeonMood::COUNT); m++) {
@@ -563,8 +588,16 @@ void EnsureMood()
 	const uint32_t seed = leveltype == DTYPE_FOREST ? MyPlayer->forestSeed : (leveltype == DTYPE_TOWN ? MyPlayer->townSeed : DungeonSeeds[currlevel]);
 	const int64_t key = (setlevel ? (int64_t { 1 } << 20) + static_cast<int64_t>(setlvlnum) : static_cast<int64_t>(currlevel))
 	    + (static_cast<int64_t>(leveltype) << 24) + (static_cast<int64_t>(seed) << 32);
-	if (key != moodKey)
+	if (key != moodKey) {
 		InitMood(key, seed);
+	} else if (const std::optional<DungeonMood> mapMood = MapMood(); mapMood != appliedMapMood) {
+		// The map's weather was changed (in the editor): fade the new one in.
+		appliedMapMood = mapMood;
+		SetMood(mapMood ? *mapMood : RollMood(DungeonMood::COUNT));
+		fade = 0;
+		fadingOut = false;
+		changeTimer = RandomChangeDelay();
+	}
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -586,7 +619,7 @@ float FlashBrightness(float t)
 
 void UpdateWeather(float dt)
 {
-	if (outdoor) {
+	if (outdoor && !appliedMapMood) { // a map's chosen weather stays
 		changeTimer -= dt;
 		if (!fadingOut && changeTimer <= 0)
 			fadingOut = true;
@@ -1644,6 +1677,19 @@ void DrawDungeonMood(const Surface &out)
 	if (flashTime >= 0)
 		Wash(out, colors.white, FlashBrightness(flashTime) * 0.7f * std::min(intensity, 1.3f), /*last=*/true);
 	overlayOn = false;
+}
+
+std::vector<DungeonMood> MoodsForLevelType(dungeon_type type)
+{
+	std::vector<DungeonMood> moods;
+	for (const Weight &w : MoodTableFor(type, false))
+		moods.push_back(w.mood);
+	return moods;
+}
+
+bool MoodsEnabledFor(dungeon_type type)
+{
+	return type == DTYPE_TOWN ? *GetOptions().Graphics.townWeather : *GetOptions().Graphics.dungeonMoods;
 }
 
 } // namespace devilution

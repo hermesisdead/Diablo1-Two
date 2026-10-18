@@ -58,6 +58,8 @@ void CreateCustomTownLevel(lvl_entry entry);
 void PaintCustomTownTiles();
 /** @brief Paints a town-tiled map (a town or wilds) into the level's pieces, filler around it. */
 void PaintTownStyleTiles(const CustomMap *map);
+/** @brief Decor layers the map editor is hiding (bit per layer); they are left out when tiles are painted. */
+void SetHiddenDecorLayers(unsigned mask);
 /**
  * @brief Called at the end of CreateTown (Tristram and custom towns): sets up the town's links and
  * moves the view to a requested arrival point.

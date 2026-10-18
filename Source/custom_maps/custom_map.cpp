@@ -1,5 +1,6 @@
 #include "custom_maps/custom_map.hpp"
 #include "custom_maps/custom_town.hpp"
+#include "custom_maps/map_editor.hpp"
 #include "custom_maps/campaign.hpp"
 
 #include <algorithm>
@@ -230,6 +231,10 @@ void CustomMap::Resize(int w, int h)
 	height = std::clamp(h, 4, 40);
 	tiles.assign(static_cast<size_t>(width) * height, 0);
 	hues.assign(static_cast<size_t>(width) * height, 0);
+	for (int layer = 0; layer < MapDecorLayerCount; layer++) {
+		decor[layer].assign(static_cast<size_t>(width) * height, 0);
+		decorHues[layer].assign(static_cast<size_t>(width) * height, 0);
+	}
 	monsters.assign(static_cast<size_t>(width) * 2 * height * 2, 0);
 	objects.assign(static_cast<size_t>(width) * 2 * height * 2, 0);
 	plan.assign(40 * 40, 0);
@@ -331,6 +336,21 @@ std::expected<CustomMap, std::string> ReadCustomMap(std::string_view name)
 		for (size_t i = 0; i < map.hues.size(); i++)
 			map.hues[i] = static_cast<int8_t>((*hue)[i]);
 	}
+	if (std::expected<std::string, std::string> dec = ReadWholeFile(MapFolder(name) + "map.decor"); dec.has_value()) {
+		// "DCR1", layer count, then per layer: ids (u16 each) and hues (one byte each) for every map piece.
+		const std::string &d = *dec;
+		const size_t cells = map.tiles.size();
+		if (d.size() >= 5 && d.compare(0, 4, "DCR1") == 0) {
+			const int layers = std::min(static_cast<int>(static_cast<uint8_t>(d[4])), MapDecorLayerCount);
+			size_t at = 5;
+			for (int layer = 0; layer < layers && at + cells * 3 <= d.size(); layer++) {
+				for (size_t i = 0; i < cells; i++, at += 2)
+					map.decor[layer][i] = static_cast<uint16_t>(static_cast<uint8_t>(d[at]) | (static_cast<uint8_t>(d[at + 1]) << 8));
+				for (size_t i = 0; i < cells; i++, at++)
+					map.decorHues[layer][i] = static_cast<int8_t>(d[at]);
+			}
+		}
+	}
 	map.name = std::string(name);
 	return map;
 }
@@ -359,6 +379,18 @@ std::expected<void, std::string> WriteCustomMap(const CustomMap &map)
 		// Colour shifts painted in the editor (one signed byte per map piece).
 		const std::string hue(map.hues.begin(), map.hues.end());
 		if (std::expected<void, std::string> r = WriteWholeFile(folder + "map.hue", hue); !r.has_value())
+			return r;
+	}
+	{
+		std::string dec = "DCR1";
+		dec.push_back(static_cast<char>(MapDecorLayerCount));
+		for (int layer = 0; layer < MapDecorLayerCount; layer++) {
+			for (size_t i = 0; i < map.tiles.size(); i++)
+				PutU16(dec, i < map.decor[layer].size() ? map.decor[layer][i] : 0);
+			for (size_t i = 0; i < map.tiles.size(); i++)
+				dec.push_back(static_cast<char>(i < map.decorHues[layer].size() ? map.decorHues[layer][i] : 0));
+		}
+		if (std::expected<void, std::string> r = WriteWholeFile(folder + "map.decor", dec); !r.has_value())
 			return r;
 	}
 	return WriteWholeFile(folder + "map.ini", BuildMeta(map));
@@ -462,6 +494,19 @@ std::expected<void, std::string> LoadWildsLevel()
 const CustomMap *ActiveCustomMap()
 {
 	return Active ? &*Active : nullptr;
+}
+
+std::string CurrentMapWeather()
+{
+	if (std::optional<std::string> edited = EditorMapWeather(); edited)
+		return *edited;
+	if (setlevel && setlvlnum == SL_CUSTOM && Active)
+		return Active->weather;
+	if (!setlevel && currlevel == 0 && leveltype == DTYPE_TOWN && InCustomTown()) {
+		const CustomMap *town = CurrentCustomTownMap();
+		return town != nullptr ? town->weather : std::string {};
+	}
+	return {};
 }
 
 void SetActiveCustomMap(CustomMap map, std::string_view entry)

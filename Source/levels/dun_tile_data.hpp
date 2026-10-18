@@ -78,6 +78,16 @@ extern DVL_API_FOR_TEST std::unique_ptr<MegaTile[]> pMegaTiles;
 extern size_t MegaTileCount;
 /** Hue shift of each world tile in steps (painted maps; see engine/render/tile_hue.hpp), 0 = as drawn. */
 extern int8_t dTileHue[MAXDUNX][MAXDUNY];
+/** Decor layers painted over the ground in hand-made maps (see engine/render/tile_decor.hpp). */
+inline constexpr int DecorLayerCount = 3;
+/** Town piece + 1 whose standing parts (foliage, rocks, walls) are drawn over a world tile, 0 = none. */
+extern uint16_t dDecorPiece[DecorLayerCount][MAXDUNX][MAXDUNY];
+/** Flower patch + 1 drawn on a world tile's ground, 0 = none. */
+extern uint8_t dDecorFlower[DecorLayerCount][MAXDUNX][MAXDUNY];
+/** Hue shift of each decor layer, in tile hue steps. */
+extern int8_t dDecorHue[DecorLayerCount][MAXDUNX][MAXDUNY];
+/** Decor that blocks walking (rocks, trunks, walls). */
+extern bool dDecorSolid[MAXDUNX][MAXDUNY];
 extern DVL_API_FOR_TEST std::unique_ptr<std::byte[]> pDungeonCels;
 /**
  * List tile properties
