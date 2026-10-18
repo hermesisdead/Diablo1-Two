@@ -206,7 +206,7 @@ std::vector<uint16_t> CurrentBrushVariants()
 /** Format a tile variant label for display. */
 std::string VariantLabel(uint16_t tileId)
 {
-	return StrCat("Tile ", tileId);
+	return StrCat("  Tile #", tileId);
 }
 
 void Say(std::string text)
@@ -669,13 +669,10 @@ std::vector<std::string> PaletteRows()
 	case Tool::Paint:
 		if (S.showVariants) {
 			// Show variants of the selected brush.
-			rows.push_back("[Back to brushes]");
-			rows.push_back("--- Tile Variants ---");
+			rows.push_back("◄ Back to brushes");
 			const auto variants = CurrentBrushVariants();
 			for (uint16_t tile : variants)
 				rows.push_back(VariantLabel(tile));
-			rows.push_back("--- Hue Shift (F/G) ---");
-			rows.push_back(StrCat("Hue: ", S.hueShift >= 0 ? "+" : "", S.hueShift, "°"));
 		} else {
 			// Show ground brushes.
 			for (const GroundBrush &b : GroundBrushes())
@@ -715,9 +712,10 @@ std::string PaletteTitle()
 		if (S.showVariants) {
 			const auto &brushes = GroundBrushes();
 			const std::string name = S.brush >= 0 && S.brush < static_cast<int>(brushes.size()) ? std::string(brushes[S.brush].name) : "Unknown";
-			return StrCat("Variants: ", name, "  (right-click F/G hue)");
+			const std::string selected = S.selectedVariant >= 0 ? StrCat(" [#", CurrentBrushVariants()[S.selectedVariant], "]") : "";
+			return StrCat(name, " variants", selected, "  F/G: hue");
 		}
-		return "Ground  (right-click variant)";
+		return "Ground brushes  (click to pick)";
 	case Tool::Stamp: return "Pieces of Tristram";
 	case Tool::Npc: return "Townspeople";
 	case Tool::Spawner: return StrCat("Pack of ", S.packSize, "  (click +/right -)");
@@ -749,18 +747,23 @@ void SelectPalette(int row)
 			if (row == 0) {
 				// "Back to brushes"
 				S.showVariants = false;
-			} else if (row == 1) {
-				// Skip the header
-			} else if (row >= 4) {
+				S.selectedVariant = -1;
+			} else if (row > 2) {
+				// Click on a tile variant (row 0=back, 1=header, 2+=variants)
 				const auto variants = CurrentBrushVariants();
-				const int varIdx = row - 4;
-				if (varIdx < static_cast<int>(variants.size()))
+				const int varIdx = row - 3;
+				if (varIdx >= 0 && varIdx < static_cast<int>(variants.size()))
 					S.selectedVariant = varIdx;
 			}
 		} else {
-			S.brush = row >= static_cast<int>(GroundBrushes().size()) ? -1 : row;
-			if (S.brush >= 0)
-				S.showVariants = true;  // Enter variants view when brush is selected
+			// Selecting a brush - show its variants
+			if (row < static_cast<int>(GroundBrushes().size())) {
+				S.brush = row;
+				S.showVariants = true;
+				S.selectedVariant = 0;  // Auto-select first variant
+			} else {
+				S.brush = -1;  // Picked tile
+			}
 		}
 		break;
 	case Tool::Stamp: S.stamp = row >= static_cast<int>(TownStamps().size()) ? -1 : row; break;
