@@ -1027,47 +1027,38 @@ void DrawTilePicker(const Surface &out)
 	DrawHalfTransparentRectTo(out, panel.position.x, panel.position.y, panel.size.width, panel.size.height);
 	DrawString(out, PaletteTitle(), { panel.position + Displacement { 0, 5 }, { panel.size.width, 12 } }, { .flags = UiFlags::ColorWhitegold | UiFlags::AlignCenter | UiFlags::KerningFitSpacing });
 
-	// Draw a grid of tiles
-	const int tileSize = S.pickerZoom * 16;  // zoom level 1 = 16px, 2 = 32px, etc.
-	const int tilesPerRow = std::max(1, panel.size.width / (tileSize + 4));
-	const int startX = panel.position.x + 4;
+	// Draw scrollable tile list on the left
+	const int listWidth = 60;
+	const int previewWidth = panel.size.width - listWidth - 8;
+	const int itemHeight = 14;
+	const int itemsPerScreen = (panel.size.height - 24) / itemHeight;
 	const int startY = panel.position.y + 24;
 
-	for (uint16_t tile = 1; tile <= 127; tile++) {
-		const int row = (tile - 1) / tilesPerRow;
-		const int col = (tile - 1) % tilesPerRow;
-		const int x = startX + col * (tileSize + 4) + S.pickerPan.x;
-		const int y = startY + row * (tileSize + 4) + S.pickerPan.y;
+	// Draw tile number list
+	int firstTile = std::max(0, S.paletteScroll);
+	for (int i = 0; i < itemsPerScreen && firstTile + i < 128; i++) {
+		const uint16_t tile = firstTile + i + 1;
+		const int y = startY + i * itemHeight;
+		const Rectangle rect = { { panel.position.x + 2, y }, { listWidth - 4, itemHeight - 1 } };
 
-		// Skip tiles outside the visible area
-		if (x + tileSize < panel.position.x || x > panel.position.x + panel.size.width ||
-		    y + tileSize < startY || y > startY + (PaletteVisibleRows() * PaletteRow))
-			continue;
+		// Highlight selected tile
+		if (tile == S.pickerTile)
+			FillRect(out, rect.position.x, rect.position.y, rect.size.width, rect.size.height, PAL16_YELLOW + 12);
+		else if (rect.contains(MousePosition))
+			FillRect(out, rect.position.x, rect.position.y, rect.size.width, rect.size.height, PAL16_GRAY + 13);
 
-		// Draw tile preview box with a color based on tile number
-		// Hue shift changes which color palette is used (cycle through different ranges)
-		int colorBase = PAL16_GRAY;
-		if (S.hueShift > 0) {
-			// Shift towards yellow/gold
-			colorBase = PAL16_YELLOW;
-		} else if (S.hueShift < 0) {
-			// Shift towards blue
-			colorBase = PAL16_BLUE;
-		}
-		const uint8_t tileColor = colorBase + (tile % 8);
-		FillRect(out, x, y, tileSize, tileSize, tileColor);
-
-		// Draw selection highlight with a gold border
-		if (tile == S.pickerTile) {
-			FillRect(out, x - 2, y - 2, tileSize + 4, 2, PAL16_YELLOW + 12);  // Top
-			FillRect(out, x - 2, y + tileSize, tileSize + 4, 2, PAL16_YELLOW + 12);  // Bottom
-			FillRect(out, x - 2, y, 2, tileSize, PAL16_YELLOW + 12);  // Left
-			FillRect(out, x + tileSize, y, 2, tileSize, PAL16_YELLOW + 12);  // Right
-		}
-
-		// Draw tile number label prominently
-		DrawString(out, StrCat(tile), { { x + 1, y + tileSize - 9 }, { tileSize - 2, 8 } }, { .flags = UiFlags::ColorWhite | UiFlags::AlignCenter });
+		DrawString(out, StrCat(tile), { rect.position + Displacement { 2, 1 }, { listWidth - 8, itemHeight } }, { .flags = UiFlags::ColorWhite | UiFlags::KerningFitSpacing });
 	}
+
+	// Draw large preview of selected tile on the right
+	const int previewX = panel.position.x + listWidth + 4;
+	const int previewY = startY;
+	const int previewH = panel.size.height - 28;
+	FillRect(out, previewX, previewY, previewWidth, previewH, PAL16_GRAY + 3);
+
+	// Draw the selected tile number large and clear
+	DrawString(out, StrCat("Tile #", S.pickerTile), { { previewX + 4, previewY + 4 }, { previewWidth - 8, 12 } }, { .flags = UiFlags::ColorWhitegold | UiFlags::KerningFitSpacing });
+	DrawString(out, "(Use Up/Down or Click)", { { previewX + 4, previewY + 20 }, { previewWidth - 8, 10 } }, { .flags = UiFlags::ColorGold | UiFlags::KerningFitSpacing });
 }
 
 void DrawInterface(const Surface &out)
@@ -1351,25 +1342,38 @@ void MouseDown(Point p, bool right)
 				S.packSize = std::clamp(S.packSize + (right ? -1 : 1), 1, 20);
 			return;
 		}
-		// Tile picker click handling.
+		// Tile picker click handling - simple scrollable list
 		if (S.showTilePicker) {
 			const Rectangle panel = PaletteRect();
-			const int tileSize = S.pickerZoom * 16;
-			const int tilesPerRow = std::max(1, panel.size.width / (tileSize + 4));
-			const int startX = panel.position.x + 4;
+			const int listWidth = 60;
+			const int itemHeight = 14;
+			const int itemsPerScreen = (panel.size.height - 24) / itemHeight;
 			const int startY = panel.position.y + 24;
 
-			for (uint16_t tile = 1; tile <= 127; tile++) {
-				const int row = (tile - 1) / tilesPerRow;
-				const int col = (tile - 1) % tilesPerRow;
-				const int x = startX + col * (tileSize + 4) + S.pickerPan.x;
-				const int y = startY + row * (tileSize + 4) + S.pickerPan.y;
-
-				if (Rectangle{{ x, y }, { tileSize, tileSize }}.contains(p)) {
-					S.pickerTile = tile;
-					return;
+			// Check if click is in the tile list area
+			if (p.x >= panel.position.x && p.x < panel.position.x + listWidth) {
+				// Clicked in the tile list
+				int firstTile = std::max(0, S.paletteScroll);
+				int clickedIndex = (p.y - startY) / itemHeight;
+				if (clickedIndex >= 0 && clickedIndex < itemsPerScreen) {
+					uint16_t clickedTile = firstTile + clickedIndex + 1;
+					if (clickedTile <= 127) {
+						S.pickerTile = clickedTile;
+						// Scroll to keep selection visible
+						if (clickedTile - 1 < S.paletteScroll)
+							ScrollPalette(clickedTile - 1 - S.paletteScroll);
+						else if (clickedTile - 1 >= S.paletteScroll + itemsPerScreen)
+							ScrollPalette(clickedTile - 1 - S.paletteScroll - itemsPerScreen + 1);
+						return;
+					}
 				}
 			}
+
+			// Up/Down keys or scrolling to change tile
+			if (right)
+				S.pickerTile = std::max(1, static_cast<int>(S.pickerTile) - 1);
+			else
+				S.pickerTile = std::min(127, S.pickerTile + 1);
 			return;
 		}
 
@@ -1846,9 +1850,25 @@ bool MapEditorHandleEvent(const SDL_Event &event)
 			}
 			return false;
 		}
-		// Hue shift when tile picker is open
+		// Tile picker controls
 		if (S.tool == Tool::Paint && S.showTilePicker) {
-			if (sc == SDL_SCANCODE_F) {
+			if (sc == SDL_SCANCODE_UP) {
+				S.pickerTile = std::max(1, static_cast<int>(S.pickerTile) - 1);
+				// Scroll list to keep selection visible
+				const int itemHeight = 14;
+				const int itemsPerScreen = (PaletteRect().size.height - 24) / itemHeight;
+				if (S.pickerTile - 1 < S.paletteScroll)
+					ScrollPalette(S.pickerTile - 1 - S.paletteScroll);
+				return true;
+			} else if (sc == SDL_SCANCODE_DOWN) {
+				S.pickerTile = std::min(127, S.pickerTile + 1);
+				// Scroll list to keep selection visible
+				const int itemHeight = 14;
+				const int itemsPerScreen = (PaletteRect().size.height - 24) / itemHeight;
+				if (S.pickerTile - 1 >= S.paletteScroll + itemsPerScreen)
+					ScrollPalette(S.pickerTile - 1 - S.paletteScroll - itemsPerScreen + 1);
+				return true;
+			} else if (sc == SDL_SCANCODE_F) {
 				S.hueShift = std::max(S.hueShift - 5, -30);
 				return true;
 			} else if (sc == SDL_SCANCODE_G) {
