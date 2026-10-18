@@ -55,6 +55,7 @@ const Kind *FindKind(std::string_view key)
 }
 
 // --- Colours ----------------------------------------------------------------------------------
+// Muted, earthy colours like the game's pre-rendered art; shading and grain do the rest.
 
 enum Colour : uint8_t {
 	None,
@@ -81,55 +82,74 @@ enum Colour : uint8_t {
 
 constexpr std::array<std::array<uint8_t, 3>, ColourCount> ColourRgb { {
 	{ 0, 0, 0 },
-	{ 236, 232, 220 },
-	{ 186, 182, 172 },
-	{ 122, 119, 112 },
-	{ 62, 60, 56 },
-	{ 22, 20, 20 },
-	{ 228, 160, 152 },
-	{ 168, 100, 94 },
-	{ 140, 92, 50 },
-	{ 80, 52, 28 },
-	{ 196, 158, 106 },
-	{ 226, 196, 148 },
-	{ 232, 200, 70 },
-	{ 214, 120, 36 },
-	{ 186, 36, 30 },
-	{ 206, 122, 56 },
-	{ 150, 80, 30 },
-	{ 132, 72, 36 },
-	{ 46, 30, 20 },
+	{ 168, 160, 142 }, // dirty wool, a hen's feathers
+	{ 128, 121, 108 },
+	{ 88, 83, 75 },
+	{ 52, 48, 43 },
+	{ 20, 18, 16 },
+	{ 146, 106, 92 },  // dusky pig skin
+	{ 102, 70, 60 },
+	{ 94, 68, 45 },
+	{ 56, 39, 26 },
+	{ 124, 98, 70 },
+	{ 146, 120, 90 },
+	{ 148, 126, 62 },
+	{ 136, 94, 44 },
+	{ 112, 30, 24 },
+	{ 116, 86, 60 },   // grey-brown tabby
+	{ 66, 48, 34 },
+	{ 82, 52, 32 },    // dark bay
+	{ 28, 21, 16 },
 } };
 
-std::array<uint8_t, ColourCount> ColourIndex {};
-std::array<SDL_Color, 256> ColoursForPalette {};
-bool ColoursReady = false;
+struct Rgb {
+	float r = 0, g = 0, b = 0;
+};
 
-void RefreshColours()
+Rgb ToRgb(Colour c, float scale = 1.0f)
 {
-	bool same = ColoursReady;
+	return { ColourRgb[c][0] * scale, ColourRgb[c][1] * scale, ColourRgb[c][2] * scale };
+}
+
+// Nearest palette colour for any RGB, worked out as needed (5 bits a channel) and kept until the palette changes.
+std::array<int16_t, 32 * 32 * 32> Nearest;
+std::array<SDL_Color, 256> NearestFor {};
+bool NearestReady = false;
+
+void RefreshNearest()
+{
+	bool same = NearestReady;
 	for (size_t i = 0; same && i < logical_palette.size(); i++)
-		same = logical_palette[i].r == ColoursForPalette[i].r && logical_palette[i].g == ColoursForPalette[i].g && logical_palette[i].b == ColoursForPalette[i].b;
+		same = logical_palette[i].r == NearestFor[i].r && logical_palette[i].g == NearestFor[i].g && logical_palette[i].b == NearestFor[i].b;
 	if (same)
 		return;
-	ColoursForPalette = logical_palette;
-	ColoursReady = true;
-	for (int c = 1; c < ColourCount; c++) {
+	NearestFor = logical_palette;
+	NearestReady = true;
+	Nearest.fill(-1);
+}
+
+uint8_t NearestIndex(const Rgb &c)
+{
+	const int r = std::clamp(static_cast<int>(c.r), 0, 255), g = std::clamp(static_cast<int>(c.g), 0, 255), b = std::clamp(static_cast<int>(c.b), 0, 255);
+	int16_t &slot = Nearest[static_cast<size_t>(((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3))];
+	if (slot < 0) {
+		const int qr = (r & ~7) + 4, qg = (g & ~7) + 4, qb = (b & ~7) + 4;
 		int best = 1, bestDistance = INT32_MAX;
 		for (int i = 1; i < 256; i++) {
 			const SDL_Color &p = logical_palette[i];
-			const int dr = p.r - ColourRgb[c][0], dg = p.g - ColourRgb[c][1], db = p.b - ColourRgb[c][2];
+			const int dr = p.r - qr, dg = p.g - qg, db = p.b - qb;
 			const int distance = 3 * dr * dr + 4 * dg * dg + 2 * db * db;
 			if (distance < bestDistance) {
 				bestDistance = distance;
 				best = i;
 			}
 		}
-		ColourIndex[c] = static_cast<uint8_t>(best);
+		slot = static_cast<int16_t>(best);
 	}
+	return static_cast<uint8_t>(slot);
 }
 
-/** Shades of one coat: lit top, body, shaded belly, outline. */
+/** A coat: its colour (the other fields are kept for the drawings' readability; shading is lit, not banded). */
 struct Coat {
 	Colour light, base, dark, outline;
 };
@@ -163,34 +183,57 @@ enum Pose : uint8_t {
 	PoseCount,
 };
 
+/** Grain in [-1, 1] for a pixel, like the noisy textures of the game's renders. */
+float Grain(int x, int y)
+{
+	uint32_t h = static_cast<uint32_t>(x) * 73856093u ^ static_cast<uint32_t>(y) * 19349663u;
+	h ^= h >> 13;
+	h *= 0x5bd1e995u;
+	h ^= h >> 15;
+	return static_cast<float>(h & 0xFFFF) / 32767.5f - 1.0f;
+}
+
 struct Canvas {
-	std::array<uint8_t, CanvasWidth * CanvasHeight> px {};
+	std::array<Rgb, CanvasWidth * CanvasHeight> px {};
+	std::array<bool, CanvasWidth * CanvasHeight> on {};
 	float k = 1.0f; // scale from sketch to canvas
+	int left = CanvasWidth, right = -1; // drawn extent, for the shadow
 
 	float X(float x) const { return FeetX + (x - SketchFeetX) * k; }
 	float Y(float y) const { return GroundY + (y - SketchGroundY) * k; }
 
-	void Put(int x, int y, Colour c)
+	void Put(int x, int y, const Rgb &c)
 	{
-		if (x >= 0 && y >= 0 && x < CanvasWidth && y < CanvasHeight && c != None)
-			px[static_cast<size_t>(y) * CanvasWidth + x] = c;
+		if (x < 0 || y < 0 || x >= CanvasWidth || y >= CanvasHeight)
+			return;
+		const size_t i = static_cast<size_t>(y) * CanvasWidth + x;
+		px[i] = c;
+		on[i] = true;
+		left = std::min(left, x);
+		right = std::max(right, x);
 	}
 
-	/** A sketch pixel: a small block once scaled. */
+	/** A small detail (eye, nostril, comb): a block of flat colour once scaled. */
 	void Set(int x, int y, Colour c)
 	{
+		if (c == None)
+			return;
 		const int x0 = static_cast<int>(X(static_cast<float>(x))), y0 = static_cast<int>(Y(static_cast<float>(y)));
 		const int x1 = static_cast<int>(X(static_cast<float>(x + 1))), y1 = static_cast<int>(Y(static_cast<float>(y + 1)));
 		for (int py = y0; py < std::max(y0 + 1, y1); py++) {
 			for (int px_ = x0; px_ < std::max(x0 + 1, x1); px_++)
-				Put(px_, py, c);
+				Put(px_, py, ToRgb(c, 0.9f + 0.08f * Grain(px_, py)));
 		}
 	}
 
-	/** A shaded oval, lit from above, with an outline. `bumpy` roughens the edge (wool). */
+	/**
+	 * A body part lit like a rounded solid: light from the upper left, a dark underside, no outline.
+	 * `bumpy` roughens the edge and coarsens the grain (wool).
+	 */
 	void Oval(float cx, float cy, float rx, float ry, const Coat &coat, bool bumpy = false)
 	{
 		cx = X(cx), cy = Y(cy), rx *= k, ry *= k;
+		const float grain = bumpy ? 0.22f : 0.09f;
 		for (int y = static_cast<int>(cy - ry - 2); y <= static_cast<int>(cy + ry + 2); y++) {
 			for (int x = static_cast<int>(cx - rx - 2); x <= static_cast<int>(cx + rx + 2); x++) {
 				const float nx = (x + 0.5f - cx) / rx, ny = (y + 0.5f - cy) / ry;
@@ -200,35 +243,33 @@ struct Canvas {
 				const float d = nx * nx + ny * ny;
 				if (d > edge)
 					continue;
-				Colour c = coat.base;
-				if (d > edge * 0.78f)
-					c = coat.outline;
-				else if (ny < -0.35f)
-					c = coat.light;
-				else if (ny > 0.45f)
-					c = coat.dark;
-				if (bumpy && c == coat.base && ((x * 7 + y * 13) % 9) == 0)
-					c = coat.dark;
-				Put(x, y, c);
+				const float nz = std::sqrt(std::max(0.0f, 1.0f - d / edge));
+				const float lambert = std::max(0.0f, -0.48f * nx - 0.62f * ny + 0.62f * nz);
+				float light = 0.16f + 0.95f * lambert;
+				if (ny > 0.15f)
+					light *= 1.0f - 0.5f * std::min(1.0f, (ny - 0.15f) / 0.85f); // the belly in its own shadow
+				light *= 1.0f + grain * Grain(x, y);
+				Put(x, y, ToRgb(coat.base, light));
 			}
 		}
 	}
 
-	/** A line in sketch units, as thick as one scaled sketch pixel. */
+	/** A line in sketch units (tails, horns, manes), as thick as one scaled sketch pixel. */
 	void Line(int sx0, int sy0, int sx1, int sy1, Colour c)
 	{
 		const int thick = std::max(1, static_cast<int>(k + 0.5f));
 		for (int t = 0; t < thick; t++)
-			RawLine(static_cast<int>(X(static_cast<float>(sx0))) + t, static_cast<int>(Y(static_cast<float>(sy0))), static_cast<int>(X(static_cast<float>(sx1))) + t, static_cast<int>(Y(static_cast<float>(sy1))), c);
+			RawLine(static_cast<int>(X(static_cast<float>(sx0))) + t, static_cast<int>(Y(static_cast<float>(sy0))), static_cast<int>(X(static_cast<float>(sx1))) + t, static_cast<int>(Y(static_cast<float>(sy1))), c,
+			    thick > 1 ? 1.0f - 0.45f * static_cast<float>(t) / static_cast<float>(thick - 1) : 0.8f);
 	}
 
-	void RawLine(int x0, int y0, int x1, int y1, Colour c)
+	void RawLine(int x0, int y0, int x1, int y1, Colour c, float shade)
 	{
 		const int dx = std::abs(x1 - x0), dy = -std::abs(y1 - y0);
 		const int sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
 		int err = dx + dy;
 		for (int guard = 0; guard < 256; guard++) {
-			Put(x0, y0, c);
+			Put(x0, y0, ToRgb(c, shade * (1.0f + 0.1f * Grain(x0, y0))));
 			if (x0 == x1 && y0 == y1)
 				break;
 			const int e2 = 2 * err;
@@ -243,12 +284,23 @@ struct Canvas {
 		}
 	}
 
-	/** A leg from the body down to the ground; far legs are drawn darker. */
+	/** A leg from the body down to the ground, rounded by shading across it; far legs sit in shadow. */
 	void Leg(int x, int top, int swing, Colour near, Colour far, bool isFar, int width = 2)
 	{
 		const Colour c = isFar ? far : near;
-		for (int w = 0; w < width; w++)
-			Line(x + w, top, x + w + swing, SketchGroundY, c);
+		const float x0 = X(static_cast<float>(x)), y0 = Y(static_cast<float>(top));
+		const float x1 = X(static_cast<float>(x + swing)), y1 = Y(static_cast<float>(SketchGroundY));
+		const int w = std::max(1, static_cast<int>(width * k + 0.5f));
+		const int rows = std::max(1, static_cast<int>(y1 - y0));
+		for (int r = 0; r <= rows; r++) {
+			const float t = static_cast<float>(r) / static_cast<float>(rows);
+			const int lx = static_cast<int>(x0 + (x1 - x0) * t), ly = static_cast<int>(y0 + (y1 - y0) * t);
+			for (int i = 0; i < w; i++) {
+				float light = (isFar ? 0.5f : 0.95f) - 0.4f * static_cast<float>(i) / static_cast<float>(std::max(1, w - 1));
+				light *= 1.0f - 0.25f * t; // darker towards the ground
+				Put(lx + i, ly, ToRgb(c, light * (1.0f + 0.08f * Grain(lx + i, ly))));
+			}
+		}
 	}
 };
 
@@ -399,13 +451,13 @@ void DrawChicken(Canvas &c, Pose pose)
 void DrawHorse(Canvas &c, Pose pose)
 {
 	const int s = Swing(pose) * 2;
-	c.Leg(20, 30, -s, Chestnut, DarkBrown, true);
-	c.Leg(37, 30, s, Chestnut, DarkBrown, true);
+	c.Leg(19, 30, -s, Chestnut, DarkBrown, true, 3);
+	c.Leg(36, 30, s, Chestnut, DarkBrown, true, 3);
 	c.Line(15, 24, 12, 35, Mane); // tail
 	c.Line(16, 24, 14, 36, Mane);
 	c.Oval(28, 25, 14.0f, 7.0f, HorseHide);
-	c.Leg(23, 31, s, Chestnut, DarkBrown, false);
-	c.Leg(40, 31, -s, Chestnut, DarkBrown, false);
+	c.Leg(22, 31, s, Chestnut, DarkBrown, false, 3);
+	c.Leg(39, 31, -s, Chestnut, DarkBrown, false, 3);
 	const bool graze = pose == Graze;
 	if (graze) {
 		c.Oval(43.0f, 29.0f, 3.5f, 6.5f, HorseHide);
@@ -450,19 +502,39 @@ const Canvas &AnimalCanvas(int kind, Pose pose)
 	return *slot;
 }
 
-/** Puts a drawn animal on screen, feet at `feet`, through a light table. */
-void BlitAnimal(const Surface &out, Point feet, const Canvas &canvas, bool facingRight, const uint8_t *tbl)
+/** Puts a drawn animal on screen, feet at `feet`, lit by a tile's light, with a soft shadow on the ground. */
+void BlitAnimal(const Surface &out, Point feet, const Canvas &canvas, bool facingRight, int lightLevel)
 {
-	RefreshColours();
+	RefreshNearest();
+	lightLevel = std::clamp(lightLevel, 0, static_cast<int>(LightTables.size()) - 1);
+	// Shadow: the ground under the body darkened, falling a little away from the light.
+	if (canvas.right >= canvas.left) {
+		const float rx = static_cast<float>(canvas.right - canvas.left) * 0.42f, ry = rx * 0.3f;
+		const int centreX = facingRight ? (canvas.left + canvas.right) / 2 - FeetX : FeetX - (canvas.left + canvas.right) / 2;
+		const Point c = feet + Displacement { centreX + 3, 1 };
+		for (int y = static_cast<int>(-ry); y <= static_cast<int>(ry); y++) {
+			for (int x = static_cast<int>(-rx); x <= static_cast<int>(rx); x++) {
+				const float d = (x * x) / (rx * rx) + (y * y) / (ry * ry);
+				const Point p = c + Displacement { x, y };
+				if (d <= 1.0f && out.InBounds(p) && (d < 0.6f || Grain(p.x, p.y) > (d - 0.6f) * 5.0f - 1.0f))
+				{
+					// Darken the ground's own colour (town light tables are not darkness ramps).
+					const SDL_Color &g = logical_palette[*out.at(p.x, p.y)];
+					*out.at(p.x, p.y) = NearestIndex({ g.r * 0.45f, g.g * 0.45f, g.b * 0.45f });
+				}
+			}
+		}
+	}
+	const uint8_t *tbl = LightTables[lightLevel].data();
 	for (int y = 0; y < CanvasHeight; y++) {
 		for (int x = 0; x < CanvasWidth; x++) {
-			const uint8_t c = canvas.px[static_cast<size_t>(y) * CanvasWidth + x];
-			if (c == None)
+			const size_t i = static_cast<size_t>(y) * CanvasWidth + x;
+			if (!canvas.on[i])
 				continue;
 			const int sx = facingRight ? x - FeetX : FeetX - x;
 			const Point p = feet + Displacement { sx, y - GroundY };
 			if (out.InBounds(p))
-				*out.at(p.x, p.y) = tbl[ColourIndex[c]];
+				*out.at(p.x, p.y) = tbl[NearestIndex(canvas.px[i])];
 		}
 	}
 }
@@ -686,7 +758,7 @@ void DrawOne(const Surface &out, const Animal &a, Point feet, int lightTableInde
 		}
 		return;
 	}
-	BlitAnimal(out, feet, AnimalCanvas(a.kind, CurrentPose(a)), a.facingRight, tbl);
+	BlitAnimal(out, feet, AnimalCanvas(a.kind, CurrentPose(a)), a.facingRight, lightTableIndex);
 }
 
 } // namespace

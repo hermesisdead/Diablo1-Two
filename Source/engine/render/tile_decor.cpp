@@ -42,9 +42,9 @@ constexpr std::array<std::array<uint8_t, 3>, ShadeCount> ShadeRgb { {
     { 150, 70, 175 }, // purple
     { 80, 100, 215 }, // blue
     { 230, 130, 170 },// pink
-    { 125, 82, 45 },  // wood
-    { 170, 120, 70 }, // sunlit wood
-    { 62, 40, 22 },   // wood in shadow
+    { 70, 54, 40 },   // weathered wood
+    { 92, 74, 56 },   // its lit edge
+    { 36, 28, 21 },   // wood in shadow
 } };
 
 std::array<uint8_t, ShadeCount> ShadeIndex {};
