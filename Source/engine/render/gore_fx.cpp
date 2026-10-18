@@ -339,19 +339,51 @@ OverlayColor Dim(OverlayColor c, float k)
 	return { static_cast<uint8_t>(c.r * k), static_cast<uint8_t>(c.g * k), static_cast<uint8_t>(c.b * k) };
 }
 
+/** How a liquid stain tints the floor it soaks into (multiply), fresh and dried. */
+struct StainTint {
+	float fresh[3];
+	float dried[3];
+};
+
+const StainTint &TintOf(GoreKind kind)
+{
+	static const StainTint blood { { 0.66f, 0.09f, 0.07f }, { 0.40f, 0.10f, 0.08f } };
+	static const StainTint rot { { 0.52f, 0.30f, 0.14f }, { 0.36f, 0.24f, 0.13f } };
+	static const StainTint ichor { { 0.38f, 0.04f, 0.10f }, { 0.24f, 0.05f, 0.09f } };
+	static const StainTint dust { { 0.85f, 0.82f, 0.76f }, { 0.85f, 0.82f, 0.76f } };
+	switch (kind) {
+	case GoreKind::Rot: return rot;
+	case GoreKind::Ichor: return ichor;
+	case GoreKind::Bone:
+	case GoreKind::Rubble: return dust;
+	default: return blood;
+	}
+}
+
 void DrawSplats(const WorldProjector &pr)
 {
+	std::vector<float> cover, rim, shine;
 	for (const Splat &s : splats) {
 		const float light = LightAtTile(s.x, s.y);
 		if (light <= 0.03f)
 			continue;
 		const GoreLook &look = LookOf(s.kind);
+		const StainTint &tint = TintOf(s.kind);
 		const float grow = s.grow > 0 ? std::clamp(s.age / s.grow, 0.25f, 1.0f) : 1.0f;
 		const float fade = std::clamp((s.maxAge - s.age) / 12.0f, 0.0f, 1.0f);
-		// Fresh blood is brighter; it darkens as it dries.
+		// Fresh blood is wet and shiny; it darkens and goes matte as it dries.
 		const float dry = std::clamp(s.age / 30.0f, 0.0f, 1.0f);
-		const OverlayColor color = Dim(look.splat, light * (1.15f - 0.35f * dry));
+		const float wet = look.liquid ? std::clamp(1.0f - s.age / 18.0f, 0.0f, 1.0f) : 0.0f;
 		const float alpha = look.splatAlpha * fade;
+
+		// The stain's blobs on screen, and the box around them.
+		struct ScreenBlob {
+			Point c;
+			float rx, ry, depth, phase;
+		};
+		std::array<ScreenBlob, 6> sb {};
+		int count = 0;
+		int minX = INT32_MAX, minY = INT32_MAX, maxX = INT32_MIN, maxY = INT32_MIN;
 		for (int b = 0; b < s.blobs; b++) {
 			const Blob &blob = s.blob[b];
 			const std::optional<OrbitScreenPoint> c = pr.Project(s.x + blob.dx * grow, s.y + blob.dy * grow, 0.0f);
@@ -359,19 +391,67 @@ void DrawSplats(const WorldProjector &pr)
 				continue;
 			const float rx = std::max(0.8f, blob.r * grow * c->pixelsPerTile * 0.9f);
 			const float ry = rx * (pr.orbit ? 0.6f : 0.5f);
-			const int ix = static_cast<int>(std::ceil(rx)) + 1, iy = static_cast<int>(std::ceil(ry)) + 1;
-			for (int dy = -iy; dy <= iy; dy++) {
-				for (int dx = -ix; dx <= ix; dx++) {
-					const float fx = dx / rx, fy = dy / ry;
-					const float d = std::sqrt(fx * fx + fy * fy);
+			sb[count++] = { c->pos, rx, ry, c->depth, (s.x * 12.9898f + s.y * 78.233f + static_cast<float>(b) * 3.7f) };
+			minX = std::min(minX, c->pos.x - static_cast<int>(rx * 1.3f) - 1);
+			maxX = std::max(maxX, c->pos.x + static_cast<int>(rx * 1.3f) + 1);
+			minY = std::min(minY, c->pos.y - static_cast<int>(ry * 1.3f) - 1);
+			maxY = std::max(maxY, c->pos.y + static_cast<int>(ry * 1.3f) + 1);
+		}
+		if (count == 0 || maxX - minX > 400 || maxY - minY > 300)
+			continue;
+		const int w = maxX - minX + 1, h = maxY - minY + 1;
+		cover.assign(static_cast<size_t>(w) * h, 0.0f);
+		rim.assign(static_cast<size_t>(w) * h, 0.0f);
+		shine.assign(static_cast<size_t>(w) * h, 0.0f);
+		float depth = sb[0].depth;
+		// One coverage for the whole stain (blobs that overlap do not stain twice), with ragged edges.
+		for (int i = 0; i < count; i++) {
+			const ScreenBlob &bl = sb[i];
+			depth = std::min(depth, bl.depth);
+			for (int y = std::max(minY, bl.c.y - static_cast<int>(bl.ry * 1.3f) - 1); y <= std::min(maxY, bl.c.y + static_cast<int>(bl.ry * 1.3f) + 1); y++) {
+				for (int x = std::max(minX, bl.c.x - static_cast<int>(bl.rx * 1.3f) - 1); x <= std::min(maxX, bl.c.x + static_cast<int>(bl.rx * 1.3f) + 1); x++) {
+					const float fx = static_cast<float>(x - bl.c.x) / bl.rx, fy = static_cast<float>(y - bl.c.y) / bl.ry;
+					const float ang = std::atan2(fy, fx);
+					const float ragged = 1.0f + 0.16f * std::sin(3.0f * ang + bl.phase) + 0.09f * std::sin(7.0f * ang + bl.phase * 1.7f) + 0.05f * std::sin(13.0f * ang + bl.phase * 2.3f);
+					const float d = std::sqrt(fx * fx + fy * fy) / ragged;
 					if (d >= 1.0f)
 						continue;
-					const Point p { c->pos.x + dx, c->pos.y + dy };
-					if (!pr.Visible(p, c->depth - 0.2f))
-						continue;
-					const float edge = std::clamp((1.0f - d) * 3.0f, 0.0f, 1.0f);
-					ColorOverlayDecal(p.x, p.y, color, alpha * edge);
+					const size_t k = static_cast<size_t>(y - minY) * w + (x - minX);
+					// Liquid has a clean edge; dust thins out.
+					const float c = look.liquid ? std::clamp((1.0f - d) * 5.0f, 0.0f, 1.0f) : std::clamp((1.0f - d) * 2.0f, 0.0f, 1.0f);
+					if (c > cover[k]) {
+						cover[k] = c;
+						// Drying blood pulls to its edge: a darker ring.
+						rim[k] = look.liquid ? std::clamp((d - 0.7f) / 0.3f, 0.0f, 1.0f) * (0.4f + 0.6f * dry) : 0.0f;
+					}
+					if (i == 0 && look.liquid) {
+						// A soft highlight up and to the left, where the light catches the wet surface.
+						const float hx = fx + 0.32f, hy = fy + 0.42f;
+						shine[k] = std::max(shine[k], std::clamp(1.0f - (hx * hx / 0.10f + hy * hy / 0.05f), 0.0f, 1.0f));
+					}
 				}
+			}
+		}
+		for (int y = 0; y < h; y++) {
+			for (int x = 0; x < w; x++) {
+				const size_t k = static_cast<size_t>(y) * w + x;
+				const float c = cover[k] * alpha;
+				if (c <= 0.01f)
+					continue;
+				const Point p { minX + x, minY + y };
+				if (!pr.Visible(p, depth - 0.2f))
+					continue;
+				// Soak in: darken and tint the floor (its texture shows through), deeper at the rim.
+				float m[3];
+				for (int ch = 0; ch < 3; ch++) {
+					const float t = tint.fresh[ch] + (tint.dried[ch] - tint.fresh[ch]) * dry;
+					m[ch] = 1.0f - c * (1.0f - t * (1.0f - 0.35f * rim[k]));
+				}
+				ColorOverlayDecalMultiply(p.x, p.y, m[0], m[1], m[2]);
+				// A little colour on top so stains still read on dark stone.
+				ColorOverlayDecal(p.x, p.y, Dim(look.splat, light * (1.1f - 0.4f * dry)), c * (look.liquid ? 0.22f : 0.55f));
+				if (wet > 0 && shine[k] > 0)
+					ColorOverlayDecalGloss(p.x, p.y, { 255, 225, 215 }, shine[k] * wet * c * light * 0.55f);
 			}
 		}
 	}

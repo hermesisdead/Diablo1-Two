@@ -54,6 +54,7 @@
 #include "missiles.h"
 #include "nthread.h"
 #include "engine/render/color_overlay.hpp"
+#include "levels/desert.hpp"
 #include "engine/render/dungeon_mood.hpp"
 #include "engine/render/tile_decor.hpp"
 #include "engine/render/tile_hue.hpp"
@@ -702,6 +703,25 @@ void DrawCell(const Surface &out, const Lightmap lightmap, Point tilePosition, P
  * @param tilePosition dPiece coordinates
  * @param targetBufferPosition Target buffer coordinate
  */
+/** Tristram's pieces with water in their lowest layers (the stream, the pond): their water is drawn with the tile. */
+constexpr uint16_t TownWaterPieces[] {
+	261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276,
+	278, 281, 282, 284, 285, 287, 288, 294, 295, 296, 301, 305, 306, 307, 308, 309,
+	310, 330, 331, 332, 333, 337, 338, 339, 340, 346, 350, 352, 355, 364, 1161, 1162,
+	1163, 1164,
+};
+
+bool IsWaterFloor(uint16_t piece)
+{
+	if (leveltype != DTYPE_TOWN || InDesertRegion())
+		return false;
+#ifdef _DEBUG
+	if (std::getenv("DEVILUTIONX_DEV_ALLWATER") != nullptr)
+		return true;
+#endif
+	return std::binary_search(std::begin(TownWaterPieces), std::end(TownWaterPieces), piece);
+}
+
 void DrawFloorTile(const Surface &out, const Lightmap &lightmap, Point tilePosition, Point targetBufferPosition)
 {
 	const int lightTableIndex = dLight[tilePosition.x][tilePosition.y];
@@ -1004,6 +1024,9 @@ void DrawFloor(const Surface &out, const Lightmap &lightmap, Point tilePosition,
 		for (int j = 0; j < columns; j++, tilePosition += Direction::East, targetBufferPosition.x += TILE_WIDTH) {
 			if (!InDungeonBounds(tilePosition))
 				continue;
+			// Water is not floor one can walk on, but where it is matters to the full-colour layer.
+			if (IsWaterFloor(dPiece[tilePosition.x][tilePosition.y]))
+				ColorOverlayWaterTile(out, targetBufferPosition + Displacement { 0, 1 });
 			if (IsFloor(tilePosition)) {
 				DrawFloorTile(out, lightmap, tilePosition, targetBufferPosition);
 			}

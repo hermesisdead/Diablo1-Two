@@ -577,6 +577,8 @@ struct GraphicsOptions : OptionCategoryBase {
 	OptionEntryBoolean dungeonMoods;
 	/** @brief Weather and mood effects with real transparency instead of a dither pattern. */
 	OptionEntryBoolean smoothEffects;
+	/** @brief Water that ripples, flows and reflects its banks (needs Smooth Effects). */
+	OptionEntryBoolean waterEffects;
 	/** @brief Original art, the new sprites in full colour (HD), or the new sprites in the game's 256 colours (HD Redux). \\ cycles. */
 	OptionEntryEnum<TextureMode> textures;
 	/** @brief Master switch for weather and mood effects (F8 weather panel). */

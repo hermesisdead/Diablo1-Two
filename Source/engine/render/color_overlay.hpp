@@ -70,6 +70,22 @@ void ColorOverlayDecal(int x, int y, OverlayColor color, float alpha);
  */
 void ColorOverlaySpritePixel(const Surface &out, Point p, OverlayColor color, uint8_t alpha, uint8_t expect);
 
+/**
+ * @brief Floor decals, other blend modes (blood that stains rather than covers):
+ * Multiply darkens and tints the floor under it (factors 0..1 per channel; several multiply
+ * together), Gloss adds light on top (a wet sheen). Shown only where the floor is still visible,
+ * like ColorOverlayDecal. Order on a pixel: multiply, then decal colour, then gloss.
+ */
+void ColorOverlayDecalMultiply(int x, int y, float r, float g, float b);
+void ColorOverlayDecalGloss(int x, int y, OverlayColor color, float amount);
+
+/**
+ * @brief Water: marks a water tile drawn at `position` (bottom-left corner of the tile, as the floor
+ * is drawn) on the floor surface. At the end of the frame its water-coloured pixels ripple, flow,
+ * glint and reflect what stands on the bank above them.
+ */
+void ColorOverlayWaterTile(const Surface &floor, Point position);
+
 /** @brief A whole-region wash: before everything else (darkening) or after (flashes). */
 void ColorOverlayWash(OverlayColor color, float alpha, bool last);
 
