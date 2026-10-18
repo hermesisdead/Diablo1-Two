@@ -75,6 +75,13 @@ struct Layer {
 
 Layer L;
 
+struct UiImage {
+	int x, y, w, h; // back buffer pixels
+	const uint8_t *pixels;
+	int stride;
+};
+std::vector<UiImage> UiImages;
+
 constexpr uint32_t Pack(uint32_t r, uint32_t g, uint32_t b, uint32_t a)
 {
 	return r | (g << 8) | (b << 16) | (a << 24);
@@ -175,6 +182,7 @@ bool ColorOverlayAvailable()
 
 void ColorOverlayBeginFrame()
 {
+	UiImages.clear();
 	L.inFrame = true;
 	L.recording = false;
 	L.finished = false;
@@ -436,6 +444,13 @@ void ColorOverlaySpritePixel(const Surface &out, Point p, OverlayColor color, ui
 	}
 }
 
+void ColorOverlayUiImage(const Surface &out, Point topLeft, int width, int height, const uint8_t *pixels, int stride)
+{
+	if (!L.inFrame || out.surface != PalSurface || pixels == nullptr || !ColorOverlayAvailable())
+		return;
+	UiImages.push_back({ out.region.x + topLeft.x, out.region.y + topLeft.y, width, height, pixels, stride });
+}
+
 void ColorOverlaySetFogColor(OverlayColor color)
 {
 	L.fogColor = color;
@@ -511,6 +526,43 @@ void ColorOverlayComposite(SDL_Surface *src, const SDL_Rect *srcRect, SDL_Surfac
 	if (!GetLayout(dst, layout))
 		return;
 	const bool water = L.waterUsed && L.floorValid && L.waterW == L.floorW && L.waterH == L.floorH;
+	if (!UiImages.empty()) {
+		// Interface images: anywhere on the frame, where their 256-colour pixels are still there.
+		const SDL_Rect s = srcRect != nullptr ? *srcRect : SDL_Rect { 0, 0, src->w, src->h };
+		const int ox = (dstRect != nullptr ? dstRect->x : 0) - s.x;
+		const int oy = (dstRect != nullptr ? dstRect->y : 0) - s.y;
+		const int rs = layout.rShift, gs = layout.gShift, bs = layout.bShift;
+		const uint32_t keep = ~((0xFFu << rs) | (0xFFu << gs) | (0xFFu << bs));
+		for (const UiImage &img : UiImages) {
+			const int ix0 = std::max({ img.x, s.x, 0 }), ix1 = std::min({ img.x + img.w, s.x + s.w, src->w });
+			const int iy0 = std::max({ img.y, s.y, 0 }), iy1 = std::min({ img.y + img.h, s.y + s.h, src->h });
+			for (int y = iy0; y < iy1; y++) {
+				const int dy = y + oy;
+				if (dy < 0 || dy >= dst->h)
+					continue;
+				const uint8_t *pal = static_cast<const uint8_t *>(src->pixels) + static_cast<size_t>(y) * src->pitch;
+				const uint8_t *px = img.pixels + static_cast<size_t>(y - img.y) * img.stride;
+				auto *out = reinterpret_cast<uint32_t *>(static_cast<uint8_t *>(dst->pixels) + static_cast<size_t>(dy) * dst->pitch);
+				for (int x = ix0; x < ix1; x++) {
+					const uint8_t *p = px + static_cast<size_t>(x - img.x) * 5;
+					if (p[3] == 0 || pal[x] != p[4])
+						continue;
+					const int dx = x + ox;
+					if (dx < 0 || dx >= dst->w)
+						continue;
+					uint32_t r = p[0], g = p[1], b = p[2];
+					if (p[3] != 255) {
+						const uint32_t o = out[dx], a = p[3];
+						r = Mul(r, a) + Mul((o >> rs) & 0xFF, 255 - a);
+						g = Mul(g, a) + Mul((o >> gs) & 0xFF, 255 - a);
+						b = Mul(b, a) + Mul((o >> bs) & 0xFF, 255 - a);
+					}
+					out[dx] = (out[dx] & keep) | (r << rs) | (g << gs) | (b << bs);
+				}
+			}
+		}
+		L.shown = true;
+	}
 	const bool anything = L.pre.alpha != 0 || L.post.alpha != 0 || L.fogUsed || L.lightUsed || L.pMaxX >= L.pMinX || L.dMaxX >= L.dMinX || L.sMaxX >= L.sMinX || water;
 	if (!anything)
 		return;

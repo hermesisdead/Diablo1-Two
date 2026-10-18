@@ -55,6 +55,7 @@
 #include "nthread.h"
 #include "engine/render/color_overlay.hpp"
 #include "levels/desert.hpp"
+#include "panels/hd_panel.hpp"
 #include "engine/render/dungeon_mood.hpp"
 #include "engine/render/tile_decor.hpp"
 #include "engine/render/tile_hue.hpp"
@@ -1560,8 +1561,10 @@ void DrawView(const Surface &out, Point startPosition)
 	UpdateLifeManaPercent(); // Update life/mana totals before rendering any portion of the flask.
 	if (!IsActionHudShown()) {
 		DrawInfoBox(out);
-		DrawLifeFlaskUpper(out);
-		DrawManaFlaskUpper(out);
+		if (!HdPanelActive()) { // the new panel's orbs sit inside it
+			DrawLifeFlaskUpper(out);
+			DrawManaFlaskUpper(out);
+		}
 	}
 }
 
@@ -1994,14 +1997,20 @@ void DrawAndBlit()
 		drawControlButtons = false;
 		drawBelt = false;
 	}
+	if (HdPanelActive() && !IsActionHudShown()) {
+		// The orbs' liquid moves: they are drawn every frame.
+		drawHealth = true;
+		drawMana = true;
+	}
 	if (drawCtrlPan) {
 		DrawMainPanel(out);
 	}
-	if (drawHealth) {
+	if (drawHealth && !DrawHdOrb(out, true)) {
 		DrawLifeFlaskLower(out, !drawCtrlPan);
 	}
 	if (drawMana) {
-		DrawManaFlaskLower(out, !drawCtrlPan);
+		if (!DrawHdOrb(out, false))
+			DrawManaFlaskLower(out, !drawCtrlPan);
 
 		DrawSpell(out);
 	}
@@ -2028,6 +2037,8 @@ void DrawAndBlit()
 	if ((*GetOptions().Gameplay.showMultiplayerPartyInfo != PartyPortraits::Disabled) && PartySidePanelOpen)
 		DrawPartyMemberInfoPanel(out);
 
+	if (!IsActionHudShown())
+		DrawHdPanelColour(out);
 	DrawWeatherPanel(out);
 	DrawCampaignQuests(out);
 	DrawMapEditor(out);

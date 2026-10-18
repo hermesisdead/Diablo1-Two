@@ -151,6 +151,7 @@ set(libdevilutionx_SRCS
   panels/console.cpp
   panels/info_box.cpp
   panels/mainpanel.cpp
+  panels/hd_panel.cpp
   panels/partypanel.cpp
   panels/quest_log.cpp
   panels/skill_tree.cpp

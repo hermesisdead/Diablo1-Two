@@ -10,6 +10,7 @@
 #include "diablo_msg.hpp"
 #include "engine/backbuffer_state.hpp"
 #include "engine/load_cel.hpp"
+#include "panels/hd_panel.hpp"
 #include "engine/render/clx_render.hpp"
 #include "engine/trn.hpp"
 #include "gamemenu.h"
@@ -368,6 +369,8 @@ std::expected<void, std::string> InitMainPanel()
 			ASSIGN_OR_RETURN(const OwnedClxSpriteList sprite, LoadCelWithStatus("ctrlpan\\panel8", GetMainPanel().size.width));
 			ClxDraw(*BottomBuffer, { 0, (GetMainPanel().size.height + PanelPaddingHeight) - 1 }, sprite[0]);
 		}
+		if (HdPanelActive())
+			ApplyPanelTextures(); // the new textures' panel
 		{
 			const Point bulbsPosition { 0, 87 };
 			ASSIGN_OR_RETURN(const OwnedClxSpriteList statusPanel, LoadCelWithStatus("ctrlpan\\p8bulbs", 88));

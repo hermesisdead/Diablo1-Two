@@ -262,6 +262,7 @@ set(devilutionx_assets
   towners/new/griswold.hds
   towners/new/griswold_walk.clx
   towners/new/griswold_walk.hds
+  ui_hd/panel.hds
   towners/new/lester.hds
   towners/new/nut.hds
   towners/new/nut_brown.hds

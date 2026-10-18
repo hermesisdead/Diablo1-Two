@@ -26,6 +26,7 @@
 #include "game_mode.hpp"
 #include "inv.h"
 #include "minitext.h"
+#include "panels/hd_panel.hpp"
 #include "engine/path.h"
 #include "utils/log.hpp"
 #include "custom_maps/map_editor.hpp"
@@ -1025,6 +1026,7 @@ void ApplyTownerTextures()
 {
 	for (Towner &towner : Towners)
 		ApplyTownerTexture(towner);
+	ApplyPanelTextures(); // the main panel follows the same setting
 }
 
 void ToggleNewTextures()

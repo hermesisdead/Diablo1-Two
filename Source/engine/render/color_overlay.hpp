@@ -86,6 +86,14 @@ void ColorOverlayDecalGloss(int x, int y, OverlayColor color, float amount);
  */
 void ColorOverlayWaterTile(const Surface &floor, Point position);
 
+/**
+ * @brief Interface in full colour (HD textures): an image whose 256-colour version was drawn at
+ * `topLeft` on `out`. Its pixels (5 bytes each: r, g, b, alpha, palette index) replace the frame's
+ * wherever the 8-bit pixel there is still that palette index (so text and items drawn over it stay).
+ * The pixels must stay valid until the frame is shown. Outside the game view too.
+ */
+void ColorOverlayUiImage(const Surface &out, Point topLeft, int width, int height, const uint8_t *pixels, int stride);
+
 /** @brief A whole-region wash: before everything else (darkening) or after (flashes). */
 void ColorOverlayWash(OverlayColor color, float alpha, bool last);
 
