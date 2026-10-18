@@ -179,6 +179,7 @@ struct Session {
 	Point pickerPan {};           // pan offset for tile picker
 	bool pickerDragging = false;  // dragging with middle mouse
 	Point pickerDragStart {};
+	int hueShift = 0;             // hue shift for tiles (-30 to +30 degrees)
 
 	// Monster tools.
 	int monster = 0;    // index in SpawnableMonsters()
@@ -712,8 +713,10 @@ std::string PaletteTitle()
 {
 	switch (S.tool) {
 	case Tool::Paint:
-		if (S.showTilePicker)
-			return StrCat("Tile Picker [#", S.pickerTile, "]  Scroll: zoom  MMB: pan");
+		if (S.showTilePicker) {
+			const std::string hue = S.hueShift != 0 ? StrCat("  Hue: ", S.hueShift >= 0 ? "+" : "", S.hueShift, "°") : "";
+			return StrCat("Tile Picker [#", S.pickerTile, "]", hue, "  F/G: hue");
+		}
 		if (S.brush >= 0 && S.brush < static_cast<int>(GroundBrushes().size()))
 			return std::string(GroundBrushes()[S.brush].name);
 		return "Ground";
@@ -1041,8 +1044,17 @@ void DrawTilePicker(const Surface &out)
 		    y + tileSize < startY || y > startY + (PaletteVisibleRows() * PaletteRow))
 			continue;
 
-		// Draw tile preview box with a color based on tile number for visual distinction
-		const uint8_t tileColor = PAL16_GRAY + (tile % 8);  // Cycle through gray shades
+		// Draw tile preview box with a color based on tile number
+		// Hue shift changes which color palette is used (cycle through different ranges)
+		int colorBase = PAL16_GRAY;
+		if (S.hueShift > 0) {
+			// Shift towards yellow/gold
+			colorBase = PAL16_YELLOW;
+		} else if (S.hueShift < 0) {
+			// Shift towards blue
+			colorBase = PAL16_BLUE;
+		}
+		const uint8_t tileColor = colorBase + (tile % 8);
 		FillRect(out, x, y, tileSize, tileSize, tileColor);
 
 		// Draw selection highlight with a gold border
@@ -1834,11 +1846,21 @@ bool MapEditorHandleEvent(const SDL_Event &event)
 			}
 			return false;
 		}
+		// Hue shift when tile picker is open
+		if (S.tool == Tool::Paint && S.showTilePicker) {
+			if (sc == SDL_SCANCODE_F) {
+				S.hueShift = std::max(S.hueShift - 5, -30);
+				return true;
+			} else if (sc == SDL_SCANCODE_G) {
+				S.hueShift = std::min(S.hueShift + 5, 30);
+				return true;
+			}
+		}
 		if (ctrl && sc == SDL_SCANCODE_S) {
 			SaveMap();
 		} else if (ctrl && sc == SDL_SCANCODE_Z) {
 			Undo();
-		} else if (sc == SDL_SCANCODE_G) {
+		} else if (sc == SDL_SCANCODE_G && !(S.tool == Tool::Paint && S.showTilePicker)) {
 			S.grid = !S.grid;
 		} else if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9) {
 			SelectTool(sc - SDL_SCANCODE_1);
