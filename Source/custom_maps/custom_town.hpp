@@ -60,6 +60,8 @@ void PaintCustomTownTiles();
 void PaintTownStyleTiles(const CustomMap *map);
 /** @brief Decor layers the map editor is hiding (bit per layer); they are left out when tiles are painted. */
 void SetHiddenDecorLayers(unsigned mask);
+/** @brief Dungeon-styled maps: their decor layers and colour shifts, over tiles already in the level. */
+void ApplyDungeonMapDecor(const CustomMap &map);
 /**
  * @brief Called at the end of CreateTown (Tristram and custom towns): sets up the town's links and
  * moves the view to a requested arrival point.

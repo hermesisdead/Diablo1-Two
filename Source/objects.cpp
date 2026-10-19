@@ -4935,4 +4935,44 @@ void SyncNakrulRoom()
 	MarkWalkabilityChanged();
 }
 
+void RemoveObjectNow(Point tile)
+{
+	for (int i = 0; i < ActiveObjectCount; i++) {
+		const int oi = ActiveObjects[i];
+		Object &object = Objects[oi];
+		if (object.position != tile)
+			continue;
+		const bool lit = IsAnyOf(object._otype, OBJ_L1LIGHT, OBJ_SKFIRE, OBJ_CANDLE1, OBJ_CANDLE2, OBJ_BOOKCANDLE, OBJ_STORYCANDLE, OBJ_L5CANDLE,
+		    OBJ_TORCHL, OBJ_TORCHR, OBJ_TORCHL2, OBJ_TORCHR2, OBJ_BCROSS, OBJ_TBCROSS);
+		if (lit && object._oVar1 == 1)
+			AddUnLight(object._olid);
+		DeleteObject(oi, i);
+		return;
+	}
+}
+
+Object *AddDunObjectNow(uint16_t dunObjectId, Point tile)
+{
+	if (dunObjectId == 0 || dunObjectId > 146 || !InDungeonBounds(tile))
+		return nullptr;
+	const _object_id type = ObjTypeConv[dunObjectId];
+	if (type == OBJ_NULL)
+		return nullptr;
+	RemoveObjectNow(tile);
+	const ObjectData &data = AllObjects[type];
+	if (!HeadlessMode && std::find(ObjFileList, ObjFileList + numobjfiles, data.ofindex) == ObjFileList + numobjfiles) {
+		if (numobjfiles >= static_cast<int>(std::size(ObjFileList)))
+			return nullptr;
+		char filestr[32];
+		*BufCopy(filestr, "objects\\", ObjMasterLoadList[data.ofindex]) = '\0';
+		std::expected<OwnedClxSpriteList, std::string> cel = LoadCelWithStatus(filestr, data.animWidth);
+		if (!cel.has_value())
+			return nullptr;
+		ObjFileList[numobjfiles] = data.ofindex;
+		pObjCels[numobjfiles] = std::move(*cel);
+		numobjfiles++;
+	}
+	return AddObject(type, tile);
+}
+
 } // namespace devilution

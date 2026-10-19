@@ -718,6 +718,8 @@ std::expected<void, std::string> LoadActiveCustomMapLevel()
 	// See-through walls: flood the floor areas like the level generators do.
 	DRLG_InitTrans();
 	FloodTransparencyValues(MapStyleFloorPiece(Active->style));
+	// Decor painted over the dungeon's floors, and painted colour shifts.
+	ApplyDungeonMapDecor(*Active);
 	LoadRndLvlPal(Active->style, 0);
 	numtrigs = 0;
 	trigflag = false;

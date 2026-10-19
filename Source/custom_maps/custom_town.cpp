@@ -353,6 +353,21 @@ void PaintTownStyleTiles(const CustomMap *map)
 	PaintDecorLayers(*map);
 }
 
+void ApplyDungeonMapDecor(const CustomMap &map)
+{
+	ClearTileHues();
+	if (map.hues.size() == map.tiles.size()) {
+		for (int y = 0; y < map.height; y++) {
+			for (int x = 0; x < map.width; x++) {
+				const int8_t hue = map.hues[static_cast<size_t>(y) * map.width + x];
+				for (int k = 0; k < 4; k++)
+					dTileHue[16 + 2 * x + k % 2][16 + 2 * y + k / 2] = hue;
+			}
+		}
+	}
+	PaintDecorLayers(map);
+}
+
 void CreateCustomTownLevel(lvl_entry entry)
 {
 	PaintCustomTownTiles();

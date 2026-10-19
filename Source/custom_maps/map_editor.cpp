@@ -47,6 +47,8 @@
 #include "levels/drlg_l3.h"
 #include "levels/drlg_l4.h"
 #include "levels/gendung.h"
+#include "objects.h"
+#include "tables/objdat.h"
 #include "levels/tile_properties.hpp"
 #include "levels/town.h"
 #include "lighting.h"
@@ -87,6 +89,7 @@ enum class Tool : uint8_t {
 	Chest,
 	Fence,
 	Animal,
+	Prop,
 	COUNT,
 };
 
@@ -194,6 +197,8 @@ struct Session {
 
 	int fenceKind = 0; // Fence tool: 0 fence, 1 gate, 2 remove
 	int animal = 0;    // Animals tool: index in AnimalKinds()
+	int prop = 0;      // Props tool: index in PropsForMap()
+	std::vector<uint16_t> liveObjects; // the map's objects as they stand in the loaded level (dungeons, wilds)
 	std::vector<std::pair<Point, uint8_t>> fenceGhost; // fencing previewed this frame, and what it covered
 
 	// Tile picker (Paint tool): every megatile of the tileset as a picture.
@@ -259,9 +264,9 @@ void Say(std::string text)
 
 const std::vector<Tool> &ToolsFor(Kind kind)
 {
-	static const std::vector<Tool> dungeon { Tool::Room, Tool::Erase, Tool::Spawner, Tool::Boss, Tool::Chest, Tool::Entry, Tool::Portal, Tool::Door };
+	static const std::vector<Tool> dungeon { Tool::Room, Tool::Erase, Tool::Paint, Tool::Prop, Tool::Spawner, Tool::Boss, Tool::Chest, Tool::Entry, Tool::Portal, Tool::Door };
 	static const std::vector<Tool> town { Tool::Paint, Tool::Stamp, Tool::Copy, Tool::Fence, Tool::Animal, Tool::Npc, Tool::Entry, Tool::Portal, Tool::Door };
-	static const std::vector<Tool> wilds { Tool::Paint, Tool::Stamp, Tool::Copy, Tool::Fence, Tool::Animal, Tool::Spawner, Tool::Boss, Tool::Chest, Tool::Entry, Tool::Portal, Tool::Door };
+	static const std::vector<Tool> wilds { Tool::Paint, Tool::Stamp, Tool::Copy, Tool::Fence, Tool::Animal, Tool::Prop, Tool::Spawner, Tool::Boss, Tool::Chest, Tool::Entry, Tool::Portal, Tool::Door };
 	static const std::vector<Tool> tristram { Tool::Entry, Tool::Portal, Tool::Door };
 	switch (kind) {
 	case Kind::Town: return town;
@@ -323,6 +328,32 @@ void BuildFromFloorPlan(dungeon_type style, const uint8_t *plan, uint16_t *tiles
 	}
 }
 
+/**
+ * Brings the loaded level's objects (props, chests) in line with the map: what was placed or
+ * removed since the level was built shows up (or goes) right away.
+ */
+void SyncLiveObjects()
+{
+	if (!IsAnyOf(S.kind, Kind::Dungeon, Kind::Wilds) || !OnEditorLevel())
+		return;
+	const size_t n = S.map.objects.size();
+	if (S.liveObjects.size() != n) {
+		S.liveObjects = S.map.objects; // the map was resized: the next build shows them
+		return;
+	}
+	const int cols = std::max(1, 2 * S.map.width);
+	for (size_t i = 0; i < n; i++) {
+		if (S.liveObjects[i] == S.map.objects[i])
+			continue;
+		const Point t { 16 + static_cast<int>(i % cols), 16 + static_cast<int>(i / cols) };
+		if (S.map.objects[i] == 0)
+			RemoveObjectNow(t);
+		else
+			AddDunObjectNow(S.map.objects[i], t);
+		S.liveObjects[i] = S.map.objects[i];
+	}
+}
+
 /** Rebuilds the level from the map after an edit. */
 void Rebuild()
 {
@@ -339,6 +370,7 @@ void Rebuild()
 		if (OnEditorLevel()) {
 			PaintTownStyleTiles(&S.map);
 			InitTownStylePieces();
+			SyncLiveObjects();
 		}
 		return;
 	}
@@ -366,6 +398,9 @@ void Rebuild()
 	}
 	DRLG_InitTrans();
 	FloodTransparencyValues(MapStyleFloorPiece(S.map.style));
+	// Decor painted over the floors, colour shifts, and props.
+	ApplyDungeonMapDecor(S.map);
+	SyncLiveObjects();
 }
 
 void SetPlan(Point a, Point b, bool floor)
@@ -380,6 +415,8 @@ void SetPlan(Point a, Point b, bool floor)
 			const size_t i = static_cast<size_t>(y) * Grid + x;
 			S.map.plan[i] = floor ? 1 : 0;
 			S.map.overrides[i] = 0;
+			if (S.map.hues.size() == S.map.tiles.size())
+				S.map.hues[static_cast<size_t>(y) * S.map.width + x] = 0;
 		}
 	}
 	// Keep a ring of rock: walls need a piece of room around the floor.
@@ -410,6 +447,8 @@ uint16_t PaintTileAt(Point piece)
 {
 	if (S.brush < 0)
 		return S.pickerTile;
+	if (S.kind == Kind::Dungeon)
+		return 0; // the "auto" brush: the tile the floor plan gives
 	const std::vector<GroundBrush> &brushes = GroundBrushes();
 	if (S.brush >= static_cast<int>(brushes.size()) || brushes[S.brush].tiles.empty())
 		return 0;
@@ -423,13 +462,20 @@ void PaintGround(Point a, Point b)
 {
 	const int x0 = std::max(0, std::min(a.x, b.x)), x1 = std::min(S.map.width - 1, std::max(a.x, b.x));
 	const int y0 = std::max(0, std::min(a.y, b.y)), y1 = std::min(S.map.height - 1, std::max(a.y, b.y));
-	if (x0 > x1 || y0 > y1 || PaintTileAt({ x0, y0 }) == 0)
+	if (x0 > x1 || y0 > y1 || (S.kind != Kind::Dungeon && PaintTileAt({ x0, y0 }) == 0))
 		return;
 	PushUndo();
 	for (int y = y0; y <= y1; y++) {
 		for (int x = x0; x <= x1; x++) {
-			TownTile({ x, y }) = PaintTileAt({ x, y });
-			TownHue({ x, y }) = static_cast<int8_t>(S.hueShift);
+			const uint16_t tile = PaintTileAt({ x, y });
+			if (S.kind == Kind::Dungeon) {
+				// Tiles mode: the tile is laid as it is; the floor plan's walls do not follow it.
+				S.map.overrides[static_cast<size_t>(y) * Grid + x] = tile;
+				TownHue({ x, y }) = static_cast<int8_t>(tile != 0 ? S.hueShift : 0);
+			} else {
+				TownTile({ x, y }) = tile;
+				TownHue({ x, y }) = static_cast<int8_t>(S.hueShift);
+			}
 		}
 	}
 	Rebuild();
@@ -854,7 +900,7 @@ std::string_view ToolName(Tool tool)
 	case Tool::Entry: return "Arrival";
 	case Tool::Portal: return "Portal";
 	case Tool::Door: return "Door";
-	case Tool::Paint: return "Paint";
+	case Tool::Paint: return S.kind == Kind::Dungeon ? "Tiles" : "Paint";
 	case Tool::Stamp: return "Stamp";
 	case Tool::Copy: return "Copy";
 	case Tool::Npc: return "People";
@@ -863,6 +909,7 @@ std::string_view ToolName(Tool tool)
 	case Tool::Chest: return "Chest";
 	case Tool::Fence: return "Fence";
 	case Tool::Animal: return "Animals";
+	case Tool::Prop: return "Props";
 	default: return "";
 	}
 }
@@ -875,7 +922,10 @@ std::string_view ToolHint(Tool tool)
 	case Tool::Entry: return "Click to add an arrival point, drag to move, right-click to delete.";
 	case Tool::Portal: return "Click to place a portal and choose where it leads. Right-click deletes.";
 	case Tool::Door: return "Click to place a doorway exit and choose where it leads. Right-click deletes.";
-	case Tool::Paint: return "Drag to paint. Right-click picks up. T: picker   L: layer   F/G: hue";
+	case Tool::Paint:
+		if (S.kind == Kind::Dungeon)
+			return "Drag to lay the chosen tile as it is (walls don't follow). Right-click picks up. T: tiles   L: layer   F/G: hue";
+		return "Drag to paint. Right-click picks up. T: picker   L: layer   F/G: hue";
 	case Tool::Stamp: return "Click to place the chosen piece of Tristram (centred on the cursor).";
 	case Tool::Copy: return "Drag over an area to copy it, then click to paste it anywhere.";
 	case Tool::Npc: return "Click to place the chosen townsperson (or move them). Right-click removes.";
@@ -884,11 +934,74 @@ std::string_view ToolHint(Tool tool)
 	case Tool::Chest: return "Click to place a chest (quests can hide an item in it). Right-click removes.";
 	case Tool::Fence: return "Drag a straight run of fence (or a gate). Right-drag removes fencing.";
 	case Tool::Animal: return "Click to place the chosen animal; it wanders around there, never past fences (cows stay put). Right-click removes.";
+	case Tool::Prop: return "Click to place the chosen prop (it shows right away). Right-click removes. Wheel over the list scrolls it.";
 	default: return "";
 	}
 }
 
 std::string PaintingLabel();
+
+/** A dungeon prop: an object the level loads from the map (.dun object id). */
+struct PropKind {
+	uint16_t id;
+	std::string_view label;
+};
+
+/** Props that suit the map's style (objects drawn for another tileset's palette are left out). */
+const std::vector<PropKind> &PropsForMap()
+{
+	static const std::vector<PropKind> all {
+		{ 114, "Wall torch (left wall)" }, { 115, "Wall torch (right wall)" }, { 111, "Wall torch 2 (left wall)" }, { 110, "Wall torch 2 (right wall)" },
+		{ 18, "Candle" }, { 19, "Candles" }, { 20, "Candle (lit)" }, { 144, "Candle (crypt)" },
+		{ 16, "Burning cross" }, { 38, "Skull fire" }, { 39, "Pile of skulls" },
+		{ 40, "Skull on a stick 1" }, { 41, "Skull on a stick 2" }, { 42, "Skull on a stick 3" }, { 43, "Skull on a stick 4" }, { 44, "Skull on a stick 5" },
+		{ 6, "Banner (left)" }, { 7, "Banner (middle)" }, { 8, "Banner (right)" },
+		{ 2, "Crucified skeleton 1" }, { 3, "Crucified skeleton 2" }, { 4, "Crucified skeleton 3" }, { 5, "Angel statue" },
+		{ 55, "Tortured body 1" }, { 56, "Tortured body 2" }, { 57, "Tortured body 3" }, { 58, "Tortured body 4" }, { 59, "Tortured body 5" },
+		{ 70, "Impaled body 1" }, { 71, "Impaled body 2" }, { 72, "Impaled body 3" }, { 73, "Impaled body 4" },
+		{ 74, "Impaled body 5" }, { 75, "Impaled body 6" }, { 76, "Impaled body 7" }, { 65, "Hanging body" }, { 132, "Decapitated body" },
+		{ 14, "Book (left)" }, { 15, "Book (right)" }, { 137, "Book stand" }, { 143, "Pile of books" },
+		{ 120, "Bookshelf" }, { 138, "Bookshelf (right)" }, { 121, "Bookcase (left)" }, { 122, "Bookcase (right)" },
+		{ 123, "Armour stand" }, { 124, "Weapon rack" }, { 21, "Cauldron" },
+		{ 125, "Blood fountain" }, { 126, "Purifying spring" }, { 130, "Murky pool" }, { 131, "Fountain of tears" },
+		{ 127, "Shrine (left)" }, { 128, "Shrine (right)" }, { 129, "Goat shrine" },
+		{ 117, "Sarcophagus" }, { 146, "Sarcophagus (crypt)" },
+		{ 118, "Barrel" }, { 119, "Explosive barrel" }, { 139, "Pod" }, { 140, "Explosive pod" }, { 141, "Urn" }, { 142, "Explosive urn" },
+	};
+	static std::vector<PropKind> fitting;
+	static int builtFor = -1;
+	if (builtFor == static_cast<int>(S.map.style))
+		return fitting;
+	builtFor = static_cast<int>(S.map.style);
+	fitting.clear();
+	for (const PropKind &prop : all) {
+		const _object_id type = ObjTypeConv[prop.id];
+		if (type == OBJ_NULL)
+			continue;
+		const dungeon_type home = AllObjects[type].olvltype;
+		if (home == DTYPE_NONE || home == S.map.style || (S.map.style == DTYPE_FOREST && home == DTYPE_CATHEDRAL))
+			fitting.push_back(prop);
+	}
+	return fitting;
+}
+
+/** The map's object id on a world tile, nullptr outside the map. */
+uint16_t *MapObjectAt(Point tile)
+{
+	const int cols = 2 * S.map.width, rows = 2 * S.map.height;
+	const Point local = tile - Displacement { 16, 16 };
+	if (local.x < 0 || local.y < 0 || local.x >= cols || local.y >= rows)
+		return nullptr;
+	if (S.map.objects.size() != static_cast<size_t>(cols) * rows)
+		S.map.objects.assign(static_cast<size_t>(cols) * rows, 0);
+	return &S.map.objects[static_cast<size_t>(local.y) * cols + local.x];
+}
+
+/** Ground brushes of the Paint tool: town brushes, or in dungeons the one "auto" brush. */
+int BrushCount()
+{
+	return S.kind == Kind::Dungeon ? 1 : static_cast<int>(GroundBrushes().size());
+}
 
 /** Rows of the palette panel for the current tool. */
 std::vector<std::string> PaletteRows()
@@ -897,6 +1010,11 @@ std::vector<std::string> PaletteRows()
 	switch (S.tool) {
 	case Tool::Paint:
 		// Ground brushes (a mix of variants), then any single tile from the picker.
+		if (S.kind == Kind::Dungeon) {
+			rows.emplace_back("Auto tiles (walls follow)");
+			rows.push_back(S.paintKind != PaintKind::Ground || S.brush < 0 ? StrCat(PaintingLabel(), "  (T)") : std::string("Tiles and decor  (T)"));
+			break;
+		}
 		for (const GroundBrush &b : GroundBrushes())
 			rows.emplace_back(b.name);
 		rows.push_back(S.paintKind != PaintKind::Ground || S.brush < 0 ? StrCat(PaintingLabel(), "  (T)") : std::string("Tiles, decor, buildings  (T)"));
@@ -928,6 +1046,10 @@ std::vector<std::string> PaletteRows()
 		for (const AnimalKindInfo &a : AnimalKinds())
 			rows.emplace_back(a.label);
 		break;
+	case Tool::Prop:
+		for (const PropKind &prop : PropsForMap())
+			rows.emplace_back(prop.label);
+		break;
 	default:
 		break;
 	}
@@ -947,6 +1069,7 @@ std::string PaletteTitle()
 	case Tool::Boss: return "Bosses (with minions)";
 	case Tool::Fence: return "Wooden fencing";
 	case Tool::Animal: return StrCat("Animals (", S.map.animals.size(), " placed)");
+	case Tool::Prop: return "Props";
 	default: return "";
 	}
 }
@@ -955,13 +1078,14 @@ int PaletteSelected()
 {
 	switch (S.tool) {
 	case Tool::Paint:
-		return S.paintKind != PaintKind::Ground || S.brush < 0 ? static_cast<int>(GroundBrushes().size()) : S.brush;
+		return S.paintKind != PaintKind::Ground || S.brush < 0 ? BrushCount() : S.brush;
 	case Tool::Stamp: return S.stamp < 0 ? static_cast<int>(Buildings().size()) : S.stamp;
 	case Tool::Npc: return S.npc;
 	case Tool::Spawner: return S.monster;
 	case Tool::Boss: return S.boss;
 	case Tool::Fence: return S.fenceKind;
 	case Tool::Animal: return S.animal;
+	case Tool::Prop: return S.prop;
 	default: return -1;
 	}
 }
@@ -970,7 +1094,7 @@ void SelectPalette(int row)
 {
 	switch (S.tool) {
 	case Tool::Paint:
-		if (row < static_cast<int>(GroundBrushes().size())) {
+		if (row < BrushCount()) {
 			S.brush = row;
 			S.paintKind = PaintKind::Ground;
 			S.layer = 0;
@@ -985,6 +1109,7 @@ void SelectPalette(int row)
 	case Tool::Boss: S.boss = row; break;
 	case Tool::Fence: S.fenceKind = std::clamp(row, 0, 2); break;
 	case Tool::Animal: S.animal = row; break;
+	case Tool::Prop: S.prop = row; break;
 	default: break;
 	}
 }
@@ -1035,6 +1160,8 @@ enum class PickerTab : uint8_t {
 	All,
 };
 constexpr std::array<std::string_view, 4> PickerTabNames { "Ground", "Decor", "Buildings", "All tiles" };
+/** Dungeons: floors, decor laid over them, walls and other standing tiles, everything. */
+constexpr std::array<std::string_view, 4> DungeonPickerTabNames { "Floors", "Decor", "Walls", "All tiles" };
 constexpr std::array<std::string_view, 4> LayerNames { "Ground", "Decor 1", "Decor 2", "Decor 3" };
 constexpr std::array<std::string_view, 4> PickerButtonLabels { "Hue -  (F)", "Hue +  (G)", "Hue off", "Close (T)" };
 constexpr std::array<std::string_view, 4> PickerButtonShortLabels { "Hue -", "Hue +", "Reset", "Close" };
@@ -1067,15 +1194,18 @@ const std::vector<TileClass> &TileClasses()
 {
 	static std::vector<TileClass> classes;
 	static const MegaTile *builtFor = nullptr;
-	if (builtFor == pMegaTiles.get() && classes.size() == MegaTileCount)
+	static bool builtForDungeon = false;
+	const bool dungeonTiles = S.kind == Kind::Dungeon;
+	if (builtFor == pMegaTiles.get() && classes.size() == MegaTileCount && builtForDungeon == dungeonTiles)
 		return classes;
 	builtFor = pMegaTiles.get();
+	builtForDungeon = dungeonTiles;
 	classes.assign(MegaTileCount, TileClass::Ground);
 	if (pMegaTiles == nullptr)
 		return classes;
 	// A building piece is one classic Tristram only uses inside its buildings.
 	std::vector<uint8_t> inBuilding(MegaTileCount + 1, 0), elsewhere(MegaTileCount + 1, 0);
-	if (!InDesertRegion()) {
+	if (!InDesertRegion() && !dungeonTiles) {
 		const std::vector<uint16_t> &classic = ClassicTownMegaTiles();
 		for (const Building &b : Buildings()) {
 			if (!b.builtIn || IsSceneryStamp(b.name))
@@ -1152,15 +1282,34 @@ const std::vector<PickerItem> &PickerItems()
 	static int builtTab = -1;
 	static size_t builtTiles = 0, builtBuildings = 0;
 	static const MegaTile *builtFor = nullptr;
-	const size_t tileCount = pMegaTiles == nullptr ? 0 : MegaTileCount;
-	if (builtTab == S.pickerTab && builtTiles == tileCount && builtBuildings == Buildings().size() && builtFor == pMegaTiles.get())
+	static Kind builtKind = Kind::Tristram;
+	const bool dungeonTiles = S.kind == Kind::Dungeon;
+	// Dungeon tiles are kept in a byte per piece: the tileset's first 255 megatiles.
+	const size_t tileCount = pMegaTiles == nullptr ? 0 : (dungeonTiles ? std::min<size_t>(MegaTileCount, 255) : MegaTileCount);
+	if (builtTab == S.pickerTab && builtTiles == tileCount && builtBuildings == Buildings().size() && builtFor == pMegaTiles.get() && builtKind == S.kind)
 		return items;
+	builtKind = S.kind;
 	builtTab = S.pickerTab;
 	builtTiles = tileCount;
 	builtBuildings = Buildings().size();
 	builtFor = pMegaTiles.get();
 	items.clear();
 	const std::vector<TileClass> &classes = TileClasses();
+	if (dungeonTiles) {
+		// Floors lie flat; walls, pillars and rubble stand. Decor lays standing tiles over the floor.
+		const PickerTab tab = CurrentTab();
+		if (tab == PickerTab::Decor)
+			items.push_back({ PickerItem::Kind::Decor, 0 });
+		for (size_t i = 0; i < tileCount; i++) {
+			const bool standing = classes[i] != TileClass::Ground;
+			const int id = static_cast<int>(i + 1);
+			if (tab == PickerTab::All || (tab == PickerTab::Ground && !standing) || (tab == PickerTab::Buildings && standing))
+				items.push_back({ PickerItem::Kind::Tile, id });
+			else if (tab == PickerTab::Decor && standing)
+				items.push_back({ PickerItem::Kind::Decor, id });
+		}
+		return items;
+	}
 	switch (CurrentTab()) {
 	case PickerTab::Ground:
 		for (size_t i = 0; i < tileCount; i++) {
@@ -1329,7 +1478,10 @@ PickerTab TabForPaint()
 	switch (S.paintKind) {
 	case PaintKind::Decor: return PickerTab::Decor;
 	case PaintKind::Building: return PickerTab::Buildings;
-	default: return CurrentTab() == PickerTab::All ? PickerTab::All : PickerTab::Ground;
+	default:
+		if (S.kind == Kind::Dungeon && CurrentTab() == PickerTab::Buildings)
+			return PickerTab::Buildings; // walls
+		return CurrentTab() == PickerTab::All ? PickerTab::All : PickerTab::Ground;
 	}
 }
 
@@ -1396,6 +1548,8 @@ std::string PaintingLabel()
 		return S.pickerBuilding >= 0 && S.pickerBuilding < static_cast<int>(all.size()) ? StrCat("Building: ", all[S.pickerBuilding].name) : std::string("Building");
 	}
 	default:
+		if (S.kind == Kind::Dungeon && S.brush >= 0)
+			return "Auto tiles";
 		if (S.brush >= 0 && S.brush < static_cast<int>(GroundBrushes().size()))
 			return std::string(GroundBrushes()[S.brush].name);
 		return StrCat("Tile #", S.pickerTile);
@@ -2102,7 +2256,7 @@ void DrawTilePicker(const Surface &out)
 
 	const bool narrow = PickerRowButton(0, 0).size.width < 80;
 	for (int i = 0; i < 4; i++)
-		Button(out, PickerRowButton(0, i), PickerTabNames[i], S.pickerTab == i);
+		Button(out, PickerRowButton(0, i), S.kind == Kind::Dungeon ? DungeonPickerTabNames[i] : PickerTabNames[i], S.pickerTab == i);
 	for (int i = 0; i < 4; i++) {
 		const bool hidden = i > 0 && (S.hiddenLayers & (1u << (i - 1))) != 0;
 		Button(out, PickerRowButton(1, i), hidden ? StrCat(narrow ? "D" : "Decor ", i, " (off)") : std::string(LayerNames[i]), S.layer == i);
@@ -3337,6 +3491,38 @@ void MouseDown(Point p, bool right)
 			SetMapChest(S.map, tile, true);
 			Say("Chest placed. A quest can hide its item here (Campaign Editor, Quests).");
 		}
+		SyncLiveObjects();
+		break;
+	}
+	case Tool::Prop: {
+		if (MapObjectAt(tile) == nullptr)
+			break;
+		if (right) {
+			// The nearest prop within a tile (chests belong to the Chest tool).
+			for (int r = 0; r <= 1; r++) {
+				for (int dy = -r; dy <= r; dy++) {
+					for (int dx = -r; dx <= r; dx++) {
+						uint16_t *at = MapObjectAt(tile + Displacement { dx, dy });
+						if (at == nullptr || *at == 0 || *at == MapChestObjectId)
+							continue;
+						PushUndo();
+						*at = 0;
+						SyncLiveObjects();
+						Say("Prop removed.");
+						return;
+					}
+				}
+			}
+			break;
+		}
+		const std::vector<PropKind> &props = PropsForMap();
+		if (props.empty())
+			break;
+		const PropKind &prop = props[std::clamp(S.prop, 0, static_cast<int>(props.size()) - 1)];
+		PushUndo();
+		*MapObjectAt(tile) = prop.id;
+		SyncLiveObjects();
+		Say(StrCat(prop.label, " placed."));
 		break;
 	}
 	case Tool::Boss: {
@@ -3742,6 +3928,14 @@ void MapEditorTick()
 					S.pickerDecor = static_cast<uint16_t>(n[1]);
 					S.paintKind = PaintKind::Decor;
 					S.layer = std::max(S.layer, 1);
+				} else if (w[0] == "paintdecor" && n.size() >= 5) {
+					PaintDecor({ n[1], n[2] }, { n[3], n[4] });
+				} else if (w[0] == "prop" && n.size() >= 4) {
+					if (uint16_t *slot = MapObjectAt({ n[2], n[3] }); slot != nullptr) {
+						PushUndo();
+						*slot = static_cast<uint16_t>(n[1]);
+						SyncLiveObjects();
+					}
 				} else if (w[0] == "flower" && n.size() >= 2) {
 					S.pickerDecor = static_cast<uint16_t>(DecorFlowerBase + n[1]);
 					S.paintKind = PaintKind::Decor;
@@ -3851,6 +4045,7 @@ void MapEditorTick()
 	const int key = static_cast<int>(currlevel) + (setlevel ? 1000 + setlvlnum : 0);
 	if (key != S.levelKey) {
 		S.levelKey = key;
+		S.liveObjects = S.map.objects; // the level was just built with the map's objects
 		if (IsMapEditing() && S.kind == Kind::Dungeon) {
 			// Freshly built level: keep editing from the same spot.
 			Rebuild();
@@ -3922,7 +4117,7 @@ void GhostGround(Point cell, int tile, int hue)
 	const std::optional<std::array<uint16_t, 4>> pieces = MegaPieces(tile);
 	if (!pieces)
 		return;
-	const bool townRoofs = !InDesertRegion();
+	const bool townRoofs = !InDesertRegion() && S.kind != Kind::Dungeon;
 	for (int k = 0; k < 4; k++) {
 		const Point t { 16 + 2 * cell.x + k % 2, 16 + 2 * cell.y + k / 2 };
 		dPiece[t.x][t.y] = (*pieces)[k];
@@ -3948,7 +4143,9 @@ void GhostDecor(Point cell, int layer, uint16_t id, int hue)
 /** Lays what painting would lay (the hovered piece, the dragged area, or the building) into the level for this frame's drawing. */
 void PlaceGhost()
 {
-	if (!S.editing || S.tool != Tool::Paint || S.linkPortal >= 0 || S.panning || S.capturing || S.naming || !IsAnyOf(S.kind, Kind::Town, Kind::Wilds))
+	if (!S.editing || S.tool != Tool::Paint || S.linkPortal >= 0 || S.panning || S.capturing || S.naming || S.kind == Kind::Tristram)
+		return;
+	if (S.kind == Kind::Dungeon && (!OnEditorLevel() || leveltype != S.map.style))
 		return;
 	if (OnInterface(MousePosition) || pMegaTiles == nullptr)
 		return;

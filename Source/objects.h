@@ -343,6 +343,13 @@ std::expected<void, std::string> SetMapObjects(const uint16_t *dunData, int star
  * @param objPos tile coordinates
  */
 Object *AddObject(_object_id objType, Point objPos);
+/**
+ * @brief Map editor: puts an object from a .dun object id on a tile right away (replacing what stood
+ * there), loading its graphics if the level has not got them yet.
+ */
+Object *AddDunObjectNow(uint16_t dunObjectId, Point tile);
+/** @brief Map editor: takes away the object standing on a tile (and its light). */
+void RemoveObjectNow(Point tile);
 bool UpdateTrapState(Object &trap);
 void OperateTrap(Object &trap);
 void ProcessObjects();
