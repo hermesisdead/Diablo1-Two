@@ -92,8 +92,13 @@ std::expected<void, std::string> WriteCustomNpcs(const std::vector<CustomNpc> &n
 
 /** @brief Folder of voice recordings (ends with a separator); empty for Diablo: Original. */
 [[nodiscard]] std::string CampaignVoiceDirectory();
-/** @brief Recordings (.wav, .ogg) in the open campaign's voice folder. */
+/** @brief Recordings (.wav, .ogg, .mp3) in the open campaign's voice folder. */
 [[nodiscard]] std::vector<std::string> ListCampaignVoices();
+/**
+ * @brief Copies a recording from anywhere (the player's computer) into the campaign's voice folder.
+ * @return Its name there, for a line's voice.
+ */
+[[nodiscard]] std::expected<std::string, std::string> ImportCampaignVoice(const std::string &sourcePath);
 /** @brief Plays a line's recording (stops the one playing). */
 void PlayNpcVoice(std::string_view voiceFile);
 

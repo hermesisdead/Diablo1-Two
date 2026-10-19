@@ -17,6 +17,7 @@
 #include "options.h"
 #include "towners.h"
 #include "custom_maps/custom_npcs.hpp"
+#include "custom_maps/file_dialog.hpp"
 #include "engine/load_cel.hpp"
 #include "engine/load_file.hpp"
 #include "engine/render/clx_render.hpp"
@@ -755,11 +756,69 @@ void DrawQuestScreen(const Surface &out, Point o)
 std::vector<CustomNpc> NpcList;
 int NpcIndex = -1;
 std::vector<std::string> VoiceFiles;
+std::vector<Rectangle> NpcLineRows; // where each line of the NPC being edited is drawn (for dropped files)
 
 void SaveNpcs()
 {
 	if (std::expected<void, std::string> r = WriteCustomNpcs(NpcList); !r.has_value())
 		Notice = r.error();
+}
+
+/** A recording's name without its extension, for buttons. */
+std::string VoiceLabel(std::string_view voice)
+{
+	std::string name(voice.substr(0, voice.find_last_of('.')));
+	if (name.size() > 14)
+		name = StrCat(name.substr(0, 12), "..");
+	return name;
+}
+
+/**
+ * Copies recordings from the player's computer and gives them to the NPC's lines, starting at
+ * `firstLine` (more files go to the following lines, adding lines as needed, up to five).
+ */
+void GiveLinesRecordings(int firstLine, const std::vector<std::string> &files)
+{
+	if (NpcIndex < 0 || NpcIndex >= static_cast<int>(NpcList.size()) || files.empty())
+		return;
+	StopTyping(true);
+	CustomNpc &npc = NpcList[NpcIndex];
+	int line = std::max(0, firstLine);
+	int given = 0;
+	std::string last;
+	for (const std::string &file : files) {
+		if (line >= 5)
+			break;
+		const std::expected<std::string, std::string> voice = ImportCampaignVoice(file);
+		if (!voice.has_value()) {
+			Notice = voice.error();
+			continue;
+		}
+		while (static_cast<int>(npc.lines.size()) <= line)
+			npc.lines.push_back({ "", "" });
+		npc.lines[line].voice = *voice;
+		last = *voice;
+		given++;
+		line++;
+	}
+	if (given == 0)
+		return;
+	VoiceFiles = ListCampaignVoices();
+	SaveNpcs();
+	PlayNpcVoice(last);
+	Notice = given == 1 ? StrCat("Line ", line, " now plays ", last, ".") : StrCat(given, " recordings given to lines ", line - given + 1, " to ", line, ".");
+}
+
+/** "Upload" on a line: choose recordings on this computer for it (and the lines after it). */
+void UploadLineRecording(int line)
+{
+	StopTyping(true);
+	const std::optional<std::vector<std::string>> files = ChooseFilesToOpen("Choose a recording for this line", { "ogg", "wav", "mp3" });
+	if (!files) {
+		Notice = "No file window on this system: drag the recording onto the line instead.";
+		return;
+	}
+	GiveLinesRecordings(line, *files);
 }
 
 void OpenNpcs()
@@ -919,24 +978,33 @@ void DrawNpcScreen(const Surface &out, Point o)
 	y += 30;
 
 	// What they say: each line can have a recording.
-	Text(out, "What they say (one line each time; each can have a recording)", o + Displacement { 40, y }, 380, UiFlags::ColorUiGold);
+	Text(out, "What they say (Upload or drop a recording on a line)", o + Displacement { 40, y }, 380, UiFlags::ColorUiGold);
 	y += 18;
+	NpcLineRows.clear();
 	for (int i = 0; i < static_cast<int>(npc.lines.size()) && i < 5; i++, y += 25) {
 		NpcLine &line = npc.lines[i];
-		Field(out, { o + Displacement { 40, y }, { 196, 22 } }, line.text, "A line they say", 160, false, save);
+		NpcLineRows.push_back({ o + Displacement { 40, y }, { 380, 22 } });
+		Field(out, { o + Displacement { 40, y }, { 168, 22 } }, line.text, "A line they say", 160, false, save);
 		const int index = i;
-		Button(out, { o + Displacement { 240, y }, { 92, 22 } }, line.voice.empty() ? std::string("No voice") : line.voice, [index](bool right) {
+		// The recording: click cycles through those uploaded (right-click backwards), Upload adds one.
+		Button(out, { o + Displacement { 212, y }, { 84, 22 } }, line.voice.empty() ? std::string("No voice") : VoiceLabel(line.voice), [index](bool right) {
 			NpcLine &line = NpcList[NpcIndex].lines[index];
 			if (VoiceFiles.empty()) {
-				Notice = StrCat("No recordings yet: put .wav or .ogg files in ", CampaignVoiceDirectory());
+				UploadLineRecording(index);
 				return;
 			}
 			line.voice = Cycle(VoiceFiles, line.voice, right, /*allowNone=*/true);
 			SaveNpcs();
 			PlayNpcVoice(line.voice);
 		});
-		Button(out, { o + Displacement { 336, y }, { 42, 22 } }, "Play", [index](bool) { PlayNpcVoice(NpcList[NpcIndex].lines[index].voice); });
-		Button(out, { o + Displacement { 382, y }, { 38, 22 } }, "Cut", [index](bool) {
+		Button(out, { o + Displacement { 300, y }, { 48, 22 } }, "Upload", [index](bool) { UploadLineRecording(index); });
+		Button(out, { o + Displacement { 352, y }, { 34, 22 } }, "Play", [index](bool) {
+			const std::string &voice = NpcList[NpcIndex].lines[index].voice;
+			if (voice.empty())
+				Notice = "This line has no recording yet: Upload one, or drag it onto the line.";
+			PlayNpcVoice(voice);
+		});
+		Button(out, { o + Displacement { 390, y }, { 30, 22 } }, "Cut", [index](bool) {
 			StopTyping(true);
 			NpcList[NpcIndex].lines.erase(NpcList[NpcIndex].lines.begin() + index);
 			SaveNpcs();
@@ -987,6 +1055,35 @@ bool MenuConsoleHandleEvent(SDL_Event &event)
 	}
 	if (!Open)
 		return false;
+#ifdef USE_SDL3
+	if (event.type == SDL_EVENT_DROP_FILE) {
+		const std::string file = event.drop.data != nullptr ? event.drop.data : "";
+#elif !defined(USE_SDL1)
+	if (event.type == SDL_DROPFILE) {
+		const std::string file = event.drop.file != nullptr ? event.drop.file : "";
+		SDL_free(event.drop.file);
+		event.drop.file = nullptr;
+#else
+	if (false) {
+		const std::string file;
+#endif
+		if (Current == Screen::Npc && !file.empty()) {
+			// Onto the line under the mouse, or the first line without a recording.
+			int line = -1;
+			for (size_t i = 0; i < NpcLineRows.size(); i++) {
+				if (NpcLineRows[i].contains(MousePosition))
+					line = static_cast<int>(i);
+			}
+			if (line < 0 && NpcIndex >= 0 && NpcIndex < static_cast<int>(NpcList.size())) {
+				const std::vector<NpcLine> &lines = NpcList[NpcIndex].lines;
+				line = static_cast<int>(std::find_if(lines.begin(), lines.end(), [](const NpcLine &l) { return l.voice.empty(); }) - lines.begin());
+			}
+			GiveLinesRecordings(line, { file });
+		} else if (!file.empty()) {
+			Notice = "Drop recordings on a townsperson's lines (NPCs, then pick one).";
+		}
+		return true;
+	}
 	switch (event.type) {
 	case SDL_EVENT_MOUSE_MOTION:
 		return false; // the menu keeps the mouse position up to date
@@ -1131,6 +1228,23 @@ void MenuConsoleDevScript()
 		return;
 	const std::string_view script = text;
 	if (pos < script.size()) {
+		if (script[pos] == '{') {
+			// '{N:path}' gives line N (0-based) a recording as Upload would; '{path}' drops a file on the window.
+			const size_t end = script.find('}', pos);
+			const std::string_view inner = script.substr(pos + 1, end - pos - 1);
+			pos = end == std::string_view::npos ? script.size() : end + 1;
+			if (const size_t colon = inner.find(':'); colon != std::string_view::npos && colon <= 2) {
+				GiveLinesRecordings(std::atoi(std::string(inner.substr(0, colon)).c_str()), { std::string(inner.substr(colon + 1)) });
+			} else {
+#if !defined(USE_SDL1) && !defined(USE_SDL3)
+				SDL_Event drop {};
+				drop.type = SDL_DROPFILE;
+				drop.drop.file = SDL_strdup(std::string(inner).c_str());
+				MenuConsoleHandleEvent(drop);
+#endif
+			}
+			return;
+		}
 		if (script[pos] == '[') {
 			const size_t end = script.find(']', pos);
 			const std::string_view label = script.substr(pos + 1, end - pos - 1);

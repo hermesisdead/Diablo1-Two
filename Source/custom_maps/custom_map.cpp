@@ -770,11 +770,16 @@ bool IsSongFile(std::string_view name)
 
 std::expected<std::string, std::string> ImportCampaignSong(const std::string &sourcePath)
 {
+	return ImportAudioFile(sourcePath, CampaignMusicDirectory(), "song");
+}
+
+std::expected<std::string, std::string> ImportAudioFile(const std::string &sourcePath, const std::string &dir, std::string_view what)
+{
 	// The file's own name, kept to letters, digits, spaces and a few marks.
 	const size_t slash = sourcePath.find_last_of("/\\");
 	const std::string file = slash == std::string::npos ? sourcePath : sourcePath.substr(slash + 1);
 	if (!IsSongFile(file))
-		return std::unexpected(StrCat(file, " is not a song the game can play (use .ogg, .mp3 or .wav)."));
+		return std::unexpected(StrCat(file, " is not a sound the game can play (use .ogg, .mp3 or .wav)."));
 	const size_t dot = file.find_last_of('.');
 	std::string stem;
 	for (const char c : file.substr(0, dot)) {
@@ -789,14 +794,13 @@ std::expected<std::string, std::string> ImportCampaignSong(const std::string &so
 	if (stem.size() > 48)
 		stem.resize(48);
 	if (stem.empty())
-		stem = "song";
+		stem = std::string(what);
 	std::string ext = file.substr(dot);
 	std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
 	const std::expected<std::string, std::string> data = ReadWholeFile(sourcePath);
 	if (!data || data->empty())
 		return std::unexpected(StrCat("Cannot read ", sourcePath));
-	const std::string dir = CampaignMusicDirectory();
 	RecursivelyCreateDir(dir.c_str());
 	std::string name;
 	for (int n = 1; n < 1000; n++) {

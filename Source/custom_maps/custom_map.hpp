@@ -196,6 +196,12 @@ void SetMapChest(CustomMap &map, Point tile, bool chest);
  * @return The song's name there (the same file again is not copied twice).
  */
 [[nodiscard]] std::expected<std::string, std::string> ImportCampaignSong(const std::string &sourcePath);
+/**
+ * @brief Copies a sound file (.ogg, .mp3, .wav) from anywhere into a folder, checking it plays.
+ * @param what What it is, for a file whose name has nothing usable ("song", "voice").
+ * @return Its name there (the same file again is not copied twice).
+ */
+[[nodiscard]] std::expected<std::string, std::string> ImportAudioFile(const std::string &sourcePath, const std::string &dir, std::string_view what);
 /** @brief Full path of an uploaded song. */
 [[nodiscard]] std::string CampaignSongPath(std::string_view song);
 /** @brief Full paths of the songs a map plays (those that exist). */

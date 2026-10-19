@@ -7,6 +7,7 @@
 #include <deque>
 
 #include "custom_maps/campaign.hpp"
+#include "custom_maps/custom_map.hpp"
 #include "engine/assets.hpp"
 #include "engine/palette.h"
 #include "engine/render/clx_render.hpp"
@@ -368,11 +369,19 @@ std::vector<std::string> ListCampaignVoices()
 	for (std::string &name : ListFiles(dir.c_str())) {
 		std::string lower = name;
 		std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-		if (lower.ends_with(".ogg") || lower.ends_with(".wav"))
+		if (IsSongFile(lower))
 			files.push_back(std::move(name));
 	}
 	std::sort(files.begin(), files.end());
 	return files;
+}
+
+std::expected<std::string, std::string> ImportCampaignVoice(const std::string &sourcePath)
+{
+	const std::string dir = CampaignVoiceDirectory();
+	if (dir.empty())
+		return std::unexpected("Open a campaign first: recordings are kept with it.");
+	return ImportAudioFile(sourcePath, dir, "voice");
 }
 
 void PlayNpcVoice(std::string_view voiceFile)

@@ -136,7 +136,7 @@ std::optional<std::vector<std::string>> ChooseFilesToOpen(std::string_view title
 			patterns += L";";
 		patterns += L"*." + Widen(ext);
 	}
-	std::wstring filter = L"Music (" + patterns + L")";
+	std::wstring filter = L"Sound files (" + patterns + L")";
 	filter.push_back(L'\0');
 	filter += patterns;
 	filter.push_back(L'\0');
