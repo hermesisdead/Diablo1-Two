@@ -275,7 +275,7 @@ void RenderOrb(const Surface &out, Orb &orb, const Look &look, bool warn)
 
 bool HdPanelActive()
 {
-	return NewTexturesActive() && PanelArt() != nullptr;
+	return HudTexturesActive() && PanelArt() != nullptr;
 }
 
 void ApplyPanelTextures()

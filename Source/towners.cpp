@@ -1036,7 +1036,13 @@ void ApplyTownerTextures()
 void ToggleNewTextures()
 {
 	auto &option = GetOptions().Graphics.textures;
-	const TextureMode next = *option == TextureMode::Vanilla ? TextureMode::HD : (*option == TextureMode::HD ? TextureMode::HDRedux : TextureMode::Vanilla);
+	TextureMode next = TextureMode::Vanilla;
+	switch (*option) {
+	case TextureMode::Vanilla: next = TextureMode::HD; break;
+	case TextureMode::HD: next = TextureMode::HDRedux; break;
+	case TextureMode::HDRedux: next = TextureMode::HudOnly; break;
+	default: next = TextureMode::Vanilla; break;
+	}
 	option.SetValue(next);
 	ApplyTownerTextures();
 	switch (next) {
@@ -1044,6 +1050,7 @@ void ToggleNewTextures()
 	case TextureMode::HD:
 		InitDiabloMsg(*GetOptions().Graphics.smoothEffects ? _("Textures: HD") : _("Textures: HD (needs Smooth Effects for full colour)"));
 		break;
+	case TextureMode::HudOnly: InitDiabloMsg(_("Textures: HUD Only (original art, HD interface)")); break;
 	default: InitDiabloMsg(_("Textures: HD Redux")); break;
 	}
 }

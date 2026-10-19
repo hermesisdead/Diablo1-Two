@@ -72,6 +72,7 @@ enum class TextureMode : uint8_t {
 	Vanilla, // the original art
 	HD,      // the new sprites in full colour, with soft edges and see-through shadows
 	HDRedux, // the new sprites in the game's own 256 colours, pixel for pixel (low-fi)
+	HudOnly, // only the interface (panel and orbs) in HD; the world keeps the original art
 };
 
 enum class ScalingQuality : uint8_t {

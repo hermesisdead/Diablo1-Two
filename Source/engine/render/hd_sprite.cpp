@@ -53,6 +53,12 @@ std::shared_ptr<const HdSprite> LoadHdSprite(const std::string &path)
 
 bool NewTexturesActive()
 {
+	const TextureMode mode = *GetOptions().Graphics.textures;
+	return mode == TextureMode::HD || mode == TextureMode::HDRedux;
+}
+
+bool HudTexturesActive()
+{
 	return *GetOptions().Graphics.textures != TextureMode::Vanilla;
 }
 

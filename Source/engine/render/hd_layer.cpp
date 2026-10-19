@@ -150,13 +150,15 @@ bool HdLayerActive()
 #ifdef USE_SDL1
 	return false;
 #else
-	return renderer != nullptr && *GetOptions().Graphics.textures == TextureMode::HD && !RenderDirectlyToOutputSurface;
+	const TextureMode mode = *GetOptions().Graphics.textures;
+	return renderer != nullptr && (mode == TextureMode::HD || mode == TextureMode::HudOnly) && !RenderDirectlyToOutputSurface;
 #endif
 }
 
 bool HdLayerWorldActive()
 {
-	return HdLayerActive() && !*GetOptions().Graphics.zoom;
+	// Townspeople and animals: only in full HD (HUD Only keeps the world's original art).
+	return HdLayerActive() && *GetOptions().Graphics.textures == TextureMode::HD && !*GetOptions().Graphics.zoom;
 }
 
 void HdLayerBeginFrame()

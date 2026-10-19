@@ -7,6 +7,7 @@
 #include "engine/palette.h"
 #include "engine/render/dun_render.hpp"
 #include "engine/render/tile_hue.hpp"
+#include "engine/render/tree_sway.hpp"
 #include "levels/dun_tile_data.hpp"
 #include "options.h"
 
@@ -266,7 +267,7 @@ bool PieceHasStandingParts(uint16_t piece)
 	return false;
 }
 
-void DrawDecorPiece(const Surface &out, const Lightmap &lightmap, Point position, uint16_t piece, const uint8_t *tbl)
+void DrawDecorPiece(const Surface &out, const Lightmap &lightmap, Point position, uint16_t piece, const uint8_t *tbl, Point swayTile)
 {
 	if (piece >= MAXTILES || pDungeonCels == nullptr)
 		return;
@@ -285,10 +286,11 @@ void DrawDecorPiece(const Surface &out, const Lightmap &lightmap, Point position
 	}
 	Point at = position + Displacement { 0, -TILE_HEIGHT };
 	for (int b = 2; b + 1 < static_cast<int>(MicroTileLen); b += 2, at.y -= TILE_HEIGHT) {
+		const int sway = swayTile.x >= 0 ? TreeSwayOffset(piece, swayTile, b / 2) : 0;
 		for (int half = 0; half < 2; half++) {
 			const LevelCelBlock block { micros.mt[b + half] };
 			if (block.hasValue())
-				RenderTile(out, lightmap, at + Displacement { half * HalfWidth, 0 }, pDungeonCels.get(), block, MaskType::Solid, tbl);
+				RenderTile(out, lightmap, at + Displacement { half * HalfWidth + sway, 0 }, pDungeonCels.get(), block, MaskType::Solid, tbl);
 		}
 	}
 }
@@ -322,7 +324,7 @@ void DrawDecorCell(const Surface &out, const Lightmap &lightmap, Point tilePosit
 		const uint8_t *tbl = hueTables != nullptr ? (*hueTables)[lightTableIndex].data() : LightTables[lightTableIndex].data();
 		uint8_t lightmapBuffer[TILE_WIDTH * TILE_HEIGHT];
 		const Lightmap bled = Lightmap::bleedUp(*GetOptions().Graphics.perPixelLighting, lightmap, targetBufferPosition, lightmapBuffer);
-		DrawDecorPiece(out, hueTables != nullptr ? bled.withLightTables(*hueTables) : bled, targetBufferPosition, static_cast<uint16_t>(piece - 1), tbl);
+		DrawDecorPiece(out, hueTables != nullptr ? bled.withLightTables(*hueTables) : bled, targetBufferPosition, static_cast<uint16_t>(piece - 1), tbl, tilePosition);
 	}
 }
 

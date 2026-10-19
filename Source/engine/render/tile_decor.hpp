@@ -37,7 +37,7 @@ inline constexpr int FlowerPatchCount = 8;
 void DrawFlowerPatch(const Surface &out, Point position, int patch, uint32_t seed, const uint8_t *tbl);
 
 /** @brief Draws the parts of a level piece that stand on the ground (everything but its floor). */
-void DrawDecorPiece(const Surface &out, const Lightmap &lightmap, Point position, uint16_t piece, const uint8_t *tbl);
+void DrawDecorPiece(const Surface &out, const Lightmap &lightmap, Point position, uint16_t piece, const uint8_t *tbl, Point swayTile = { -1, -1 });
 
 /** @brief Flower patches of every decor layer at a world tile (floor pass). */
 void DrawDecorFloor(const Surface &out, Point tilePosition, Point targetBufferPosition, int lightTableIndex);

@@ -586,7 +586,7 @@ void ColorOverlayComposite(SDL_Surface *src, const SDL_Rect *srcRect, SDL_Surfac
 
 	if (water) {
 		// Water: the floor's own pixels wobble with ripples running along the flow, the bank above
-		// shows mirrored in it, and a few glints drift by. Done first, on the bare scene.
+		// shows mirrored in it. Done first, on the bare scene.
 		std::array<uint32_t, 256> rgb;
 		std::array<bool, 256> bluish;
 		for (int i = 0; i < 256; i++) {
@@ -649,29 +649,6 @@ void ColorOverlayComposite(SDL_Surface *src, const SDL_Rect *srcRect, SDL_Surfac
 						r = r * (1 - w) + static_cast<float>(refl & 0xFF) * w * 0.8f;
 						g = g * (1 - w) + static_cast<float>((refl >> 8) & 0xFF) * w * 0.85f;
 						b = b * (1 - w) + static_cast<float>((refl >> 16) & 0xFF) * w * 0.95f;
-					}
-				}
-				// Glints: short streaks scattered on the surface, drifting with the current and twinkling.
-				{
-					const float u = fx + t * 5.0f, v = fy - t * 7.0f; // carried along the stream
-					const int cu = static_cast<int>(std::floor(u / 9.0f)), cv = static_cast<int>(std::floor(v / 5.0f));
-					uint32_t hsh = static_cast<uint32_t>(cu) * 73856093u ^ static_cast<uint32_t>(cv) * 19349663u;
-					hsh ^= hsh >> 13;
-					hsh *= 0x5bd1e995u;
-					hsh ^= hsh >> 15;
-					if ((hsh & 0xFF) < 70) {
-						const float gx = static_cast<float>(cu) * 9.0f + 1.5f + static_cast<float>((hsh >> 8) & 7);
-						const float gy = static_cast<float>(cv) * 5.0f + 1.0f + static_cast<float>((hsh >> 11) % 3);
-						const float len = 1.5f + static_cast<float>((hsh >> 14) & 3);
-						const float ddx = std::abs(u - gx), ddy = std::abs(v - gy);
-						if (ddy < 0.75f && ddx < len) {
-							const float twinkle = std::max(0.0f, std::sin(t * (2.5f + static_cast<float>((hsh >> 17) & 3)) + static_cast<float>((hsh >> 20) & 63)));
-							const float lum = (r + g + b) / (3.0f * 255.0f);
-							const float glint = (1.0f - ddx / len) * twinkle * twinkle * (30.0f + 150.0f * std::min(1.0f, lum * 2.5f));
-							r += glint * 0.85f;
-							g += glint * 0.95f;
-							b += glint;
-						}
 					}
 				}
 				auto* out = reinterpret_cast<uint32_t *>(static_cast<uint8_t *>(dst->pixels) + static_cast<size_t>(dy) * dst->pitch);

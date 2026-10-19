@@ -68,6 +68,7 @@
 #include "levels/forest.hpp"
 #include "action_mode.hpp"
 #include "engine/render/orbit_view.hpp"
+#include "engine/render/tree_sway.hpp"
 #include "options.h"
 #include "panels/charpanel.hpp"
 #include "panels/console.hpp"
@@ -665,10 +666,12 @@ void DrawCell(const Surface &out, const Lightmap lightmap, Point tilePosition, P
 	targetBufferPosition.y -= TILE_HEIGHT;
 
 	for (uint_fast8_t i = 2, n = MicroTileLen; i < n; i += 2) {
+		// Trees sway a little in the wind (upper storeys more).
+		const Displacement sway { TreeSwayOffset(levelPieceId, tilePosition, i / 2), 0 };
 		{
 			const LevelCelBlock levelCelBlock { pMap->mt[i] };
 			if (levelCelBlock.hasValue()) {
-				RenderTile(out, bleedLightmap, targetBufferPosition,
+				RenderTile(out, bleedLightmap, targetBufferPosition + sway,
 				    pDungeonCels.get(), levelCelBlock,
 				    transparency ? MaskType::Transparent : MaskType::Solid, foliageTbl);
 			}
@@ -676,7 +679,7 @@ void DrawCell(const Surface &out, const Lightmap lightmap, Point tilePosition, P
 		{
 			const LevelCelBlock levelCelBlock { pMap->mt[i + 1] };
 			if (levelCelBlock.hasValue()) {
-				RenderTile(out, bleedLightmap, targetBufferPosition + RightFrameDisplacement,
+				RenderTile(out, bleedLightmap, targetBufferPosition + RightFrameDisplacement + sway,
 				    pDungeonCels.get(), levelCelBlock,
 				    transparency ? MaskType::Transparent : MaskType::Solid, foliageTbl);
 			}

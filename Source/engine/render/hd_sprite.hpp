@@ -35,6 +35,8 @@ struct HdSprite {
 [[nodiscard]] bool HdTexturesActive();
 /** @brief The new sprites are shown (HD or HD Redux). */
 [[nodiscard]] bool NewTexturesActive();
+/** @brief The interface (panel and orbs) uses its new art: every mode but Vanilla, HUD Only included. */
+[[nodiscard]] bool HudTexturesActive();
 
 struct HdHiresSprite;
 
