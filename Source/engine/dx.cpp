@@ -29,6 +29,7 @@
 #include "options.h"
 #include "engine/render/color_overlay.hpp"
 #include "engine/render/hd_layer.hpp"
+#include "engine/render/painterly.hpp"
 #include "utils/paths.h"
 #include <cstdio>
 #include <cstdlib>
@@ -326,6 +327,10 @@ void RenderPresent()
 		if (SDL_RenderClear(renderer) <= -1) ErrSdl();
 		if (SDL_UpdateTexture(texture.get(), nullptr, surface->pixels, surface->pitch) <= -1) ErrSdl();
 		if (SDL_RenderCopy(renderer, texture.get(), nullptr, nullptr) <= -1) ErrSdl();
+#endif
+#ifndef USE_SDL3
+		// Painterly textures: the world repainted by a GPU shader (the interface stays crisp).
+		PainterlyPresent(renderer, texture.get());
 #endif
 		// The new textures at the window's own resolution, over the stretched frame.
 		HdLayerPresent(renderer, PalSurface, surface);

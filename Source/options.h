@@ -73,6 +73,7 @@ enum class TextureMode : uint8_t {
 	HD,      // the new sprites in full colour, with soft edges and see-through shadows
 	HDRedux, // the new sprites in the game's own 256 colours, pixel for pixel (low-fi)
 	HudOnly, // only the interface (panel and orbs) in HD; the world keeps the original art
+	Painterly, // HUD Only, with the world smoothed into brush strokes (and film grain) by a GPU shader
 };
 
 enum class ScalingQuality : uint8_t {
@@ -582,6 +583,10 @@ struct GraphicsOptions : OptionCategoryBase {
 	OptionEntryBoolean waterEffects;
 	/** @brief Original art, the new sprites in full colour (HD), or the new sprites in the game's 256 colours (HD Redux). \\ cycles. */
 	OptionEntryEnum<TextureMode> textures;
+	/** @brief Painterly textures: how much the world is smoothed into brush strokes, 0..100. */
+	OptionEntryInt<int> paintSmoothing;
+	/** @brief Painterly textures: film grain, 0..100. */
+	OptionEntryInt<int> paintGrain;
 	/** @brief Master switch for weather and mood effects (F8 weather panel). */
 	OptionEntryBoolean weatherEffects;
 	/** @brief Weather effect strength in percent, 0..200 (F8 weather panel). */

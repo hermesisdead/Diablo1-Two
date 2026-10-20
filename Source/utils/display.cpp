@@ -773,7 +773,22 @@ void ReinitializeRenderer()
 #ifdef USE_SDL3
 			renderer = SDL_CreateRenderer(ghMainWnd, nullptr);
 #else
+#if (defined(_WIN32) || defined(__linux__) || defined(__APPLE__)) && !defined(__ANDROID__) && !defined(__IPHONEOS__)
+			// Prefer OpenGL on desktops: the Painterly textures' shader runs on it. Any other
+			// renderer is still used if OpenGL is missing (or one was asked for).
+			if (SDL_GetHint(SDL_HINT_RENDER_DRIVER) == nullptr) {
+				SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
+				renderer = SDL_CreateRenderer(ghMainWnd, -1, 0);
+				if (renderer == nullptr) {
+					LogWarn("OpenGL renderer unavailable ({}), using the default one", SDL_GetError());
+					SDL_SetHint(SDL_HINT_RENDER_DRIVER, ""); // no preference
+				}
+			}
+			if (renderer == nullptr)
+				renderer = SDL_CreateRenderer(ghMainWnd, -1, 0);
+#else
 			renderer = SDL_CreateRenderer(ghMainWnd, -1, 0);
+#endif
 #endif
 			if (renderer == nullptr) {
 				ErrSdl();

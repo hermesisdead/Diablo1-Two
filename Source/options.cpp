@@ -803,13 +803,16 @@ GraphicsOptions::GraphicsOptions()
     , dungeonMoods("Dungeon Moods", OptionEntryFlags::None, N_("Dungeon Moods"), N_("Every visit to a dungeon level rolls its own atmosphere and ambient sound: fog, dust, frost, embers, dripping water, ash, spores or blood mist."), true)
     , smoothEffects("Smooth Effects", OptionEntryFlags::None, N_("Smooth Effects"), N_("Fog, rain, glows and other weather effects are blended in full colour with real transparency instead of a dither pattern."), true)
     , waterEffects("Water Effects", OptionEntryFlags::None, N_("Water Effects"), N_("Water ripples, flows and reflects what stands on its banks. Needs Smooth Effects."), true)
-    , textures("Textures", OptionEntryFlags::None, N_("Textures"), N_("Townspeople and animals: the original art (Vanilla), the new sprites in full colour (HD, needs Smooth Effects), the new sprites in the game's 256 colours (HD Redux), or the original art with only the HD interface (HUD Only). Cycle in game with \\."), TextureMode::HD,
+    , textures("Textures", OptionEntryFlags::None, N_("Textures"), N_("Townspeople and animals: the original art (Vanilla), the new sprites in full colour (HD, needs Smooth Effects), the new sprites in the game's 256 colours (HD Redux), the original art with only the HD interface (HUD Only), or HUD Only with the world painted by a GPU shader (Painterly; smoothing and grain in the F8 panel). Cycle in game with \\."), TextureMode::HD,
           {
               { TextureMode::Vanilla, N_("Vanilla") },
               { TextureMode::HD, N_("HD") },
               { TextureMode::HDRedux, N_("HD Redux") },
               { TextureMode::HudOnly, N_("HUD Only") },
+              { TextureMode::Painterly, N_("Painterly") },
           })
+    , paintSmoothing("Paint Smoothing", OptionEntryFlags::None, N_("Paint Smoothing"), N_("Painterly textures: how much the world is smoothed into brush strokes. Live in the F8 panel (Look)."), 50, { 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100 })
+    , paintGrain("Paint Grain", OptionEntryFlags::None, N_("Paint Grain"), N_("Painterly textures: film grain over the world. Live in the F8 panel (Look)."), 20, { 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100 })
     , weatherEffects("Weather Effects", OptionEntryFlags::None, N_("Weather Effects"), N_("Shows weather and dungeon mood effects. Also in the weather panel (F8)."), true)
     , weatherIntensity("Weather Intensity", OptionEntryFlags::Invisible, "Weather Intensity", "Weather effect strength in percent (F8 weather panel).", 100)
     , coloredLighting("Coloured Lighting", OptionEntryFlags::None, N_("Coloured Lighting"), N_("Torches and candles glow warm, fire spells orange, lightning cold blue, portals blue. Needs Smooth Effects."), true)
@@ -860,6 +863,8 @@ std::vector<OptionEntryBase *> GraphicsOptions::GetEntries()
 		&smoothEffects,
 		&waterEffects,
 		&textures,
+		&paintSmoothing,
+		&paintGrain,
 		&weatherEffects,
 		&weatherIntensity,
 		&coloredLighting,

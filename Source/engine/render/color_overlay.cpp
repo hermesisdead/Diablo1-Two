@@ -48,6 +48,7 @@ struct Layer {
 	int pMinX = 0, pMinY = 0, pMaxX = -1, pMaxY = -1; // touched area (inclusive)
 
 	std::vector<uint8_t> snapshot; // the world's 8-bit pixels when it was finished
+	int shownOffX = 0, shownOffY = 0; // back buffer to output frame, as composited
 
 	// Floor decals and the floor as it was before anything stood on it.
 	std::vector<uint32_t> decals; // premultiplied like particles
@@ -571,6 +572,8 @@ void ColorOverlayComposite(SDL_Surface *src, const SDL_Rect *srcRect, SDL_Surfac
 	SDL_Rect s = srcRect != nullptr ? *srcRect : SDL_Rect { 0, 0, src->w, src->h };
 	const int offX = (dstRect != nullptr ? dstRect->x : 0) - s.x;
 	const int offY = (dstRect != nullptr ? dstRect->y : 0) - s.y;
+	L.shownOffX = offX;
+	L.shownOffY = offY;
 	const int x0 = std::max(s.x, L.rect.x), x1 = std::min(s.x + s.w, L.rect.x + L.rect.w);
 	const int y0 = std::max(s.y, L.rect.y), y1 = std::min(s.y + s.h, L.rect.y + L.rect.h);
 	if (x0 >= x1 || y0 >= y1)
@@ -763,6 +766,31 @@ void ColorOverlayComposite(SDL_Surface *src, const SDL_Rect *srcRect, SDL_Surfac
 		}
 	}
 	L.shown = true;
+}
+
+bool ColorOverlayWorldMask(std::vector<uint32_t> &mask, int w, int h)
+{
+	if (!L.shown || PalSurface == nullptr || L.snapshot.size() < static_cast<size_t>(L.rect.w) * L.rect.h)
+		return false;
+	mask.assign(static_cast<size_t>(w) * h, 0);
+	for (int ly = 0; ly < L.rect.h; ly++) {
+		const int y = L.rect.y + ly;
+		const int dy = y + L.shownOffY;
+		if (y < 0 || y >= PalSurface->h || dy < 0 || dy >= h)
+			continue;
+		const uint8_t *palRow = static_cast<const uint8_t *>(PalSurface->pixels) + static_cast<size_t>(y) * PalSurface->pitch;
+		const uint8_t *snap = &L.snapshot[static_cast<size_t>(ly) * L.rect.w];
+		uint32_t *out = &mask[static_cast<size_t>(dy) * w];
+		for (int lx = 0; lx < L.rect.w; lx++) {
+			const int x = L.rect.x + lx;
+			const int dx = x + L.shownOffX;
+			if (x < 0 || x >= PalSurface->w || dx < 0 || dx >= w)
+				continue;
+			if (palRow[x] == snap[lx])
+				out[dx] = 0xFFFFFFFFu;
+		}
+	}
+	return true;
 }
 
 SDL_Surface *ColorOverlayShownSurface()

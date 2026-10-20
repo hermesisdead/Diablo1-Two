@@ -10,10 +10,12 @@
 #include "engine/rectangle.hpp"
 #include "engine/render/color_overlay.hpp"
 #include "engine/render/day_night.hpp"
+#include "engine/render/painterly.hpp"
 #include "engine/render/dungeon_mood.hpp"
 #include "engine/render/primitive_render.hpp"
 #include "engine/render/text_render.hpp"
 #include "options.h"
+#include "towners.h"
 #include "utils/format.hpp"
 #include "utils/language.h"
 #include "utils/str_cat.hpp"
@@ -36,7 +38,12 @@ constexpr int SliderHeight = 10;
 constexpr int IntensityMax = 200;
 constexpr int IntensityStep = 5;
 
-bool draggingSlider = false;
+/** Which slider the mouse is dragging: 0 none, 1 weather intensity, 2 paint smoothing, 3 paint grain. */
+int draggingSlider = 0;
+/** 0: weather and day/night, 1: the look (textures, painterly smoothing and grain). */
+int page = 0;
+constexpr int LookHeight = 176;
+constexpr int LookSliderY[2] = { 76, 116 };
 
 enum class Button {
 	Weather,
@@ -70,12 +77,62 @@ OptionEntryListBase &RowOption(DayRow row)
 
 Point PanelOrigin()
 {
+	// The look page sits at the side, so the town stays in view while it is tuned.
+	if (page == 1)
+		return { 8, 8 };
 	return { (gnScreenWidth - PanelWidth) / 2, std::max(8, gnViewportHeight / 2 - PanelHeight / 2 - 60) };
+}
+
+int PanelHeightNow()
+{
+	return page == 1 ? LookHeight : PanelHeight;
 }
 
 Rectangle PanelRect()
 {
-	return { PanelOrigin(), { PanelWidth, PanelHeight } };
+	return { PanelOrigin(), { PanelWidth, PanelHeightNow() } };
+}
+
+/** The page tabs at the top of the panel. */
+Rectangle TabRect(int tab)
+{
+	return { PanelOrigin() + Displacement { Margin + tab * 74, 6 }, { 70, 16 } };
+}
+
+Rectangle LookSliderRect(int slider)
+{
+	return { PanelOrigin() + Displacement { Margin, LookSliderY[slider] }, { PanelWidth - 2 * Margin, SliderHeight } };
+}
+
+Rectangle LookTexturesRect()
+{
+	return { PanelOrigin() + Displacement { Margin, 30 }, { PanelWidth - 2 * Margin, 18 } };
+}
+
+OptionEntryInt<int> &LookOption(int slider)
+{
+	return slider == 0 ? GetOptions().Graphics.paintSmoothing : GetOptions().Graphics.paintGrain;
+}
+
+void SetLookFromMouse(int slider, int mouseX)
+{
+	const Rectangle r = LookSliderRect(slider);
+	const float t = std::clamp(static_cast<float>(mouseX - r.position.x) / static_cast<float>(r.size.width), 0.0f, 1.0f);
+	const int value = std::clamp(static_cast<int>(std::lround(t * 20.0f)) * 5, 0, 100);
+	if (value != *LookOption(slider))
+		LookOption(slider).SetValue(value);
+}
+
+std::string_view TextureModeName(TextureMode mode)
+{
+	switch (mode) {
+	case TextureMode::Vanilla: return _("Vanilla");
+	case TextureMode::HD: return _("HD");
+	case TextureMode::HDRedux: return _("HD Redux");
+	case TextureMode::HudOnly: return _("HUD Only");
+	case TextureMode::Painterly: return _("Painterly");
+	}
+	return "";
 }
 
 Rectangle SliderRect()
@@ -189,31 +246,98 @@ std::string FormatTime(float seconds)
 void ToggleWeatherPanel()
 {
 	WeatherPanelOpen = !WeatherPanelOpen;
-	draggingSlider = false;
+	draggingSlider = 0;
 }
+
+namespace {
+
+void DrawSlider(const Surface &out, Rectangle track, int value, int max, bool on, bool dragging)
+{
+	FillRect(out, track.position.x, track.position.y + 3, track.size.width, 4, PAL16_GRAY + 12);
+	const int fillWidth = track.size.width * value / max;
+	FillRect(out, track.position.x, track.position.y + 3, fillWidth, 4, on ? PAL16_YELLOW + 6 : PAL16_GRAY + 8);
+	const int knobX = track.position.x + fillWidth - 3;
+	FillRect(out, knobX, track.position.y, 7, SliderHeight, (dragging || track.contains(MousePosition)) ? PAL16_YELLOW + 2 : PAL16_YELLOW + 4);
+}
+
+void DrawTabs(const Surface &out)
+{
+	for (int tab = 0; tab < 2; tab++) {
+		const Rectangle r = TabRect(tab);
+		const bool on = page == tab;
+		const bool hover = r.contains(MousePosition);
+		FillRect(out, r.position.x, r.position.y, r.size.width, r.size.height, on ? PAL16_YELLOW + 12 : (hover ? PAL16_GRAY + 12 : PAL16_GRAY + 14));
+		DrawHorizontalLine(out, r.position + Displacement { 0, r.size.height - 1 }, r.size.width, PAL16_YELLOW + 9);
+		DrawString(out, tab == 0 ? _("Weather") : _("Look"), { r.position + Displacement { 0, 2 }, { r.size.width, 12 } },
+		    { .flags = (on ? UiFlags::ColorWhitegold : UiFlags::ColorWhite) | UiFlags::AlignCenter });
+	}
+}
+
+/** The look page: texture mode, and the Painterly shader's smoothing and grain, live. */
+void DrawLookPage(const Surface &out)
+{
+	const Rectangle panel = PanelRect();
+	const Point o = panel.position;
+	const int textWidth = PanelWidth - 2 * Margin;
+	const TextureMode mode = *GetOptions().Graphics.textures;
+	const bool painterly = mode == TextureMode::Painterly;
+
+	const Rectangle tex = LookTexturesRect();
+	const bool hover = tex.contains(MousePosition);
+	FillRect(out, tex.position.x, tex.position.y, tex.size.width, tex.size.height, painterly ? PAL16_YELLOW + 12 : (hover ? PAL16_GRAY + 12 : PAL16_GRAY + 14));
+	DrawHorizontalLine(out, tex.position, tex.size.width, PAL16_YELLOW + 9);
+	DrawHorizontalLine(out, tex.position + Displacement { 0, tex.size.height - 1 }, tex.size.width, PAL16_YELLOW + 9);
+	DrawString(out, StrCat(_("Textures: "), TextureModeName(mode), "   (\\)"), { tex.position + Displacement { 0, 3 }, { tex.size.width, 12 } },
+	    { .flags = (painterly ? UiFlags::ColorWhitegold : UiFlags::ColorWhite) | UiFlags::AlignCenter });
+
+	for (int slider = 0; slider < 2; slider++) {
+		const int y = LookSliderY[slider] - 18;
+		const int value = *LookOption(slider);
+		DrawString(out, slider == 0 ? _("Smoothing") : _("Grain"), { o + Displacement { Margin, y }, { textWidth, 12 } }, { .flags = UiFlags::ColorWhite });
+		DrawString(out, StrCat(value, "%"), { o + Displacement { Margin, y }, { textWidth, 12 } }, { .flags = UiFlags::ColorWhitegold | UiFlags::AlignRight });
+		DrawSlider(out, LookSliderRect(slider), value, 100, painterly, draggingSlider == slider + 2);
+	}
+
+	std::string status;
+	if (!painterly)
+		status = _("Choose Painterly above to see these.");
+	else
+		status = std::string(PainterlyStatus());
+	DrawString(out, status, { o + Displacement { Margin, 134 }, { textWidth, 12 } }, { .flags = (painterly && PainterlyRunning()) ? UiFlags::ColorGold : UiFlags::ColorWhite });
+	DrawString(out, _("F8: close"), { o + Displacement { 0, LookHeight - 18 }, { PanelWidth, 12 } }, { .flags = UiFlags::ColorWhite | UiFlags::AlignCenter });
+}
+
+} // namespace
 
 void DrawWeatherPanel(const Surface &out)
 {
 #ifdef _DEBUG
 	static bool devOpened = false;
-	if (!devOpened && std::getenv("DEVILUTIONX_DEV_WEATHERPANEL") != nullptr) {
+	if (const char *dev = std::getenv("DEVILUTIONX_DEV_WEATHERPANEL"); !devOpened && dev != nullptr) {
 		devOpened = true;
 		WeatherPanelOpen = true;
+		page = std::string_view(dev) == "look" ? 1 : 0;
 	}
 #endif
 	if (!WeatherPanelOpen)
 		return;
-	if (draggingSlider)
+	if (draggingSlider == 1)
 		SetIntensityFromMouse(MousePosition.x);
+	else if (draggingSlider >= 2)
+		SetLookFromMouse(draggingSlider - 2, MousePosition.x);
 
 	const Rectangle panel = PanelRect();
 	const Point o = panel.position;
 	DrawFrame(out, panel);
 	const int textWidth = PanelWidth - 2 * Margin;
 
-	DrawString(out, _("Weather"), { o + Displacement { 0, 8 }, { PanelWidth, 12 } }, { .flags = UiFlags::ColorWhitegold | UiFlags::AlignCenter });
+	DrawTabs(out);
 	DrawString(out, "x", { ButtonRect(Button::Close).position + Displacement { 0, 1 }, ButtonRect(Button::Close).size },
 	    { .flags = (ButtonRect(Button::Close).contains(MousePosition) ? UiFlags::ColorWhite : UiFlags::ColorGold) | UiFlags::AlignCenter });
+	if (page == 1) {
+		DrawLookPage(out);
+		return;
+	}
 
 	const WeatherStatus status = GetWeatherStatus();
 	const bool on = *GetOptions().Graphics.weatherEffects;
@@ -254,7 +378,7 @@ void DrawWeatherPanel(const Surface &out)
 	// Tick at 100% (the normal strength).
 	DrawVerticalLine(out, track.position + Displacement { track.size.width / 2, 0 }, SliderHeight, PAL16_GRAY + 6);
 	const int knobX = track.position.x + fillWidth - 3;
-	FillRect(out, knobX, track.position.y, 7, SliderHeight, (draggingSlider || track.contains(MousePosition)) ? PAL16_YELLOW + 2 : PAL16_YELLOW + 4);
+	FillRect(out, knobX, track.position.y, 7, SliderHeight, (draggingSlider == 1 || track.contains(MousePosition)) ? PAL16_YELLOW + 2 : PAL16_YELLOW + 4);
 
 	// Switches.
 	DrawButton(out, Button::Weather, on ? _("Weather: On") : _("Weather: Off"), on, true);
@@ -306,13 +430,41 @@ bool WeatherPanelMouseDown(Point mousePosition)
 {
 	if (!WeatherPanelOpen || !PanelRect().contains(mousePosition))
 		return false;
+	for (int tab = 0; tab < 2; tab++) {
+		if (TabRect(tab).contains(mousePosition)) {
+			page = tab;
+			draggingSlider = 0;
+			return true;
+		}
+	}
+	if (ButtonRect(Button::Close).contains(mousePosition)) {
+		ToggleWeatherPanel();
+		return true;
+	}
+	if (page == 1) {
+		for (int slider = 0; slider < 2; slider++) {
+			Rectangle g = LookSliderRect(slider);
+			g.position.y -= 4;
+			g.size.height += 8;
+			g.position.x -= 6;
+			g.size.width += 12;
+			if (g.contains(mousePosition)) {
+				draggingSlider = slider + 2;
+				SetLookFromMouse(slider, mousePosition.x);
+				return true;
+			}
+		}
+		if (LookTexturesRect().contains(mousePosition))
+			ToggleNewTextures();
+		return true;
+	}
 	Rectangle grab = SliderRect();
 	grab.position.y -= 4;
 	grab.size.height += 8;
 	grab.position.x -= 6;
 	grab.size.width += 12;
 	if (grab.contains(mousePosition)) {
-		draggingSlider = true;
+		draggingSlider = 1;
 		SetIntensityFromMouse(mousePosition.x);
 		return true;
 	}
@@ -346,7 +498,7 @@ bool WeatherPanelMouseDown(Point mousePosition)
 
 void WeatherPanelMouseUp()
 {
-	draggingSlider = false;
+	draggingSlider = 0;
 }
 
 } // namespace devilution

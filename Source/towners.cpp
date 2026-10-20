@@ -1041,6 +1041,7 @@ void ToggleNewTextures()
 	case TextureMode::Vanilla: next = TextureMode::HD; break;
 	case TextureMode::HD: next = TextureMode::HDRedux; break;
 	case TextureMode::HDRedux: next = TextureMode::HudOnly; break;
+	case TextureMode::HudOnly: next = TextureMode::Painterly; break;
 	default: next = TextureMode::Vanilla; break;
 	}
 	option.SetValue(next);
@@ -1051,6 +1052,7 @@ void ToggleNewTextures()
 		InitDiabloMsg(*GetOptions().Graphics.smoothEffects ? _("Textures: HD") : _("Textures: HD (needs Smooth Effects for full colour)"));
 		break;
 	case TextureMode::HudOnly: InitDiabloMsg(_("Textures: HUD Only (original art, HD interface)")); break;
+	case TextureMode::Painterly: InitDiabloMsg(_("Textures: Painterly (F8: Look to adjust)")); break;
 	default: InitDiabloMsg(_("Textures: HD Redux")); break;
 	}
 }

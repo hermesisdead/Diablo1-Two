@@ -13,6 +13,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 #ifdef USE_SDL3
 #include <SDL3/SDL_rect.h>
@@ -113,6 +114,12 @@ void ColorOverlayFinish();
 /** @brief Called right after the 8-bit back buffer was copied to the 32-bit output. */
 void ColorOverlayComposite(SDL_Surface *src, const SDL_Rect *srcRect, SDL_Surface *dst, const SDL_Rect *dstRect);
 
+/**
+ * @brief Which pixels of the shown frame are the world (and not the interface drawn over it):
+ * `mask` gets w x h entries (output frame coordinates), all bits set for the world, 0 elsewhere.
+ * @return false when this frame had no world (or the layer was not shown).
+ */
+bool ColorOverlayWorldMask(std::vector<uint32_t> &mask, int w, int h);
 /** @brief The composited 32-bit frame (for screenshots), or nullptr when the overlay was not shown. */
 SDL_Surface *ColorOverlayShownSurface();
 

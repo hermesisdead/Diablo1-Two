@@ -11,6 +11,7 @@
 #include "engine/palette.h"
 #include "options.h"
 #include "utils/display.h"
+#include "utils/is_of.hpp"
 #include "utils/log.hpp"
 
 namespace devilution {
@@ -151,7 +152,7 @@ bool HdLayerActive()
 	return false;
 #else
 	const TextureMode mode = *GetOptions().Graphics.textures;
-	return renderer != nullptr && (mode == TextureMode::HD || mode == TextureMode::HudOnly) && !RenderDirectlyToOutputSurface;
+	return renderer != nullptr && IsAnyOf(mode, TextureMode::HD, TextureMode::HudOnly, TextureMode::Painterly) && !RenderDirectlyToOutputSurface;
 #endif
 }
 
