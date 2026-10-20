@@ -109,6 +109,7 @@ float strength = 1.0f;   // how heavy this roll of the weather is (0.6..1)
 float fade = 1.0f;       // 0..1 while outdoor weather changes over
 bool fadingOut = false;
 float changeTimer = 0;   // seconds until the outdoor weather turns
+std::optional<DungeonMood> requestedMood; // chosen in the weather panel: fade to it now (any level)
 float windSign = 1.0f;   // which way the wind blows across the screen
 float flashTime = -1.0f; // seconds since the last lightning strike (-1: none)
 float nextLightning = 0;
@@ -628,21 +629,26 @@ float FlashBrightness(float t)
 
 void UpdateWeather(float dt)
 {
-	if (outdoor && !appliedMapMood) { // a map's chosen weather stays
+	// Outdoors the weather turns slowly; a change asked for in a dungeon takes a moment.
+	const float fadeTime = outdoor ? 6.0f : 1.5f;
+	if (requestedMood)
+		fadingOut = true;
+	else if (outdoor && !appliedMapMood) { // a map's chosen weather stays
 		changeTimer -= dt;
 		if (!fadingOut && changeTimer <= 0)
 			fadingOut = true;
-		if (fadingOut) {
-			fade -= dt / 6.0f;
-			if (fade <= 0) {
-				fade = 0;
-				SetMood(RollMood(currentMood));
-				fadingOut = false;
-				changeTimer = RandomChangeDelay();
-			}
-		} else {
-			fade = std::min(1.0f, fade + dt / 6.0f);
+	}
+	if (fadingOut) {
+		fade -= dt / fadeTime;
+		if (fade <= 0) {
+			fade = 0;
+			SetMood(requestedMood ? *requestedMood : RollMood(currentMood));
+			requestedMood.reset();
+			fadingOut = false;
+			changeTimer = RandomChangeDelay();
 		}
+	} else {
+		fade = std::min(1.0f, fade + dt / fadeTime);
 	}
 
 	if (currentMood == DungeonMood::Storm) {
@@ -1705,7 +1711,8 @@ WeatherStatus GetWeatherStatus()
 	status.outdoor = outdoor;
 	status.strength = strength;
 	status.secondsLeft = std::max(0.0f, changeTimer);
-	status.changing = outdoor && (fadingOut || fade < 1.0f);
+	status.changing = fadingOut || fade < 1.0f;
+	status.next = requestedMood;
 	return status;
 }
 
@@ -1732,8 +1739,33 @@ std::string_view DungeonMoodTitle(DungeonMood mood)
 
 void ChangeWeatherNow()
 {
-	if (outdoor && moodKey != -1 && !fadingOut)
+	if (moodKey == -1 || fadingOut)
+		return;
+	if (outdoor && !appliedMapMood)
 		changeTimer = 0;
+	else
+		requestedMood = RollMood(currentMood);
+}
+
+void SetWeatherNow(DungeonMood mood)
+{
+	EnsureMood();
+	if (moodKey == -1 || (mood == currentMood && !fadingOut))
+		return;
+	requestedMood = mood;
+}
+
+std::vector<DungeonMood> WeatherChoicesHere()
+{
+	std::vector<DungeonMood> choices { DungeonMood::Clear };
+	for (const Weight &w : MoodTableFor(leveltype, InDesertRegion())) {
+		if (std::find(choices.begin(), choices.end(), w.mood) == choices.end())
+			choices.push_back(w.mood);
+	}
+	// Fireflies are outdoor weather too, even where the table leaves them out by day.
+	if (IsOutdoorLevel() && !InDesertRegion() && std::find(choices.begin(), choices.end(), DungeonMood::Fireflies) == choices.end())
+		choices.push_back(DungeonMood::Fireflies);
+	return choices;
 }
 
 DungeonMood GetDungeonMood()

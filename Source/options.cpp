@@ -813,6 +813,8 @@ GraphicsOptions::GraphicsOptions()
           })
     , paintSmoothing("Paint Smoothing", OptionEntryFlags::None, N_("Paint Smoothing"), N_("Painterly textures: how much the world is smoothed into brush strokes. Live in the F8 panel (Look)."), 50, { 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100 })
     , paintGrain("Paint Grain", OptionEntryFlags::None, N_("Paint Grain"), N_("Painterly textures: film grain over the world. Live in the F8 panel (Look)."), 20, { 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100 })
+    , paintBloom("Paint Bloom", OptionEntryFlags::None, N_("Paint Bloom"), N_("Painterly textures: a soft glow around torches, fire, spells and other bright light. Live in the F8 panel (Look)."), 35, { 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100 })
+    , paintGrading("Paint Grading", OptionEntryFlags::None, N_("Paint Grading"), N_("Painterly textures: colour grading - more contrast, cool shadows and warm light. Live in the F8 panel (Look)."), 50, { 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100 })
     , weatherEffects("Weather Effects", OptionEntryFlags::None, N_("Weather Effects"), N_("Shows weather and dungeon mood effects. Also in the weather panel (F8)."), true)
     , weatherIntensity("Weather Intensity", OptionEntryFlags::Invisible, "Weather Intensity", "Weather effect strength in percent (F8 weather panel).", 100)
     , coloredLighting("Coloured Lighting", OptionEntryFlags::None, N_("Coloured Lighting"), N_("Torches and candles glow warm, fire spells orange, lightning cold blue, portals blue. Needs Smooth Effects."), true)
@@ -865,6 +867,8 @@ std::vector<OptionEntryBase *> GraphicsOptions::GetEntries()
 		&textures,
 		&paintSmoothing,
 		&paintGrain,
+		&paintBloom,
+		&paintGrading,
 		&weatherEffects,
 		&weatherIntensity,
 		&coloredLighting,

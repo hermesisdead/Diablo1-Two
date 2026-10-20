@@ -14,6 +14,7 @@
 #include "engine/render/dungeon_mood.hpp"
 #include "engine/render/primitive_render.hpp"
 #include "engine/render/text_render.hpp"
+#include "levels/gendung.h"
 #include "options.h"
 #include "towners.h"
 #include "utils/format.hpp"
@@ -42,8 +43,9 @@ constexpr int IntensityStep = 5;
 int draggingSlider = 0;
 /** 0: weather and day/night, 1: the look (textures, painterly smoothing and grain). */
 int page = 0;
-constexpr int LookHeight = 176;
-constexpr int LookSliderY[2] = { 76, 116 };
+constexpr int LookSliders = 4;
+constexpr int LookSliderY[LookSliders] = { 76, 116, 156, 196 };
+constexpr int LookHeight = 256;
 
 enum class Button {
 	Weather,
@@ -111,7 +113,23 @@ Rectangle LookTexturesRect()
 
 OptionEntryInt<int> &LookOption(int slider)
 {
-	return slider == 0 ? GetOptions().Graphics.paintSmoothing : GetOptions().Graphics.paintGrain;
+	auto &graphics = GetOptions().Graphics;
+	switch (slider) {
+	case 0: return graphics.paintSmoothing;
+	case 1: return graphics.paintGrain;
+	case 2: return graphics.paintBloom;
+	default: return graphics.paintGrading;
+	}
+}
+
+std::string_view LookLabel(int slider)
+{
+	switch (slider) {
+	case 0: return _("Smoothing");
+	case 1: return _("Grain");
+	case 2: return _("Bloom");
+	default: return _("Colour grading");
+	}
 }
 
 void SetLookFromMouse(int slider, int mouseX)
@@ -198,7 +216,42 @@ void StepRow(DayRow row, bool plus)
 
 bool ChangeNowAvailable(const WeatherStatus &status)
 {
-	return status.active && status.outdoor && !status.changing && *GetOptions().Graphics.weatherEffects;
+	return status.active && !status.changing && *GetOptions().Graphics.weatherEffects;
+}
+
+/** The < and > beside the current weather: choose the weather on this level. */
+Rectangle WeatherArrowRect(bool next)
+{
+	const Point o = PanelOrigin();
+	return { o + Displacement { next ? PanelWidth - Margin - 18 : Margin, 26 }, { 18, 15 } };
+}
+
+/** Steps through the weathers this level can have and fades to the chosen one. */
+void StepWeather(bool next)
+{
+	WeatherStatus status = GetWeatherStatus();
+	if (!status.active) {
+		// Weather is switched off for this kind of level: switch it on (it rolls one), then choose.
+		auto &graphics = GetOptions().Graphics;
+		if (leveltype == DTYPE_TOWN || leveltype == DTYPE_FOREST)
+			graphics.townWeather.SetValue(true);
+		else
+			graphics.dungeonMoods.SetValue(true);
+		status = GetWeatherStatus();
+		if (!status.active)
+			return;
+	}
+	const std::vector<DungeonMood> choices = WeatherChoicesHere();
+	if (choices.empty())
+		return;
+	const DungeonMood from = status.next.value_or(status.mood);
+	auto it = std::find(choices.begin(), choices.end(), from);
+	int index = it == choices.end() ? 0 : static_cast<int>(it - choices.begin());
+	const int n = static_cast<int>(choices.size());
+	index = (index + (next ? 1 : n - 1)) % n;
+	if (!*GetOptions().Graphics.weatherEffects)
+		GetOptions().Graphics.weatherEffects.SetValue(true); // choosing a weather shows it
+	SetWeatherNow(choices[index]);
 }
 
 void SetIntensityFromMouse(int mouseX)
@@ -290,10 +343,10 @@ void DrawLookPage(const Surface &out)
 	DrawString(out, StrCat(_("Textures: "), TextureModeName(mode), "   (\\)"), { tex.position + Displacement { 0, 3 }, { tex.size.width, 12 } },
 	    { .flags = (painterly ? UiFlags::ColorWhitegold : UiFlags::ColorWhite) | UiFlags::AlignCenter });
 
-	for (int slider = 0; slider < 2; slider++) {
+	for (int slider = 0; slider < LookSliders; slider++) {
 		const int y = LookSliderY[slider] - 18;
 		const int value = *LookOption(slider);
-		DrawString(out, slider == 0 ? _("Smoothing") : _("Grain"), { o + Displacement { Margin, y }, { textWidth, 12 } }, { .flags = UiFlags::ColorWhite });
+		DrawString(out, LookLabel(slider), { o + Displacement { Margin, y }, { textWidth, 12 } }, { .flags = UiFlags::ColorWhite });
 		DrawString(out, StrCat(value, "%"), { o + Displacement { Margin, y }, { textWidth, 12 } }, { .flags = UiFlags::ColorWhitegold | UiFlags::AlignRight });
 		DrawSlider(out, LookSliderRect(slider), value, 100, painterly, draggingSlider == slider + 2);
 	}
@@ -303,7 +356,7 @@ void DrawLookPage(const Surface &out)
 		status = _("Choose Painterly above to see these.");
 	else
 		status = std::string(PainterlyStatus());
-	DrawString(out, status, { o + Displacement { Margin, 134 }, { textWidth, 12 } }, { .flags = (painterly && PainterlyRunning()) ? UiFlags::ColorGold : UiFlags::ColorWhite });
+	DrawString(out, status, { o + Displacement { Margin, 214 }, { textWidth, 12 } }, { .flags = (painterly && PainterlyRunning()) ? UiFlags::ColorGold : UiFlags::ColorWhite });
 	DrawString(out, _("F8: close"), { o + Displacement { 0, LookHeight - 18 }, { PanelWidth, 12 } }, { .flags = UiFlags::ColorWhite | UiFlags::AlignCenter });
 }
 
@@ -317,6 +370,14 @@ void DrawWeatherPanel(const Surface &out)
 		devOpened = true;
 		WeatherPanelOpen = true;
 		page = std::string_view(dev) == "look" ? 1 : 0;
+	}
+	// Test hook: DEVILUTIONX_DEV_WEATHERSTEP = how many times to press > (one every 90 frames).
+	if (const char *steps = std::getenv("DEVILUTIONX_DEV_WEATHERSTEP"); steps != nullptr) {
+		static int frame = 0, done = 0;
+		if (++frame % 90 == 0 && done < std::atoi(steps)) {
+			done++;
+			StepWeather(true);
+		}
 	}
 #endif
 	if (!WeatherPanelOpen)
@@ -342,27 +403,32 @@ void DrawWeatherPanel(const Surface &out)
 	const WeatherStatus status = GetWeatherStatus();
 	const bool on = *GetOptions().Graphics.weatherEffects;
 
-	// Current weather.
+	// Current weather, with < > to choose another for this level.
 	std::string now;
-	if (!status.active) {
-		now = _("No weather on this level");
-	} else {
-		now = StrCat(_("Now: "), DungeonMoodTitle(status.mood));
-		if (status.mood != DungeonMood::Clear)
+	{
+		now = status.active ? std::string(DungeonMoodTitle(status.next.value_or(status.mood))) : std::string(_("Off on this level"));
+		if (status.active && !status.next && status.mood != DungeonMood::Clear)
 			now += StrCat(" (", status.strength > 0.85f ? _("heavy") : (status.strength > 0.7f ? _("moderate") : _("light")), ")");
 		if (!on)
 			now += StrCat(" - ", _("hidden"));
+		for (const bool next : { false, true }) {
+			const Rectangle a = WeatherArrowRect(next);
+			const bool hover = a.contains(MousePosition);
+			FillRect(out, a.position.x, a.position.y, a.size.width, a.size.height, hover ? PAL16_GRAY + 12 : PAL16_GRAY + 14);
+			DrawHorizontalLine(out, a.position + Displacement { 0, a.size.height - 1 }, a.size.width, PAL16_YELLOW + 9);
+			DrawString(out, next ? ">" : "<", { a.position + Displacement { 0, 1 }, a.size }, { .flags = UiFlags::ColorWhite | UiFlags::AlignCenter });
+		}
+		DrawString(out, now, { o + Displacement { Margin + 20, 28 }, { textWidth - 40, 12 } }, { .flags = UiFlags::ColorWhitegold | UiFlags::AlignCenter });
 	}
-	DrawString(out, now, { o + Displacement { Margin, 28 }, { textWidth, 12 } }, { .flags = UiFlags::ColorWhite });
 
 	// When it turns.
 	std::string timing;
 	if (!status.active)
-		timing = _("Enable it under Settings > Graphics.");
-	else if (!status.outdoor)
-		timing = _("Lasts until you leave this level.");
+		timing = _("< > turns it on for this kind of level.");
 	else if (status.changing)
-		timing = _("Changing now...");
+		timing = status.next ? StrCat(_("Changing to "), DungeonMoodTitle(*status.next), "...") : std::string(_("Changing now..."));
+	else if (!status.outdoor)
+		timing = _("Stays on this level. < > changes it.");
 	else
 		timing = StrCat(_("Changes in "), FormatTime(status.secondsLeft));
 	DrawString(out, timing, { o + Displacement { Margin, 46 }, { textWidth, 12 } }, { .flags = UiFlags::ColorGold });
@@ -442,7 +508,7 @@ bool WeatherPanelMouseDown(Point mousePosition)
 		return true;
 	}
 	if (page == 1) {
-		for (int slider = 0; slider < 2; slider++) {
+		for (int slider = 0; slider < LookSliders; slider++) {
 			Rectangle g = LookSliderRect(slider);
 			g.position.y -= 4;
 			g.size.height += 8;
@@ -457,6 +523,12 @@ bool WeatherPanelMouseDown(Point mousePosition)
 		if (LookTexturesRect().contains(mousePosition))
 			ToggleNewTextures();
 		return true;
+	}
+	for (const bool next : { false, true }) {
+		if (WeatherArrowRect(next).contains(mousePosition)) {
+			StepWeather(next);
+			return true;
+		}
 	}
 	Rectangle grab = SliderRect();
 	grab.position.y -= 4;

@@ -587,6 +587,10 @@ struct GraphicsOptions : OptionCategoryBase {
 	OptionEntryInt<int> paintSmoothing;
 	/** @brief Painterly textures: film grain, 0..100. */
 	OptionEntryInt<int> paintGrain;
+	/** @brief Painterly textures: glow around bright lights, 0..100. */
+	OptionEntryInt<int> paintBloom;
+	/** @brief Painterly textures: colour grading (contrast, cool shadows, warm light), 0..100. */
+	OptionEntryInt<int> paintGrading;
 	/** @brief Master switch for weather and mood effects (F8 weather panel). */
 	OptionEntryBoolean weatherEffects;
 	/** @brief Weather effect strength in percent, 0..200 (F8 weather panel). */

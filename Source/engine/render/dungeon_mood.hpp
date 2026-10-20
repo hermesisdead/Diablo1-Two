@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -56,6 +57,7 @@ struct WeatherStatus {
 	float strength;    // how heavy this roll is, 0.6..1
 	float secondsLeft; // until it starts to turn (outdoor only)
 	bool changing;     // fading from one weather to the next
+	std::optional<DungeonMood> next; // the weather it is changing to, when chosen in the panel
 };
 [[nodiscard]] WeatherStatus GetWeatherStatus();
 /** @brief Display name of a mood, translated. */
@@ -64,8 +66,12 @@ struct WeatherStatus {
 [[nodiscard]] std::vector<DungeonMood> MoodsForLevelType(dungeon_type type);
 /** @brief Whether weather is switched on for a level type in the options. */
 [[nodiscard]] bool MoodsEnabledFor(dungeon_type type);
-/** @brief Outdoors: start turning to the next weather now. */
+/** @brief Start turning to another weather now (outdoors the next in turn; in dungeons another mood). */
 void ChangeWeatherNow();
+/** @brief Fade to a chosen weather on this level now (in town, the wilds or a dungeon). */
+void SetWeatherNow(DungeonMood mood);
+/** @brief The weathers this level can have (Clear first), for choosing one in the weather panel. */
+[[nodiscard]] std::vector<DungeonMood> WeatherChoicesHere();
 
 /**
  * @brief Tints the light around torches, candles, fire, spells and portals (full-colour overlay).

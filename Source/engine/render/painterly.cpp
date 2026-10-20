@@ -37,7 +37,9 @@ void main()
 )";
 
 // Kuwahara filter: the average of the calmest of the four quadrants around the pixel (4x4
-// samples each, spread over `radius` game pixels), then grain that is strongest in mid-tones.
+// samples each, spread over `radius` game pixels); colour grading (contrast curve, cool shadows,
+// warm highlights); bloom (the bright parts of the scene bleeding a soft glow around them, from
+// a spiral of samples); then grain that is strongest in mid-tones.
 constexpr const char *FragmentSource = R"(#version 110
 uniform sampler2D tex;
 uniform sampler2D mask;
@@ -47,7 +49,34 @@ uniform vec2 texel;
 uniform float radius;
 uniform float grain;
 uniform float seed;
+uniform float bloom;
+uniform float grading;
 varying vec2 uv;
+
+float luma(vec3 c)
+{
+	return dot(c, vec3(0.299, 0.587, 0.114));
+}
+
+vec3 grade(vec3 c)
+{
+	// Diablo is a dark game: lift the low mid-tones a little, then add contrast around them, so
+	// shadows gain depth without the night going black.
+	vec3 g = pow(c, vec3(0.88));
+	g = (g - 0.18) * 1.18 + 0.18;
+	// Split toning: cool in the shadows, warm in the light.
+	float l = luma(max(g, 0.0));
+	g *= mix(vec3(0.92, 0.98, 1.10), vec3(1.12, 1.02, 0.84), smoothstep(0.08, 0.45, l));
+	// Calmer mid-tones, richer where it is warm and bright.
+	float gl = luma(max(g, 0.0));
+	g = mix(vec3(gl), g, 0.88 + 0.30 * smoothstep(0.30, 0.70, gl));
+	return max(g, 0.0);
+}
+
+float worldAt(vec2 p)
+{
+	return useMask > 0.5 ? texture2D(mask, p * maskScale).r : 1.0;
+}
 
 float hash(vec2 p)
 {
@@ -83,13 +112,34 @@ void main()
 		float w3 = 1.0 / pow(0.0015 + v3.r + v3.g + v3.b, 4.0);
 		color = (m0 * w0 + m1 * w1 + m2 * w2 + m3 * w3) / (w0 + w1 + w2 + w3);
 	}
+	if (grading > 0.0)
+		color = mix(color, grade(clamp(color, 0.0, 1.0)), grading);
+	if (bloom > 0.0) {
+		// 24 samples on a golden-angle spiral out to 12 game pixels; only their bright part glows.
+		vec3 glow = vec3(0.0);
+		float total = 0.0;
+		for (int i = 0; i < 24; i++) {
+			float f = (float(i) + 0.5) / 24.0;
+			float r = 12.0 * sqrt(f);
+			float a = float(i) * 2.39996;
+			vec2 p = uv + vec2(cos(a), sin(a)) * r * texel;
+			vec3 c = texture2D(tex, p).rgb;
+			float w = 1.0 - f * 0.7;
+			// Soft threshold: lamps, fire and lit windows glow, the dim scene does not.
+			float bright = smoothstep(0.24, 0.62, luma(c));
+			glow += c * bright * w * worldAt(p);
+			total += w;
+		}
+		glow /= total;
+		color += glow * vec3(1.05, 0.95, 0.82) * bloom * 2.6;
+	}
 	if (grain > 0.0) {
-		float lum = dot(color, vec3(0.299, 0.587, 0.114));
+		float lum = luma(clamp(color, 0.0, 1.0));
 		float n = hash(gl_FragCoord.xy + vec2(seed * 37.0, seed * 91.0)) - 0.5;
 		color += n * grain * (0.10 + 0.22 * 4.0 * lum * (1.0 - lum));
 	}
 	// The interface drawn over the world (labels, panels) stays as it is.
-	float world = useMask > 0.5 ? texture2D(mask, uv * maskScale).r : 1.0;
+	float world = worldAt(uv);
 	color = mix(original, color, world);
 	gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
@@ -131,7 +181,7 @@ Gl gl;
 SDL_Renderer *builtFor = nullptr;
 bool ready = false;
 GLuint program = 0;
-GLint uTex = -1, uTexel = -1, uRadius = -1, uGrain = -1, uSeed = -1, uMask = -1, uUseMask = -1, uMaskScale = -1;
+GLint uTex = -1, uTexel = -1, uRadius = -1, uGrain = -1, uSeed = -1, uMask = -1, uUseMask = -1, uMaskScale = -1, uBloom = -1, uGrading = -1;
 SDL_Texture *maskTexture = nullptr;
 int maskW = 0, maskH = 0;
 std::vector<uint32_t> maskPixels;
@@ -239,6 +289,8 @@ bool Prepare(SDL_Renderer *renderer)
 	uMask = gl.GetUniformLocation(program, "mask");
 	uUseMask = gl.GetUniformLocation(program, "useMask");
 	uMaskScale = gl.GetUniformLocation(program, "maskScale");
+	uBloom = gl.GetUniformLocation(program, "bloom");
+	uGrading = gl.GetUniformLocation(program, "grading");
 	if (maskTexture != nullptr) {
 		SDL_DestroyTexture(maskTexture);
 		maskTexture = nullptr;
@@ -287,8 +339,10 @@ void PainterlyPresent(SDL_Renderer *renderer, SDL_Texture *frame)
 		return;
 	const int smoothing = std::clamp(*GetOptions().Graphics.paintSmoothing, 0, 100);
 	const int grainLevel = std::clamp(*GetOptions().Graphics.paintGrain, 0, 100);
-	if (smoothing == 0 && grainLevel == 0) {
-		Status = "GPU shader on (nothing to do: smoothing and grain are 0)";
+	const int bloomLevel = std::clamp(*GetOptions().Graphics.paintBloom, 0, 100);
+	const int gradingLevel = std::clamp(*GetOptions().Graphics.paintGrading, 0, 100);
+	if (smoothing == 0 && grainLevel == 0 && bloomLevel == 0 && gradingLevel == 0) {
+		Status = "GPU shader on (all sliders at 0)";
 		return;
 	}
 
@@ -373,6 +427,8 @@ void PainterlyPresent(SDL_Renderer *renderer, SDL_Texture *frame)
 	gl.Uniform1f(uGrain, static_cast<float>(grainLevel) / 100.0f);
 	gl.Uniform1f(uSeed, static_cast<float>(SDL_GetTicks() / 41 % 997));
 	const float bottom = texH * static_cast<float>(viewRows) / static_cast<float>(gnScreenHeight);
+	gl.Uniform1f(uBloom, static_cast<float>(bloomLevel) / 100.0f);
+	gl.Uniform1f(uGrading, static_cast<float>(gradingLevel) / 100.0f);
 	gl.Uniform1i(uMask, 1);
 	gl.Uniform1f(uUseMask, useMask ? 1.0f : 0.0f);
 	gl.Uniform2f(uMaskScale, maskTexW / texW, maskTexH / bottom);
